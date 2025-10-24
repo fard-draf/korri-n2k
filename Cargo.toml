@@ -1,0 +1,75 @@
+[package]
+name = "korri-n2k"
+version = "0.1.0"
+edition = "2021"
+description = "no_std NMEA2000 protocol implementation for embedded systems"
+repository = "https://github.com/fard-draf/korri-n2k"
+readme = "README.md"
+license = "MIT"
+keywords = ["n2k", "nmea2000", "can", "embedded", "no-std"]
+categories = ["embedded", "no-std", "network-programming"]
+
+[features]
+default = []
+defmt = ["dep:defmt"]
+build-download = ["dep:ureq"]
+# Feature flag enabling embedded examples (ESP32, STM32, etc.)
+embedded-examples = []
+
+[dependencies]
+embassy-time = "0.4"
+embassy-sync = "0.6"
+embedded-can = "0.4"
+thiserror-no-std = "2.0"
+futures-util = { version = "0.3", default-features = false }
+async-trait = "0.1"
+
+defmt = { version = "0.3", optional = true }
+
+[dev-dependencies]
+static_cell = "2.1.1"
+tokio = { version = "1.47.1", features = ["full"] }
+embassy-executor = { version = "0.7.0", features = ["executor-thread"] }
+
+[build-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0.12"
+ureq = { version = "2.11", optional = true }
+
+# ============================================================================
+# Examples – layout inspired by Embassy
+# ============================================================================
+# `std/` examples compile automatically with `cargo test`
+# Embedded examples require --features embedded-examples
+
+# std examples (enabled by default)
+[[example]]
+name = "quickstart"
+path = "examples/std/quickstart.rs"
+
+[[example]]
+name = "lookup_enum_usage"
+path = "examples/std/lookup_enum_usage.rs"
+
+[[example]]
+name = "iso_name_usage"
+path = "examples/std/iso_name_usage.rs"
+
+# ESP32-S3 examples (require --features embedded-examples and --target xtensa-esp32s3-none-elf)
+[[example]]
+name = "esp32s3_quickstart"
+path = "examples/esp32-s3/quickstart.rs"
+required-features = ["embedded-examples"]
+
+# ESP32-C3 examples (require --features embedded-examples and --target riscv32imc-unknown-none-elf)
+[[example]]
+name = "esp32c3_quickstart"
+path = "examples/esp32-c3/quickstart.rs"
+required-features = ["embedded-examples"]
+
+# STM32 examples (require --features embedded-examples and --target thumbv7em-none-eabihf)
+[[example]]
+name = "stm32_quickstart"
+path = "examples/stm32/quickstart.rs"
+required-features = ["embedded-examples"]

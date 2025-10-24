@@ -1,0 +1,28 @@
+# Archives et notes de développement
+archives/
+
+# Fichiers Git
+.git/
+.github/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Tests et CI (si applicable)
+.travis.yml
+.gitlab-ci.yml
+azure-pipelines.yml
+
+# Fichiers temporaires et backups
+*.orig
+*.rej
+*.old
+*.bup
+*.bak
+*~
