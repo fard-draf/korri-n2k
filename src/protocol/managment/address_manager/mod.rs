@@ -8,7 +8,9 @@ use crate::{
         transport::{
             can_frame::CanFrame,
             can_id::CanId,
+            fast_packet::builder::FastPacketBuilder,
             traits::{can_bus::CanBus, korri_timer::KorriTimer, pgn_sender::PgnSender},
+            FAST_PACKET_INTER_FRAME_DELAY_MS,
         },
     },
 };
@@ -142,6 +144,37 @@ where
         };
 
         self.can_bus.send(&claim_frame).await
+    }
+
+    /// Send a pre-built payload using the current logical address.
+    pub async fn send_payload(
+        &mut self,
+        pgn: u32,
+        priority: u8,
+        destination: Option<u8>,
+        payload: &[u8],
+    ) -> Result<(), SendPgnError<C::Error>> {
+        let source_address = self.current_address;
+        let builder = FastPacketBuilder::new(pgn, source_address, destination, payload);
+        let mut is_first = true;
+
+        for frame in builder.build() {
+            let mut frame = frame.map_err(SendPgnError::Build)?;
+            frame.id.0 = (frame.id.0 & !(0x7 << 26)) | (((priority & 0x07) as u32) << 26);
+
+            if !is_first && payload.len() > 8 {
+                self.timer.delay_ms(FAST_PACKET_INTER_FRAME_DELAY_MS).await;
+            }
+
+            self.can_bus
+                .send(&frame)
+                .await
+                .map_err(SendPgnError::Send)?;
+
+            is_first = false;
+        }
+
+        Ok(())
     }
 
     /// Attempt to acquire a new address after losing the previous one.
