@@ -5,6 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-10-29
 ### Added
 - `AddressService` supervisor wrapping `AddressManager` with optional command/frame channels.
 - Integration test `supervisor_queues_and_sends_pgn` to validate the supervisor flow.
