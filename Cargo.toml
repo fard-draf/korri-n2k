@@ -6,7 +6,7 @@ description = "no_std NMEA2000 protocol implementation for embedded systems"
 repository = "https://github.com/fard-draf/korri-n2k"
 readme = "README.md"
 license = "MIT"
-keywords = ["n2k", "nmea2000", "can", "embedded", "no-std", "nmea"]
+keywords = ["n2k", "nmea2000", "can", "embedded", "no-std"]
 categories = ["embedded", "no-std", "network-programming"]
 
 [features]
