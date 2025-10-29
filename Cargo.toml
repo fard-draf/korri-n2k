@@ -1,12 +1,12 @@
 [package]
 name = "korri-n2k"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "no_std NMEA2000 protocol implementation for embedded systems"
 repository = "https://github.com/fard-draf/korri-n2k"
 readme = "README.md"
 license = "MIT"
-keywords = ["n2k", "nmea2000", "can", "embedded", "no-std"]
+keywords = ["n2k", "nmea2000", "can", "embedded", "no-std", "nmea"]
 categories = ["embedded", "no-std", "network-programming"]
 
 [features]
