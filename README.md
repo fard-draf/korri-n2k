@@ -1,165 +1,58 @@
 # korri-n2k
 
-`no_std`, `no_alloc` NMEA 2000 stack for embedded Rust targets.
+`korri-n2k` is a `no_std`, `no_alloc` implementation of the NMEA 2000 / ISO 11783 protocol stack for embedded Rust targets.
 
-## Key advantages
+The crate focuses on deterministic behaviour (compile-time PGN layout, zero heap usage) and interoperates with async runtimes built on top of `embassy`. It is designed for MCUs with tight RAM/flash budgets and for firmware teams that need explicit control over message scheduling, address claiming, and Fast Packet segmentation.
 
-- **Compile-time PGN types** generated from `canboat.json` (sourced from the [CANboat](https://github.com/canboat/canboat) project)
-- **Zero heap allocation**, ideal for MCUs without a global allocator
-- **Full Fast Packet support** (segmentation and reassembly helpers)
-- **Automatic ISO 11783 address management** via `AddressManager`
-- **Async-first API** built on `embassy-time`, `embedded-can`, and `futures-util`
+## Highlights
 
-## Quick install
+- **Static PGN types** generated from the official [CANboat](https://github.com/canboat/canboat) manifest
+- **Fast Packet** helpers (segment builder + assembler) with zero runtime allocation
+- **ISO address management** via `AddressManager` and the new optional `AddressService`
+- **Async-first API** (`CanBus`, `KorriTimer`) compatible with `embassy` executors
+- **Transport-agnostic**: the crate does not depend on a specific BSP; you supply the CAN + timer drivers
 
-```bash
-cargo add korri-n2k embedded-can embassy-time
-cargo build
-```
+## Getting started
 
-- The build script defaults to `build_core/var/pgn_manifest.json` to decide which PGNs are generated.
-- Provide a custom manifest by exporting `KORRI_N2K_MANIFEST_PATH` (absolute path recommended) before `cargo build`.
-- When `curl` or `wget` are unavailable on the build host, enable `--features build-download` to fetch `canboat.json` through `ureq`.
+1. Declare the required dependencies (`korri-n2k`, `embassy-time`, `embassy-sync`, `embedded-can`, `static_cell`).
+2. Implement the two transport traits (`CanBus`, `KorriTimer`) against your HAL.
+3. Pick the integration style that fits: raw `AddressManager` for full control, or `AddressService` to get a supervisor (claim loop + optional command queue).
+4. Use the generated `PgnXXXX` structures to serialize, transmit, and decode messages.
 
-## Minimal host example (`std`)
+The `examples/std/quickstart.rs` sample shows a host-side flow. Hardware-ready showcase projects (ESP32-S3, ESP32-C3, STM32G4 in progress) live under `examples-bsp/`.
 
-```rust
-use korri_n2k::infra::codec::traits::PgnData;
-use korri_n2k::protocol::{
-    managment::iso_name::IsoName,
-    messages::{Pgn128267, Pgn129025, Pgn60928},
-};
+## Embedded examples
 
-fn main() {
-    let base_name = IsoName::builder()
-        .unique_number(12345)
-        .manufacturer_code(229)
-        .device_function(145)
-        .device_class(75)
-        .industry_group(4)
-        .arbitrary_address_capable(true)
-        .build();
+The repository ships with standalone BSP-oriented crates under `examples-bsp/` (each with its own `Cargo.toml`, toolchain and configuration):
 
-    let mut position = Pgn129025::new();
-    position.latitude = 47.7223;
-    position.longitude = -4.0022;
+| Board           | Status            | Notes |
+|-----------------|-------------------|-------|
+| ESP32-S3        | ✅ Supported       | Async TWAI driver, `AddressService` usage |
+| ESP32-C3        | ✅ Supported       | Same supervisor integration via TWAI |
+| STM32G4 (WIP)   | 🚧 Work in progress | Hardware pending |
 
-    let mut buffer = [0u8; 64];
-    let len = position.to_payload(&mut buffer).unwrap();
-    let decoded = Pgn129025::from_payload(&buffer[..len]).unwrap();
 
-    let depth_payload = [0x01, 0x48, 0x14, 0x00, 0x00, 0xF4, 0x01, 0x00, 0x00];
-    let depth = Pgn128267::from_payload(&depth_payload).unwrap();
+## Documentation
 
-    let claim: Pgn60928 = base_name.into();
-    let restored_name: IsoName = claim.into();
+- API docs: `cargo doc --no-deps`
+- Test suite: `cargo test`
+- Custom PGN generation: place a manifest at `build_core/var/pgn_manifest.json` or point `KORRI_N2K_MANIFEST_PATH` to your configuration; the build script takes care of downloading `canboat.json` with `curl`/`wget` (or falls back to `ureq` with the `build-download` feature).
 
-    println!(
-        "Position {:?}, depth {:.2} m, identical name: {}",
-        (decoded.latitude, decoded.longitude),
-        depth.depth,
-        restored_name.raw() == base_name.raw()
-    );
-}
-```
+Core modules to explore:
 
-Run the full sample with `cargo run --example quickstart`; the code above matches that binary and is ready to compile.
+| Module                         | Purpose |
+|--------------------------------|---------|
+| `protocol::messages::*`        | Generated PGN structures |
+| `protocol::transport::fast_packet` | Builder + assembler for segmented PGNs |
+| `protocol::managment::address_manager` | ISO address claiming/defence |
+| `protocol::managment::address_supervisor` | Optional supervisor wrapping the manager |
+| `infra::codec`                 | Bit-level codecs, lookup tables |
 
-## Async network integration
+## Supplied tooling
 
-```rust
-use korri_n2k::{
-    error::SendPgnError,
-    protocol::{
-        managment::address_manager::AddressManager,
-        messages::Pgn127503,
-        transport::traits::{can_bus::CanBus, korri_timer::KorriTimer},
-    },
-};
-
-async fn send_status<C, T>(
-    manager: &mut AddressManager<C, T>,
-) -> Result<(), SendPgnError<C::Error>>
-where
-    C: CanBus,
-    T: KorriTimer,
-    C::Error: core::fmt::Debug,
-{
-    let mut status = Pgn127503::new();
-    status.instance = 0;
-    status.number_of_lines = 1;
-
-    manager.send_pgn(&status, 127503, None).await
-}
-```
-
-Platform traits to implement:
-
-```rust
-use korri_n2k::protocol::transport::{
-    can_frame::CanFrame,
-    traits::{can_bus::CanBus, korri_timer::KorriTimer},
-};
-
-struct MyCan;
-struct MyTimer;
-#[derive(Debug)]
-struct MyError;
-
-impl CanBus for MyCan {
-    type Error = MyError;
-
-    fn send<'a>(
-        &'a mut self,
-        _frame: &'a CanFrame,
-    ) -> impl core::future::Future<Output = Result<(), Self::Error>> + 'a {
-        async move { /* Push the frame onto your CAN controller */ Ok(()) }
-    }
-
-    fn recv<'a>(
-        &'a mut self,
-    ) -> impl core::future::Future<Output = Result<CanFrame, Self::Error>> + 'a {
-        async move { Err(MyError) }
-    }
-}
-
-impl KorriTimer for MyTimer {
-    fn delay_ms<'a>(
-        &'a mut self,
-        millis: u32,
-    ) -> impl core::future::Future<Output = ()> + 'a {
-        async move {
-            embassy_time::Timer::after(embassy_time::Duration::from_millis(millis.into())).await
-        }
-    }
-}
-```
-
-- `AddressManager` claims and defends the node address (PGN 60928) and exposes `send_pgn` for both single-frame and Fast Packet messages.
-- `FastPacketBuilder` / `FastPacketAssembler` are available when you need full manual control.
-
-## Tests & docs
-
-```bash
-cargo test            # full suite (unit + integration)
-cargo test --doc      # documentation snippets
-cargo run --example quickstart
-cargo build --examples
-cargo doc --no-deps
-```
-
-## Useful scripts
-
-- `./scripts/download_canboat.sh` – download/validate `canboat.json` from CANboat (current upstream version: 6.1.3)
-- `./scripts/verify_docs.sh` – convenience wrapper that runs every command above
-
-## Resources
-
-- `examples/std/` – host-side examples (`quickstart`, `lookup_enum_usage`, `iso_name_usage`)
-- `examples/esp32-s3/`, `examples/esp32-c3/`, `examples/stm32/` – embedded templates (enable `--features embedded-examples`)
-- `build_core/` – code generator and manifests
-- `src/` – `core`, `infra`, and `protocol` modules (lookup tables, transport, address management, messages)
+- `scripts/download_canboat.sh` — refresh `canboat.json`
+- `scripts/verify_docs.sh` — run the documentation examples + unit tests + formatting
 
 ## License
 
-Dual-licensed under MIT or Apache 2.0 — see `LICENSE`.
+MIT OR Apache-2.0 — choose either license. See `LICENSE` for details.
