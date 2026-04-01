@@ -1,4 +1,6 @@
-# korri-n2k
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/c383dba3-0408-4b2c-bae6-cd1b935ff10e" alt="Logo" width="800">
+</p>
 
 ![CI](https://github.com/fard-draf/korri-n2k/actions/workflows/ci.yml/badge.svg)
 
