@@ -2,5 +2,5 @@
 
 # Utility script: open the generated lookup file for inspection.
 
-cd $DEV_PATH/warehouse/projects/professional/korrigan/libs/korri-n2k/
+cd "$DEV_PATH/warehouse/projects/professional/korrigan/libs/korri-n2k/" || return
 find ../../target -name "generated_lookups.rs" -exec hx {} \;

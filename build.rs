@@ -45,7 +45,10 @@ fn main() -> Result<(), BuildError> {
 
     let manifest_path = if let Some(path) = user_manifest_path {
         if path.exists() {
-            println!("cargo:warning=Using custom pgn_manifest.json from {:?}", path);
+            println!(
+                "cargo:warning=Using custom pgn_manifest.json from {:?}",
+                path
+            );
             println!("cargo:rerun-if-changed={}", path.display());
             path
         } else {
@@ -115,7 +118,10 @@ fn download_canboat(dest_path: &PathBuf) -> Result<(), BuildError> {
     const CANBOAT_URL: &str =
         "https://raw.githubusercontent.com/canboat/canboat/master/docs/canboat.json";
 
-    println!("cargo:warning=Downloading canboat.json from {}", CANBOAT_URL);
+    println!(
+        "cargo:warning=Downloading canboat.json from {}",
+        CANBOAT_URL
+    );
 
     // Create the parent directory if required
     if let Some(parent) = dest_path.parent() {

@@ -23,9 +23,9 @@ pub(crate) struct Pgn {
 #[derive(Debug, Clone, PartialEq)]
 /// Normalized representation for an enumeration variant.
 pub(crate) enum VariantData {
-    // Pour LookupEnum et LookupBitEnum
+    // For LookupEnum et LookupBitEnum
     Simple { name: String, value: u32 },
-    // Pour LookupFieldTypeEnum
+    // For LookupFieldTypeEnum
     Full(VariantMetaData),
 }
 

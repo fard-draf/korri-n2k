@@ -135,7 +135,7 @@ impl<'a> BitReader<'a> {
     /// Cursor must be aligned on an octet boundary.
     pub fn read_slice(&mut self, len: usize) -> Result<&'a [u8], BitReaderError> {
         // Slices are only allowed when aligned.
-        if self.bit_cursor % 8 != 0 {
+        if !self.bit_cursor.is_multiple_of(8) {
             return Err(BitReaderError::NonAlignedBit {
                 cursor: self.bit_cursor,
             });
@@ -283,7 +283,7 @@ impl<'a> BitWriter<'a> {
 
     /// Copy an already-aligned byte slice into the buffer.
     pub fn write_slice(&mut self, slice: &[u8]) -> Result<(), BitWriterError> {
-        if self.bit_cursor % 8 != 0 {
+        if !self.bit_cursor.is_multiple_of(8) {
             return Err(BitWriterError::NonAlignedBit {
                 cursor: self.bit_cursor,
             });
