@@ -32,10 +32,11 @@ These fields store raw numbers. The engine must honor bit length, signedness, an
   **Handling:** treated like `NUMBER`, but newtypes such as `N2kTime` or `N2kDate` keep semantics explicit.  
   **Example (PGN 129029 “GNSS Position Data”):** includes `date` (`DATE`) and `time` (`TIME`) to provide a full timestamp.
 
-- **`MMSI`, `PGN`**  
+- **MMSI**, **PGN**  
   **Description:** identifiers for vessels (MMSI) and message types (PGN).  
-  **Handling:** stored as integers (`u32` and `u24`).  
+  **Handling:** stored as integers (`u32`).  
   **Example:** PGN 129794 “AIS Class A Position Report” exposes an `mmsi` field; PGN 60928 “ISO Address Claim” carries a `pgn` field.
+
 
 ---
 

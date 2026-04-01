@@ -1,7 +1,6 @@
 /target/
 /debug/
 /release/
-/docs/
 
 **/*.rs.bk
 Cargo.lock

@@ -5,7 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 ### Changed 
-- Update README.md
+- Update README.md and examples/README.md
+- Moved annexes/ to docs/ to ensure clarity and accuracy.
 ### Removed
 - Obsolete shell scripts now handled by 'build.rs' or standard Cargo commands.
 - Hardware-specific examples (stm32/esp32..) moved to a dedicated external library.
