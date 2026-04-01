@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,8 +20,8 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 
-  check-embedded:
-    name: Check (no_std / Cortex-M4)
+  check-embedded-cortex-m4:
+    name: Check (no_std / cortex-m4)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,8 +29,36 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: thumbv7em-none-eabihf
-      - name: Check compilation for STM32
+      - name: Check compilation for stm32
         run: cargo check --target thumbv7em-none-eabihf --verbose
+
+  check-embedded-esp32c3:
+    name: Check (no_std / esp32c3 / RISC-V)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imc-unknown-none-elf
+      - name: Check library compilation
+        run: cargo check --lib --target riscv32imc-unknown-none-elf --verbose
+
+  # check-embedded-esp32s3:
+  #   name: Check (no_std / esp32s3 / Xtensa)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Install esp rust toolchain
+  #       uses: esp-rs/xtensa-toolchain@v1.5
+  #       with:
+  #         default: true
+  #         buildtargets: esp32s3
+
+  #     - name: Check library compilation
+  #       env:
+  #         RUSTUP_TOOLCHAIN: esp
+  #       run: cargo +esp check --lib --target xtensa-esp32s3-none-elf --verbose
 
   lint:
     name: Lint & Format
