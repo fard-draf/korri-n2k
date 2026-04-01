@@ -2,56 +2,101 @@
 
 `korri-n2k` is a `no_std`, `no_alloc` implementation of the NMEA 2000 / ISO 11783 protocol stack for embedded Rust targets.
 
-The crate focuses on deterministic behaviour (compile-time PGN layout, zero heap usage) and interoperates with async runtimes built on top of `embassy`. It is designed for MCUs with tight RAM/flash budgets and for firmware teams that need explicit control over message scheduling, address claiming, and Fast Packet segmentation.
+This crate is designed for industrial and marine applications requiring strict memory determinism (zero heap allocation) and high concurrency. It natively supports asynchronous execution (via `embassy`) and fully isolates the protocol logic from the underlying hardware.
 
-## Highlights
+## Core Architecture & Abstractions
 
-- **Static PGN types** generated from the official [CANboat](https://github.com/canboat/canboat) manifest
-- **Fast Packet** helpers (segment builder + assembler) with zero runtime allocation
-- **ISO address management** via `AddressManager` and the new optional `AddressService`
-- **Async-first API** (`CanBus`, `KorriTimer`) compatible with `embassy` executors
-- **Transport-agnostic**: the crate does not depend on a specific BSP; you supply the CAN + timer drivers
+The library is built upon four primary pillars, designed to separate concerns between static data structures, hardware drivers, and network state management.
 
-## Getting started
+### 1. Static Code Generation (PGNs)
+NMEA 2000 Parameter Group Numbers (PGNs) are complex and prone to manual parsing errors. `korri-n2k` eliminates this by generating static Rust structures (`PgnXXXX`) directly from JSON definitions during the build process (`build.rs`).
+- **Standard & Proprietary Support:** While it defaults to the [CANboat](https://github.com/canboat/canboat) database, you can easily add **Proprietary PGNs** (e.g., Garmin, Victron) or your own **Custom PGNs** by adding them to your local manifest.
+- **Benefit:** Compile-time type safety for all fields, automatic handling of bit offsets, signedness, and physical resolutions without runtime overhead.
 
-1. Declare the required dependencies (`korri-n2k`, `embassy-time`, `embassy-sync`, `embedded-can`, `static_cell`).
-2. Implement the two transport traits (`CanBus`, `KorriTimer`) against your HAL.
-3. Pick the integration style that fits: raw `AddressManager` for full control, or `AddressService` to get a supervisor (claim loop + optional command queue).
-4. Use the generated `PgnXXXX` structures to serialize, transmit, and decode messages.
+### 2. Hardware Isolation (Transport Traits)
+The core library has zero knowledge of the host hardware (MCU or Linux). It relies on two traits that the user must implement:
+- `CanBus`: For reading and writing raw CAN frames.
+- `KorriTimer`: For non-blocking asynchronous delays.
 
-The `examples/std/quickstart.rs` sample shows a host-side flow. Hardware-ready showcase projects (ESP32-S3, ESP32-C3, STM32G4 in progress) live under `examples-bsp/`.
+### 3. The Network Manager (`AddressManager`)
+Before transmitting data on an NMEA 2000 network, a device must negotiate a logical address. The `AddressManager` handles this ISO 11783 lifecycle autonomously:
+- Initial Address Claiming based on the device's unique `IsoName`.
+- Automatic defence against address conflicts.
+- Transparent segmentation and reassembly of large payloads (Fast Packet protocol).
 
-## Embedded examples
+### 4. The Async Socket (`AddressService`)
+To prevent ownership issues in concurrent environments and avoid locking the CAN bus, the library provides an asynchronous abstraction (`AddressService`). It splits the network interaction into three decoupled components using static `Channels`:
+- **`AddressHandle` (TX):** A lock-free sender passed to application tasks to queue outgoing PGNs.
+- **`AddressFrames` (RX):** A receiver yielding incoming application-level frames (filtered by the manager).
+- **`AddressRunner` (The Pump):** An asynchronous task that must be spawned. It loops over a `select!` statement, routing messages between the physical CAN bus and the application channels while handling address management internally.
 
-The repository ships with standalone BSP-oriented crates under `examples-bsp/` (each with its own `Cargo.toml`, toolchain and configuration):
+## Implementation Guide
 
-| Board           | Status            | Notes |
-|-----------------|-------------------|-------|
-| ESP32-S3        | ✅ Supported       | Async TWAI driver, `AddressService` usage |
-| ESP32-C3        | ✅ Supported       | Same supervisor integration via TWAI |
-| STM32G4 (WIP)   | 🚧 Work in progress | Hardware pending |
+To use `korri-n2k` effectively, it is highly recommended to use **Type Aliases** to mask the generic complexity inherent to `no_alloc` systems.
 
+### 1. Define your Socket types
+```rust
+// Alias your hardware-specific drivers and channel capacities
+type MyCan = stm32_can::Can<'static>; // Example HAL driver
+type MyTimer = embassy_time::Timer;
+const TX_QUEUE: usize = 16;
+const RX_QUEUE: usize = 16;
 
-## Documentation
+// Define your clean N2K socket types
+pub type N2kSocket<'a> = AddressService<'a, MyCan, MyTimer, TX_QUEUE, RX_QUEUE>;
+pub type N2kHandle<'a> = AddressHandle<'a, TX_QUEUE>;
+pub type N2kRunner<'a> = AddressRunner<'a, MyCan, MyTimer, TX_QUEUE, RX_QUEUE>;
+```
 
-- API docs: `cargo doc --no-deps`
-- Test suite: `cargo test`
-- Custom PGN generation: place a manifest at `build_core/var/pgn_manifest.json` or point `KORRI_N2K_MANIFEST_PATH` to your configuration; the build script takes care of downloading `canboat.json` with `curl`/`wget` (or falls back to `ureq` with the `build-download` feature).
+### 2. Initialize and Spawn
+```rust
+// 1. Statically allocate Embassy Channels
+static CMD_CHANNEL: Channel<CriticalSectionRawMutex, SupervisorCommand, TX_QUEUE> = Channel::new();
+static FRAME_CHANNEL: Channel<CriticalSectionRawMutex, CanFrame, RX_QUEUE> = Channel::new();
 
-Core modules to explore:
+// 2. Claim address and initialize the service
+let service = AddressService::claim(
+    can_driver,
+    timer,
+    my_iso_name.into(),
+    PREFERRED_ADDRESS,
+    Some(&CMD_CHANNEL),
+    Some(&FRAME_CHANNEL)
+).await?;
 
-| Module                         | Purpose |
-|--------------------------------|---------|
-| `protocol::messages::*`        | Generated PGN structures |
-| `protocol::transport::fast_packet` | Builder + assembler for segmented PGNs |
-| `protocol::managment::address_manager` | ISO address claiming/defence |
-| `protocol::managment::address_supervisor` | Optional supervisor wrapping the manager |
-| `infra::codec`                 | Bit-level codecs, lookup tables |
+// 3. Split the service into concurrent parts
+let (handle, mut frames, runner) = service.into_parts();
 
-## Supplied tooling
+// 4. Spawn the runner background task
+spawner.spawn(n2k_runner_task(runner)).unwrap();
+```
 
-- `scripts/download_canboat.sh` — refresh `canboat.json`
-- `scripts/verify_docs.sh` — run the documentation examples + unit tests + formatting
+### 3. Application Tasks
+```rust
+// TX Task: Send data lock-free
+let mut pos = Pgn129025::new();
+pos.latitude = 47.7223;
+pos.longitude = -4.0022;
+handle.send_pgn(&pos, 129025, 2, None).await?;
+
+// RX Task: Wait for incoming data
+let frame = frames.recv().await;
+if let Ok(depth) = Pgn128267::from_payload(&frame.data) {
+    // Process depth data...
+}
+```
+
+## Hardware Support & Examples
+
+The library is agnostic but was designed with real-world hardware in mind. Hardware-specific examples (e.g., ESP32-C3/S3 using the TWAI driver) are maintained in a dedicated external repository to keep this core library lightweight and strictly focused on protocol implementation.
+
+*For a quick software-only test, run: `cargo run --example quickstart`*
+
+## Build & Tooling
+
+To minimize compile times, `korri-n2k` only generates code for the PGNs you require.
+1. Define required PGNs in `build_core/var/pgn_manifest.json`.
+2. The `build.rs` script fetches the latest CANboat definitions and generates the Rust modules.
 
 ## License
 
