@@ -1,5 +1,7 @@
 # korri-n2k
 
+![CI](https://github.com/fard-draf/korri-n2k/actions/workflows/ci.yml/badge.svg)
+
 `korri-n2k` is a `no_std`, `no_alloc` implementation of the NMEA 2000 / ISO 11783 protocol stack for embedded Rust targets.
 
 This crate is designed for industrial and marine applications requiring strict memory determinism (zero heap allocation) and high concurrency. It natively supports asynchronous execution (via `embassy`) and fully isolates the protocol logic from the underlying hardware.
