@@ -30,6 +30,16 @@ To prevent ownership issues in concurrent environments and avoid locking the CAN
 - **`AddressFrames` (RX):** A receiver yielding incoming application-level frames (filtered by the manager).
 - **`AddressRunner` (The Pump):** An asynchronous task that must be spawned. It loops over a `select!` statement, routing messages between the physical CAN bus and the application channels while handling address management internally.
 
+## Footprint & Performance (Indicative)
+
+`korri-n2k` is optimized for deterministic execution and minimal resource consumption. On a typical **ARM Cortex-M4 (STM32G431)** target with a standard PGN manifest (approx. 10 PGNs):
+
+- **Flash (Code):** ~6-10 KiB for the protocol stack (Codec + Manager).
+- **RAM (Static):** Near-zero static allocation. Only your application-defined `Channels` consume RAM.
+- **Dynamic Memory:** 0 bytes (no `alloc` required).
+
+*Note: These figures are indicative and vary based on your PGN manifest, target architecture, and compiler optimization flags (LTO). Precise, reproducible benchmarks are available in our dedicated examples repository.*
+
 ## Implementation Guide
 
 To use `korri-n2k` effectively, it is highly recommended to use **Type Aliases** to mask the generic complexity inherent to `no_alloc` systems.
