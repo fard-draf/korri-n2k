@@ -1,5 +1,5 @@
 //! Cargo build script: generates PGN structures and lookup tables.
-
+#![allow(clippy::all)]
 // Re-export the core module from src/core.rs so build_core can reuse it
 #[path = "src/core.rs"]
 mod core;

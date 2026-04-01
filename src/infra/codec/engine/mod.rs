@@ -118,8 +118,8 @@ pub fn deserialize_into<T: FieldAccess>(
 ///
 /// # Return value
 /// Number of bytes written into the buffer.
-pub fn serialize<'a, T: FieldAccess>(
-    pgn_instance: &'a T,
+pub fn serialize<T: FieldAccess>(
+    pgn_instance: &T,
     buffer: &mut [u8],
     descriptor: &'static PgnDescriptor,
 ) -> Result<usize, SerializationError> {
@@ -191,7 +191,7 @@ pub fn serialize<'a, T: FieldAccess>(
 
     let bits_written = writer.bit_cursor();
 
-    Ok((bits_written + 7) / 8)
+    Ok(bits_written.div_ceil(8))
 }
 
 /// Shared helper to read a single field, applying business logic (signedness,
@@ -291,8 +291,10 @@ fn read_field_value(
             let slice = reader
                 .read_slice(num_bytes)
                 .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-            let mut pgn_bytes = PgnBytes::default();
-            pgn_bytes.len = num_bytes;
+            let mut pgn_bytes = PgnBytes {
+                len: num_bytes,
+                ..Default::default()
+            };
             pgn_bytes.data[..num_bytes].copy_from_slice(slice);
             Ok(Some(PgnValue::Bytes(pgn_bytes)))
         }
@@ -358,8 +360,10 @@ fn read_field_value(
             let slice = reader
                 .read_slice(num_bytes)
                 .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-            let mut pgn_bytes = PgnBytes::default();
-            pgn_bytes.len = num_bytes;
+            let mut pgn_bytes = PgnBytes {
+                len: num_bytes,
+                ..Default::default()
+            };
             pgn_bytes.data[..num_bytes].copy_from_slice(slice);
             Ok(Some(PgnValue::Bytes(pgn_bytes)))
         }
@@ -451,10 +455,10 @@ fn read_field_value(
 /// Private helper that writes a single value according to its descriptor.
 /// Encapsulates all business rules tied to `FieldKind` (signed/unsigned,
 /// lookup, strings, binary blocks, etc.).
-fn write_field<'a>(
+fn write_field(
     writer: &mut BitWriter,
     field_desc: &'static FieldDescriptor,
-    value: &'a PgnValue,
+    value: &PgnValue,
 ) -> Result<(), SerializationError> {
     match field_desc.kind {
         FieldKind::Number | FieldKind::Pgn => {

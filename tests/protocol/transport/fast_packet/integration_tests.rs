@@ -64,10 +64,7 @@ fn test_roundtrip_pgn_129029() {
 
     // Ensure the message was reassembled
     let message = complete.expect("Message must be complete after processing");
-    assert_eq!(
-        message.len, len,
-        "Reassembled message length must match"
-    );
+    assert_eq!(message.len, len, "Reassembled message length must match");
     assert_eq!(
         &message.payload[..len],
         &buffer[..len],
@@ -382,7 +379,9 @@ fn test_stress_100_pgns() {
         ais.latitude = 45.0 + (i as f32 * 0.01);
 
         let mut buffer = [0u8; 64];
-        let len = ais.to_payload(&mut buffer).expect("Serialization succeeded");
+        let len = ais
+            .to_payload(&mut buffer)
+            .expect("Serialization succeeded");
 
         // Build and send the frames
         let builder = FastPacketBuilder::new(129040, source, None, &buffer[..len]);
@@ -434,9 +433,7 @@ fn test_builder_throughput() {
         total_frames > 0,
         "At least one frame must be generated per iteration"
     );
-    println!(
-        "✅ Throughput test: {total_frames} frames generated over {iterations} iterations"
-    );
+    println!("✅ Throughput test: {total_frames} frames generated over {iterations} iterations");
 }
 
 #[test]

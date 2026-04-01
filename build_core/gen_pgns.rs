@@ -1,4 +1,5 @@
 //! Generate Rust code for the PGNs selected in the manifest.
+#![allow(clippy::all)]
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -31,6 +32,7 @@ pub(crate) fn run_pgns_gen(
     let mut poly_pgns_map = set_poly_pgns_map(canboat_value, pgns_set)?;
 
     let mut buffer_pgn_code = String::new();
+    writeln!(&mut buffer_pgn_code, "#[allow(clippy::all)]")?;
 
     writeln!(&mut buffer_pgn_code, "use super::lookups::*;")?;
     writeln!(

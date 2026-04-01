@@ -3,6 +3,7 @@
 //! infrastructure modules (codec, CAN bus), protocol logic (address management,
 //! transport, messages), and a few prototypes.
 #![no_std]
+#![allow(clippy::large_enum_variant, clippy::result_large_err)]
 //==================================================================================
 // use pgn::Pgn;
 //==================================================================================

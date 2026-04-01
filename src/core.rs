@@ -6,7 +6,7 @@
 
 // Types in this module are primarily used by generated code.
 #![allow(dead_code)]
-
+#![allow(clippy::large_enum_variant)]
 // Maximum payload size for PgnBytes. 223 bytes + safety margin.
 pub const MAX_PGN_BYTES: usize = 230;
 

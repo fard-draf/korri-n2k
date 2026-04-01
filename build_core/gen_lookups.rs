@@ -1,4 +1,5 @@
 //! Generate lookup enumeration tables from CANboat JSON data.
+#![allow(clippy::all)]
 use super::domain::*;
 use super::errors::*;
 use super::name_helpers::*;
@@ -12,6 +13,7 @@ use std::fmt::{Debug, Write};
 /// Iterate over lookup categories and emit the corresponding Rust code.
 pub(crate) fn run_lookup_gen(canboat_value: &Value) -> Result<String, BuildError> {
     let mut buffer_lookup_code = String::new();
+    writeln!(&mut buffer_lookup_code, "#[allow(clippy::all)]")?;
 
     process_lookup_category::<LookupEnum>(
         canboat_value,
