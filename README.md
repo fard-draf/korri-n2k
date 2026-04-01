@@ -32,7 +32,7 @@ Before transmitting data on an NMEA 2000 network, a device must negotiate a logi
 To prevent ownership issues in concurrent environments and avoid locking the CAN bus, the library provides an asynchronous abstraction (`AddressService`). It splits the network interaction into three decoupled components using static `Channels`:
 - **`AddressHandle` (TX):** A lock-free sender passed to application tasks to queue outgoing PGNs.
 - **`AddressFrames` (RX):** A receiver yielding incoming application-level frames (filtered by the manager).
-- **`AddressRunner` (The Pump):** An asynchronous task that must be spawned. It loops over a `select!` statement, routing messages between the physical CAN bus and the application channels while handling address management internally.
+- **`AddressRunner` (Runner):** An asynchronous task that must be spawned. It loops over a `select!` statement, routing messages between the physical CAN bus and the application channels while handling address management internally.
 
 ## Footprint & Performance (Indicative)
 

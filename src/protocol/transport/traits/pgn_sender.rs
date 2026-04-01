@@ -66,62 +66,60 @@ where
     /// // Send with automatic inter-frame delays
     /// can_bus.send_pgn(&pgn, 127503, my_address, None, &mut timer).await?;
     /// ```
-    fn send_pgn<'a, P: PgnData, T: KorriTimer>(
-        &'a mut self,
-        pgn_data: &'a P,
+    async fn send_pgn<P: PgnData, T: KorriTimer>(
+        &mut self,
+        pgn_data: &P,
         pgn: u32,
         source_address: u8,
         destination: Option<u8>,
-        timer: &'a mut T,
-    ) -> impl core::future::Future<Output = Result<(), SendPgnError<Self::Error>>> + 'a;
+        timer: &mut T,
+    ) -> Result<(), SendPgnError<Self::Error>>;
 }
 
 impl<C: CanBus> PgnSender for C
 where
     C::Error: core::fmt::Debug,
 {
-    fn send_pgn<'a, P: PgnData, T: KorriTimer>(
-        &'a mut self,
-        pgn_data: &'a P,
+    async fn send_pgn<P: PgnData, T: KorriTimer>(
+        &mut self,
+        pgn_data: &P,
         pgn: u32,
         source_address: u8,
         destination: Option<u8>,
-        timer: &'a mut T,
-    ) -> impl core::future::Future<Output = Result<(), SendPgnError<Self::Error>>> + 'a {
-        async move {
-            // Step 1: stack-allocate a buffer to avoid heap usage.
-            let mut payload_buffer = [0u8; MAX_FAST_PACKET_PAYLOAD];
+        timer: &mut T,
+    ) -> Result<(), SendPgnError<Self::Error>> {
+        // Step 1: stack-allocate a buffer to avoid heap usage.
+        let mut payload_buffer = [0u8; MAX_FAST_PACKET_PAYLOAD];
 
-            // Step 2: serialize the PGN into the buffer.
-            let len = pgn_data
-                .to_payload(&mut payload_buffer)
-                .map_err(|_| SendPgnError::Serialization)?;
-            let payload_slice = &payload_buffer[..len];
+        // Step 2: serialize the PGN into the buffer.
+        let len = pgn_data
+            .to_payload(&mut payload_buffer)
+            .map_err(|_| SendPgnError::Serialization)?;
+        let payload_slice = &payload_buffer[..len];
 
-            // Step 3: prepare the Fast Packet (or single-frame) builder.
-            let builder = FastPacketBuilder::new(pgn, source_address, destination, payload_slice);
+        // Step 3: prepare the Fast Packet (or single-frame) builder.
+        let builder = FastPacketBuilder::new(pgn, source_address, destination, payload_slice);
 
-            // Step 4: send every frame sequentially with inter-frame delays when required.
-            let frame_iter = builder.build();
-            let mut is_first_frame = true;
+        // Step 4: send every frame sequentially with inter-frame delays when required.
+        let frame_iter = builder.build();
+        let mut is_first_frame = true;
 
-            for frame_result in frame_iter {
-                let frame = frame_result.map_err(SendPgnError::Build)?;
+        for frame_result in frame_iter {
+            let frame = frame_result.map_err(SendPgnError::Build)?;
 
-                // For multi-frame Fast Packets insert a delay between frames
-                // (skip before the first frame to minimize latency).
-                if !is_first_frame && payload_slice.len() > 8 {
-                    // Recommended inter-frame delay to avoid TX buffer saturation
-                    timer.delay_ms(FAST_PACKET_INTER_FRAME_DELAY_MS).await;
-                }
-
-                // Send the CAN frame
-                self.send(&frame).await.map_err(SendPgnError::Send)?;
-
-                is_first_frame = false;
+            // For multi-frame Fast Packets insert a delay between frames
+            // (skip before the first frame to minimize latency).
+            if !is_first_frame && payload_slice.len() > 8 {
+                // Recommended inter-frame delay to avoid TX buffer saturation
+                timer.delay_ms(FAST_PACKET_INTER_FRAME_DELAY_MS).await;
             }
 
-            Ok(())
+            // Send the CAN frame
+            self.send(&frame).await.map_err(SendPgnError::Send)?;
+
+            is_first_frame = false;
         }
+
+        Ok(())
     }
 }

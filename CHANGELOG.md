@@ -4,12 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Changed 
-- Update README.md and examples/README.md
-- Moved annexes/ to docs/ to ensure clarity and accuracy.
+### Added
+- GitHub Actions CI/CD pipeline for automated testing on Linux and ARM Cortex-M targets.
+
+### Changed
+- **BREAKING**: Migrated from `async-trait` to native Rust **Async Functions in Traits (AFIT)**. The library is now 100% allocation-free (yay!).
+- Refactored `README.md` to highlight the "Socket" architecture and provide a clearer implementation guide.
+- Streamlined `Cargo.toml` and project structure.
+- Moved `annexes/` to `docs/` for better standard compliance.
+
 ### Removed
-- Obsolete shell scripts now handled by 'build.rs' or standard Cargo commands.
-- Hardware-specific examples (stm32/esp32..) moved to a dedicated external library.
+- **BREAKING**: Moved hardware-specific examples to a dedicated external repository.
+- Obsolete bash scripts and redundant build-time tools.
 
 ## [0.1.1] - 2025-10-29
 ### Added
