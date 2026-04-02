@@ -102,7 +102,7 @@ if let Ok(depth) = Pgn128267::from_payload(&frame.data) {
 
 ## Hardware Support & Examples
 
-The library is agnostic but was designed with real-world hardware in mind. Hardware-specific examples (e.g., ESP32-C3/S3 using the TWAI driver) are maintained in a dedicated external repository to keep this core library lightweight and strictly focused on protocol implementation.
+The library is agnostic but was designed with real-world hardware in mind. Hardware-specific examples are maintained in a [dedicated external repository](https://github.com/fard-draf/korri-n2k-examples) to keep this core library lightweight and strictly focused on protocol implementation.
 
 *For a quick software-only test, run: `cargo run --example quickstart`*
 
