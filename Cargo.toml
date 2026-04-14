@@ -10,13 +10,17 @@ keywords = ["n2k", "nmea2000", "can", "embedded", "no-std"]
 categories = ["embedded", "no-std", "network-programming"]
 
 [features]
-default = []
+default = ["embassy"]
+embassy = ["dep:embassy-time", "dep:embassy-sync"]
+tokio = ["std", "dep:tokio"]
+std = []
 defmt = ["dep:defmt"]
 build-download = ["dep:ureq"]
 
 [dependencies]
-embassy-time = "0.4"
-embassy-sync = "0.6"
+embassy-time = { version = "0.4", optional = true }
+embassy-sync = { version = "0.6", optional = true }
+tokio = { version = "1.47.1", optional = true, default-features = false, features = ["sync", "time", "macros"] }
 embedded-can = "0.4"
 thiserror-no-std = "2.0"
 futures-util = { version = "0.3", default-features = false }
@@ -24,6 +28,7 @@ futures-util = { version = "0.3", default-features = false }
 defmt = { version = "0.3", optional = true }
 
 [dev-dependencies]
+critical-section = { version = "1.1", features = ["std"] }
 static_cell = "2.1.1"
 tokio = { version = "1.47.1", features = ["full"] }
 embassy-executor = { version = "0.7.0", features = ["executor-thread"] }

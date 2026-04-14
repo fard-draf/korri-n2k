@@ -33,7 +33,8 @@ async fn supervisor_queues_and_sends_pgn() {
     let handle = parts
         .handle
         .expect("handle must exist when command channel is provided");
-    let mut runner_future = parts.runner.drive();
+    let runner_future = parts.runner.drive();
+    tokio::pin!(runner_future);
 
     tokio::select! {
         result = &mut runner_future => {
