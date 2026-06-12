@@ -111,7 +111,7 @@ where
                                             // Lost arbitration, try the next address
                                             break 'listen_loop;
                                         } else {
-                                            return Ok(254);
+                                            return Err(ClaimError::NoAddressAvailable);
                                         }
                                     } else {
                                         #[cfg(feature = "defmt")]

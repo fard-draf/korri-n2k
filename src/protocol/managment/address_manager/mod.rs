@@ -104,7 +104,13 @@ where
             // In J1939/NMEA2000 the lowest NAME wins
             if self.my_name > their_name {
                 // We lose, reclaim a new address
-                self.reclaim().await.ok();
+                if let Err(e) = self.reclaim().await {
+                    match e {
+                        ClaimError::SendError(e) | ClaimError::ReceiveError(e) => return Err(e),
+                        // No address available: mark as null address (0xFE = "Cannot Claim")
+                        _ => self.current_address = 254,
+                    }
+                }
                 Ok(None)
             } else if their_name != self.my_name {
                 // We win, defend our address
@@ -179,10 +185,6 @@ where
 
     /// Attempt to acquire a new address after losing the previous one.
     async fn reclaim(&mut self) -> Result<(), ClaimError<C::Error>> {
-        // Move to the NULL address temporarily
-        self.current_address = 255;
-
-        // Reclaim a new address
         let new_address = claim_address(
             &mut self.can_bus,
             &mut self.timer,

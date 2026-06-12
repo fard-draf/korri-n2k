@@ -1,6 +1,6 @@
 [package]
 name = "korri-n2k"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "no_std NMEA2000 protocol implementation for embedded systems"
 repository = "https://github.com/fard-draf/korri-n2k"

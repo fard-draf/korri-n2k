@@ -204,8 +204,7 @@ async fn test_claim_address_non_arbitrary_loses_and_fails() {
 
     tokio::select! {
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name, preferred_address) => {
-            assert!(claim_result.is_ok());
-            assert_eq!(claim_result.unwrap(), 254);
+            assert!(matches!(claim_result, Err(ClaimError::NoAddressAvailable)));
         }
 
         _ = async {
