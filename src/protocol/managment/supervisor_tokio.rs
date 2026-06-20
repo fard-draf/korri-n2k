@@ -135,21 +135,17 @@ where
                     pin_mut!(recv_future);
 
                     match select(recv_future, cmd_future).await {
-                        Either::Left((result, pending_cmd)) => {
-                            match result {
-                                Ok(Some(frame)) => frame_to_forward = Some(frame),
-                                Ok(None) => {}
-                                Err(err) => recv_error = Some(err),
-                            }
-                            drop(pending_cmd);
-                        }
-                        Either::Right((command, pending_recv)) => {
+                        Either::Left((result, _pending_cmd)) => match result {
+                            Ok(Some(frame)) => frame_to_forward = Some(frame),
+                            Ok(None) => {}
+                            Err(err) => recv_error = Some(err),
+                        },
+                        Either::Right((command, _pending_recv)) => {
                             if let Some(cmd) = command {
                                 command_to_process = Some(cmd);
                             } else {
                                 channel_closed = true;
                             }
-                            drop(pending_recv);
                         }
                     }
                 }
@@ -163,15 +159,7 @@ where
                 }
 
                 if let Some(frame) = frame_to_forward {
-                    let mut frame_tx_closed = false;
-                    if let Some(ref frame_tx) = self.frame_tx {
-                        if frame_tx.send(frame).await.is_err() {
-                            frame_tx_closed = true;
-                        }
-                    }
-                    if frame_tx_closed {
-                        self.frame_tx = None;
-                    }
+                    self.forward_frame(frame).await;
                 }
 
                 if let Some(command) = command_to_process {
@@ -180,21 +168,21 @@ where
             } else {
                 let result = self.manager.recv().await;
                 match result {
-                    Ok(Some(frame)) => {
-                        let mut frame_tx_closed = false;
-                        if let Some(ref frame_tx) = self.frame_tx {
-                            if frame_tx.send(frame).await.is_err() {
-                                frame_tx_closed = true;
-                            }
-                        }
-                        if frame_tx_closed {
-                            self.frame_tx = None;
-                        }
-                    }
+                    Ok(Some(frame)) => self.forward_frame(frame).await,
                     Ok(None) => {}
                     Err(err) => return Err(AddressSupervisorRunError::Receive(err)),
                 }
             }
+        }
+    }
+
+    async fn forward_frame(&mut self, frame: CanFrame) {
+        let closed = match self.frame_tx {
+            Some(ref tx) => tx.send(frame).await.is_err(),
+            None => false,
+        };
+        if closed {
+            self.frame_tx = None;
         }
     }
 }
@@ -207,6 +195,7 @@ pub struct AddressHandle {
 impl AddressHandle {
     pub async fn send_frame(&self, frame: &CanFrame) {
         let command = SupervisorCommand::SendFrame(frame.clone());
+        // Fire-and-forget: if the runner is gone the frame is silently dropped.
         let _ = self.sender.send(command).await;
     }
 
@@ -233,6 +222,7 @@ impl AddressHandle {
             payload,
         };
 
+        // Fire-and-forget: if the runner is gone the frame is silently dropped.
         let _ = self.sender.send(command).await;
         Ok(())
     }

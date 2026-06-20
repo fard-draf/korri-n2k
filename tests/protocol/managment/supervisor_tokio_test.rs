@@ -4,9 +4,12 @@ mod helpers {
 
 use helpers::{MockCanBus, MockTimer};
 use korri_n2k::protocol::managment::address_manager::AddressManager;
-use korri_n2k::protocol::managment::address_supervisor::{AddressService, AddressSupervisorRunError};
+use korri_n2k::protocol::managment::address_supervisor::{
+    AddressService, AddressSupervisorRunError,
+};
 use korri_n2k::protocol::messages::Pgn129025;
 use korri_n2k::protocol::transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus};
+use tokio::task::yield_now;
 use tokio::time::Duration;
 
 #[tokio::test]
@@ -40,7 +43,8 @@ async fn supervisor_tokio_queues_and_sends_pgn() {
             assert_eq!(claim_frame.id.pgn(), 60928);
             assert_eq!(claim_frame.id.source_address(), preferred);
 
-            tokio::time::sleep(Duration::from_millis(300)).await;
+            // Yield once so the runner enters its select loop before we send.
+            yield_now().await;
 
             let mut position = Pgn129025::new();
             position.latitude = 47.6;
@@ -80,7 +84,10 @@ async fn supervisor_tokio_exits_on_can_bus_error() {
     drop(host_bus);
 
     let result = runner_future.await;
-    assert!(matches!(result, Err(AddressSupervisorRunError::Receive(()))));
+    assert!(matches!(
+        result,
+        Err(AddressSupervisorRunError::Receive(()))
+    ));
 }
 
 #[tokio::test]
@@ -96,11 +103,11 @@ async fn supervisor_tokio_handles_cmd_channel_close() {
 
     let service = AddressService::new(manager, 4, 4);
     let parts = service.into_parts();
-    
+
     // Keep frame receiver alive to check if it still receives CAN frames
     let mut frames = parts.frames.unwrap();
     let handle = parts.handle.unwrap();
-    
+
     let runner_future = parts.runner.drive();
     tokio::pin!(runner_future);
 
@@ -140,10 +147,10 @@ async fn supervisor_tokio_handles_frame_channel_close() {
 
     let service = AddressService::new(manager, 4, 4);
     let parts = service.into_parts();
-    
+
     let handle = parts.handle.unwrap();
     let frames = parts.frames.unwrap();
-    
+
     let runner_future = parts.runner.drive();
     tokio::pin!(runner_future);
 
@@ -157,7 +164,7 @@ async fn supervisor_tokio_handles_frame_channel_close() {
         _ = async {
             host_bus.recv().await.unwrap();
 
-            // Send a dummy frame to the DUT. 
+            // Send a dummy frame to the DUT.
             // The supervisor will try to forward it, see the channel is closed, drop it and continue.
             let id = CanId::builder(129025, 42).build().unwrap();
             let frame = CanFrame { id, data: [0, 1, 2, 3, 4, 5, 6, 7], len: 8 };

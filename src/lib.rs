@@ -18,4 +18,7 @@ pub mod infra;
 /// NMEA 2000 protocol implementation: CAN transport, fast packets,
 /// address management, and lookup tables.
 pub mod protocol;
+
+#[cfg(feature = "tokio")]
+pub use protocol::transport::traits::korri_timer::TokioTimer;
 //==================================================================================
