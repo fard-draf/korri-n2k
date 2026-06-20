@@ -4,122 +4,126 @@
 
 ![CI](https://github.com/fard-draf/korri-n2k/actions/workflows/ci.yml/badge.svg)
 
-`korri-n2k` is a highly optimized NMEA 2000 / ISO 11783 protocol stack for Rust. Built around a strict `no_std`, `no_alloc` core, it natively supports both **bare-metal microcontrollers** and **Linux embedded systems** through interchangeable asynchronous runtimes.
+`korri-n2k` is a NMEA 2000 / ISO 11783 protocol stack for Rust. Its core is `no_std` and zero-allocation, supporting both bare-metal microcontrollers and Linux embedded systems through interchangeable asynchronous runtimes.
 
-Whether you are building a sensor node on an STM32 or a central chartplotter on a Raspberry Pi using `SocketCAN`, `korri-n2k` provides the same deterministic, zero-cost abstractions.
+## Only the PGNs you need — nothing else
+
+The NMEA 2000 standard defines over 400 Parameter Group Numbers. `korri-n2k` never compiles them all: the build system generates Rust structs **only for the PGN IDs listed in your `pgn_manifest.json`**.
+
+```json
+{
+  "pgns": [
+    { "id": 129025, "name": "Position, Rapid Update" },
+    { "id": 128267, "name": "Water Depth" }
+  ]
+}
+```
+
+A depth sensor pulling two PGNs adds ~2 KiB of flash. A full navigation bridge pulling thirty adds proportionally more. Everything else is dead code the linker never sees.
+
+The default manifest already covers the most common marine PGNs (position, heading, AIS, depth, wind…). Swap or extend it to add proprietary PGNs from Garmin, Victron, or your own devices.
 
 ## Runtimes & Cargo Features
 
-The library is designed to perfectly adapt to your target environment using mutually exclusive features:
+These two features are mutually exclusive — choose the one that matches your target:
 
-- **`embassy` (Default):** For bare-metal `no_std` targets. Uses `embassy-sync` static channels. **Strictly zero-allocation**.
-- **`tokio`:** For OS-backed `std` targets (e.g., Linux/SocketCAN). Uses `tokio::sync::mpsc` channels and standard timers. The protocol core remains `no_alloc`, while Tokio manages the background task allocation.
+| Feature | Target | `std` | Heap |
+|---|---|---|---|
+| `embassy` *(default)* | Bare-metal (`no_std`) | No | **0 bytes** — fully static |
+| `tokio` | Linux / OS (`std`) | Yes | Channel buffers allocated by Tokio |
 
 ```toml
-# For bare-metal microcontrollers (STM32, ESP32, RP2040...)
+# Bare-metal microcontrollers (STM32, ESP32, RP2040…)
 [dependencies]
 korri-n2k = "0.2"
 
-# For Linux Embedded / OS targets (Raspberry Pi, SocketCAN...)
+# Linux / OS targets (Raspberry Pi, SocketCAN…)
 [dependencies]
 korri-n2k = { version = "0.2", default-features = false, features = ["tokio"] }
 ```
 
+> In `tokio` mode the protocol logic (codec, address claiming, fast packet) is still zero-allocation. Only the `mpsc` channel buffers used by `AddressService` are heap-allocated — their capacity is set by the caller.
+
 ## Core Architecture & Abstractions
 
-The library is built upon four primary pillars, designed to separate concerns between static data structures, hardware drivers, and network state management.
+### 1. Hardware Isolation (Transport Traits)
+The core library has zero knowledge of the host hardware. It relies on two traits:
+- `CanBus`: Read and write raw CAN frames.
+- `KorriTimer`: Non-blocking async delays. A `TokioTimer` implementation is provided when the `tokio` feature is active (`use korri_n2k::TokioTimer`).
 
-### 1. Static Code Generation (PGNs)
-NMEA 2000 Parameter Group Numbers (PGNs) are complex and prone to manual parsing errors. `korri-n2k` eliminates this by generating static Rust structures (`PgnXXXX`) directly from JSON definitions during the build process (`build.rs`).
-- **Standard & Proprietary Support:** While it defaults to the [CANboat](https://github.com/canboat/canboat) database, you can easily add **Proprietary PGNs** or your own **Custom PGNs**.
-- **Benefit:** Compile-time type safety for all fields, automatic handling of bit offsets, signedness, and physical resolutions without runtime overhead.
-
-### 2. Hardware Isolation (Transport Traits)
-The core library has zero knowledge of the host hardware. It relies on two traits that the user must implement:
-- `CanBus`: For reading and writing raw CAN frames.
-- `KorriTimer`: For non-blocking asynchronous delays (Provided out-of-the-box for Tokio).
-
-### 3. The Network Manager (`AddressManager`)
-Before transmitting data on an NMEA 2000 network, a device must negotiate a logical address. The `AddressManager` handles this ISO 11783 lifecycle autonomously:
-- Initial Address Claiming based on the device's unique `IsoName`.
+### 2. The Network Manager (`AddressManager`)
+Before transmitting on an NMEA 2000 network, a device must negotiate a logical address. The `AddressManager` handles this autonomously:
+- Initial address claiming based on the device's unique `IsoName`.
 - Automatic defence against address conflicts.
 - Transparent segmentation and reassembly of large payloads (Fast Packet protocol).
 
-### 4. The Async Socket (`AddressService`)
-To prevent ownership issues in concurrent environments and avoid locking the CAN bus, the library provides an asynchronous abstraction (`AddressService`). It splits the network interaction into three decoupled components using channels specific to your chosen runtime:
-- **`AddressHandle` (TX):** A lock-free sender passed to application tasks to queue outgoing PGNs.
-- **`AddressFrames` (RX):** A receiver yielding incoming application-level frames (filtered by the manager).
-- **`AddressRunner` (Runner):** An asynchronous task that must be spawned. It routes messages between the physical CAN bus and the application channels while handling address management internally.
+### 3. The Async Socket (`AddressService`)
+`AddressService` splits network interaction into three decoupled components:
+- **`AddressHandle` (TX):** Queue outgoing PGNs from any task. Sends are fire-and-forget — if the runner is gone frames are silently dropped.
+- **`AddressFrames` (RX):** Receive incoming application-level frames filtered by the manager.
+- **`AddressRunner` (Runner):** Background task that routes messages between the CAN bus and the application channels.
 
 ## Footprint & Performance
 
-`korri-n2k` is optimized for deterministic execution and minimal resource consumption. On a typical **ARM Cortex-M4** target with a standard PGN manifest:
+On a typical **ARM Cortex-M4** target:
 
-- **Flash (Code):** ~6-10 KiB for the protocol stack (Codec + Manager).
-- **RAM (Static):** Near-zero static allocation. Only your application-defined channels consume RAM.
-- **Dynamic Memory:** **0 bytes** (No `alloc` required in `embassy` mode. Minimal standard channel allocation in `tokio` mode).
+- **Flash:** ~6–10 KiB for the protocol stack, plus the structs generated for your PGN manifest.
+- **RAM (embassy):** Near-zero static allocation — only your statically-defined channel buffers.
+- **RAM (tokio):** Protocol stack same as above; `AddressService` channel buffers heap-allocated at the capacity you specify.
 
 ## Implementation Guide
 
-The `AddressService` API is nearly identical across runtimes, varying only in how channels are allocated.
+### Option A — Bare-Metal (Embassy)
 
-### Option A: Bare-Metal (Embassy)
-In `no_std` environments, channels must be statically allocated to avoid the heap.
+Channels must be statically allocated to avoid the heap.
+
 ```rust
-// 1. Statically allocate Embassy Channels
 static CMD_CHANNEL: Channel<CriticalSectionRawMutex, SupervisorCommand, 16> = Channel::new();
 static FRAME_CHANNEL: Channel<CriticalSectionRawMutex, CanFrame, 16> = Channel::new();
 
-// 2. Claim address and initialize the service
 let service = AddressService::claim(
     my_can_driver,
     my_embassy_timer,
     my_iso_name.into(),
     PREFERRED_ADDRESS,
     Some(&CMD_CHANNEL),
-    Some(&FRAME_CHANNEL)
+    Some(&FRAME_CHANNEL),
 ).await?;
 
-// 3. Split the service into concurrent parts
 let parts = service.into_parts();
-let handle = parts.handle.unwrap();
-let mut frames = parts.frames.unwrap();
-
-// 4. Spawn the background runner
 spawner.spawn(n2k_runner_task(parts.runner)).unwrap();
 ```
 
-### Option B: Linux / OS (Tokio)
-In `std` environments, Tokio handles channel allocation seamlessly.
+### Option B — Linux / OS (Tokio)
+
+Channel capacities are passed as integers; Tokio allocates the buffers.
+
 ```rust
-// 1. Initialize the service with queue capacities
+use korri_n2k::TokioTimer;
+
 let service = AddressService::claim(
     my_socketcan_driver,
-    TokioTimer, // Provided by korri-n2k when `tokio` feature is active
+    TokioTimer,
     my_iso_name.into(),
     PREFERRED_ADDRESS,
-    16, // TX Queue capacity
-    16  // RX Queue capacity
+    16, // TX queue capacity
+    16, // RX queue capacity
 ).await?;
 
-// 2. Split the service into concurrent parts
 let parts = service.into_parts();
-let handle = parts.handle.unwrap();
-let mut frames = parts.frames.unwrap();
-
-// 3. Spawn the background runner
 tokio::spawn(parts.runner.drive());
 ```
 
-### Application Usage (Common to both runtimes)
+### Application Usage (common to both runtimes)
+
 ```rust
-// TX Task: Send data lock-free
+// Send data from any task
 let mut pos = Pgn129025::new();
 pos.latitude = 47.7223;
 pos.longitude = -4.0022;
 handle.send_pgn(&pos, 129025, 2, None).await?;
 
-// RX Task: Wait for incoming data
+// Receive incoming frames
 if let Some(frame) = frames.recv().await {
     if let Ok(depth) = Pgn128267::from_payload(&frame.data) {
         println!("Depth: {}m", depth.depth);
@@ -127,18 +131,21 @@ if let Some(frame) = frames.recv().await {
 }
 ```
 
+## Roadmap
+
+The codec covers **~98% of the CANboat data model** (275 of 280 PGNs). The remaining gap is one meaningful capability plus a few niche proprietary messages:
+
+- **Device configuration & query (PGN 126208).** The NMEA Group Functions meta-protocol — reading and writing parameters on any device on the network (poll an autopilot, configure a sensor, request a value on demand). It needs two runtime-resolved field types (`FIELD_INDEX`, `VARIABLE`) and a second repeating group, which is why it isn't generated yet. This is the next priority.
+- **Proprietary B&G / Simnet key-value PGNs (130824, 130833, 130845, 130846).** Niche Navico-family messages using `DYNAMIC_FIELD_*` types; implemented on demand.
+
+None of these are in the default PGN manifest, so a standard build is unaffected.
+
 ## Hardware Support & Examples
 
-The library is hardware-agnostic. Hardware-specific implementations (STM32, SocketCAN) are maintained in a [dedicated external repository](https://github.com/fard-draf/korri-n2k-examples) to keep this core library lightweight.
+The library is hardware-agnostic. Hardware-specific implementations (STM32, SocketCAN) are maintained in a [dedicated external repository](https://github.com/fard-draf/korri-n2k-examples).
 
-*For a quick software-only test using the `std` feature, run:*
+*Quick software test using the `tokio` feature:*
 `cargo run --example quickstart --no-default-features --features tokio`
-
-## Build & Tooling
-
-To minimize compile times, `korri-n2k` only generates code for the PGNs you require.
-1. Define required PGNs in `build_core/var/pgn_manifest.json`.
-2. The `build.rs` script fetches the latest CANboat definitions and generates the Rust modules.
 
 ## License
 
