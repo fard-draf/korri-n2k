@@ -5,6 +5,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-20
+### Added
+- **`tokio` runtime feature**: `AddressService` / `AddressRunner` / `AddressHandle` / `AddressFrames` built on `tokio::sync::mpsc`, for `std` targets such as Linux/SocketCAN.
+- **`std` feature**: enables building on hosted targets (`#![no_std]` is now conditional on `not(feature = "std")`).
+- **`TokioTimer`**: a ready-to-use `KorriTimer` implementation backed by `tokio::time`, re-exported at the crate root (`korri_n2k::TokioTimer`).
+- Integration tests covering the Tokio supervisor (PGN queueing, CAN-bus error, command/frame channel close).
+
+### Changed
+- **BREAKING**: `embassy` is now an explicit feature, enabled by default (`default = ["embassy"]`). `embassy-time` and `embassy-sync` became optional dependencies. Users who build with `default-features = false` must now opt into `embassy` (or `tokio`) explicitly.
+- `embassy` and `tokio` are mutually exclusive; enabling both triggers a `compile_error!`.
+- Refactored `README.md`: runtimes table, honest allocation notes for the `tokio` mode, PGN-manifest selection highlighted, and a roadmap section.
+
 ## [0.2.1] - 2026-06-12
 
 ### Fixed

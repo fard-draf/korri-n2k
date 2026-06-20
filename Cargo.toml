@@ -1,8 +1,8 @@
 [package]
 name = "korri-n2k"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
-description = "no_std NMEA2000 protocol implementation for embedded systems"
+description = "no_std-first NMEA 2000 protocol stack for embedded and Linux systems"
 repository = "https://github.com/fard-draf/korri-n2k"
 readme = "README.md"
 license = "MIT"
