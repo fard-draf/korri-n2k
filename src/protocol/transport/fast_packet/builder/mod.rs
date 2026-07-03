@@ -20,7 +20,7 @@ fn next_sequence_id() -> u8 {
     #[cfg(target_has_atomic = "8")]
     {
         GLOBAL_SEQUENCE_ID
-            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |prev| {
+            .try_update(Ordering::AcqRel, Ordering::Relaxed, |prev| {
                 Some((prev + 1) & 0x07)
             })
             .unwrap()

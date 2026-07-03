@@ -69,7 +69,6 @@ impl FastPacketSession {
         self.expected_size = 0;
         self.current_size = 0;
         self.last_frame_index = 0;
-        // No need to wipe the buffer; upcoming copies will overwrite it.
     }
 }
 
