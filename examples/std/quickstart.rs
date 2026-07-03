@@ -6,7 +6,8 @@
 //! - Deserialize incoming frames
 //!
 //! This example uses `std` for a quick trial run.
-//! For a full embedded example, see `quickstart_nostd.rs`.
+//! For a full embedded (no_std) example, see the
+//! [korri-n2k-examples](https://github.com/fard-draf/korri-n2k-examples) repository.
 //!
 //! ```bash
 //! cargo run --example quickstart

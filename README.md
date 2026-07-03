@@ -4,7 +4,7 @@
 
 ![CI](https://github.com/fard-draf/korri-n2k/actions/workflows/ci.yml/badge.svg)
 
-`korri-n2k` is a NMEA 2000 / ISO 11783 protocol stack for Rust. Its core is `no_std` and zero-allocation, supporting both bare-metal microcontrollers and Linux embedded systems through interchangeable asynchronous runtimes.
+`korri-n2k` is a NMEA 2000 / ISO 11783 protocol stack for Rust. It lets you both **send and receive** PGNs on the bus. Its core is `no_std` and zero-allocation, supporting both bare-metal microcontrollers and Linux embedded systems through interchangeable asynchronous runtimes.
 
 ## Only the PGNs you need — nothing else
 
@@ -35,11 +35,11 @@ These two features are mutually exclusive — choose the one that matches your t
 ```toml
 # Bare-metal microcontrollers (STM32, ESP32, RP2040…)
 [dependencies]
-korri-n2k = "0.2"
+korri-n2k = "0.3"
 
 # Linux / OS targets (Raspberry Pi, SocketCAN…)
 [dependencies]
-korri-n2k = { version = "0.2", default-features = false, features = ["tokio"] }
+korri-n2k = { version = "0.3", default-features = false, features = ["tokio"] }
 ```
 
 > In `tokio` mode the protocol logic (codec, address claiming, fast packet) is still zero-allocation. Only the `mpsc` channel buffers used by `AddressService` are heap-allocated — their capacity is set by the caller.
@@ -94,6 +94,15 @@ let parts = service.into_parts();
 spawner.spawn(n2k_runner_task(parts.runner)).unwrap();
 ```
 
+`#[embassy_executor::task]` functions can't be generic, so you must define `n2k_runner_task` yourself, monomorphized over your concrete `CanBus`/`KorriTimer` types:
+
+```rust
+#[embassy_executor::task]
+async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyEmbassyTimer, 16, 16>) {
+    let _ = runner.drive().await;
+}
+```
+
 ### Option B — Linux / OS (Tokio)
 
 Channel capacities are passed as integers; Tokio allocates the buffers.
@@ -114,20 +123,32 @@ let parts = service.into_parts();
 tokio::spawn(parts.runner.drive());
 ```
 
-### Application Usage (common to both runtimes)
+### Sending & Receiving PGNs
+
+`korri-n2k` is bidirectional: any task holding an `AddressHandle` can **send** PGNs, and `AddressFrames` lets you **receive** and decode incoming ones.
 
 ```rust
-// Send data from any task
+// Send: build a PGN struct and queue it for transmission (identical on both runtimes)
 let mut pos = Pgn129025::new();
 pos.latitude = 47.7223;
 pos.longitude = -4.0022;
 handle.send_pgn(&pos, 129025, 2, None).await?;
+```
 
-// Receive incoming frames
+Receiving differs slightly between runtimes: Tokio's `mpsc` channel can be closed, so `recv()` returns `Option<CanFrame>`; an Embassy channel never closes, so `recv()` returns `CanFrame` directly.
+
+```rust
+// Receive (tokio)
 if let Some(frame) = frames.recv().await {
     if let Ok(depth) = Pgn128267::from_payload(&frame.data) {
         println!("Depth: {}m", depth.depth);
     }
+}
+
+// Receive (embassy)
+let frame = frames.recv().await;
+if let Ok(depth) = Pgn128267::from_payload(&frame.data) {
+    println!("Depth: {}m", depth.depth);
 }
 ```
 
@@ -144,8 +165,10 @@ None of these are in the default PGN manifest, so a standard build is unaffected
 
 The library is hardware-agnostic. Hardware-specific implementations (STM32, SocketCAN) are maintained in a [dedicated external repository](https://github.com/fard-draf/korri-n2k-examples).
 
-*Quick software test using the `tokio` feature:*
-`cargo run --example quickstart --no-default-features --features tokio`
+`std` examples (no hardware required) live in [`examples/std/`](examples/std):
+- `cargo run --example quickstart` — ISO Name, PGN (de)serialization, CAN ID basics.
+- `cargo run --example lookup_enum_usage` — working with NMEA 2000 lookup enums.
+- `cargo run --example iso_name_usage` — ISO Name manipulation and address claiming.
 
 ## License
 
