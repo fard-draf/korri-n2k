@@ -226,7 +226,11 @@ fn read_field_value(
             Ok(Some(value))
         }
 
-        FieldKind::Number | FieldKind::Lookup | FieldKind::IndirectLookup | FieldKind::Pgn => {
+        FieldKind::Number
+        | FieldKind::Lookup
+        | FieldKind::IndirectLookup
+        | FieldKind::Pgn
+        | FieldKind::IsoName => {
             let raw_val = if let Some(bits) = field_desc.bits_length {
                 match reader.read_u64(bits as u8) {
                     Ok(val) => val,
@@ -461,7 +465,7 @@ fn write_field(
     value: &PgnValue,
 ) -> Result<(), SerializationError> {
     match field_desc.kind {
-        FieldKind::Number | FieldKind::Pgn => {
+        FieldKind::Number | FieldKind::Pgn | FieldKind::IsoName => {
             let bits_to_write = if field_desc.is_signed.is_some_and(|s| s) {
                 let prepared_val = if let Some(res) = field_desc.resolution {
                     // Common path: floating-point value that must be scaled back to an integer
