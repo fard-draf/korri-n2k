@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-03
+### Fixed
+- **codec engine**: `FieldKind::IsoName` (the 64-bit device-identity field, e.g. `DataSourceNetworkIdName` in PGN 126985 "Alert Text") had no match arm in `write_field`/`read_field_value`, falling through to `UnsupportedFieldKind`. Any PGN carrying an `IsoName` field failed `to_payload()`/`from_payload()` unconditionally. Now handled like `Number`/`Pgn` (plain unsigned integer, no sign/resolution).
+
+### Changed
+- **README**: clarified upfront that the library is bidirectional (send *and* receive). Split the "receive" example per runtime — `AddressFrames::recv()` returns `Option<CanFrame>` under `tokio` but `CanFrame` directly under `embassy` (the channel never closes), so the previous shared snippet didn't compile under the default `embassy` feature.   
+
 ## [0.3.0] - 2026-06-20
 ### Added
 - **`tokio` runtime feature**: `AddressService` / `AddressRunner` / `AddressHandle` / `AddressFrames` built on `tokio::sync::mpsc`, for `std` targets such as Linux/SocketCAN.
@@ -18,7 +25,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Refactored `README.md`: runtimes table, honest allocation notes for the `tokio` mode, PGN-manifest selection highlighted, and a roadmap section.
 
 ## [0.2.1] - 2026-06-12
-
 ### Fixed
 - **address_claiming**: A non-AAC node that loses arbitration now returns `Err(ClaimError::NoAddressAvailable)` instead of `Ok(254)`. Previously, the J1939 null address (0xFE) was silently treated as a valid claimed address, causing the node to keep sending frames with an illegal source address.
 - **address_manager**: `reclaim()` no longer sets `current_address` to 255 before the async call. If reclaim fails with a bus error, the error is now returned to the caller. If no address is available, the node is marked with the null address (0xFE) instead of quietly continuing with the global broadcast address (0xFF) as its source.
