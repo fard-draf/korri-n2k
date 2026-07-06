@@ -295,6 +295,16 @@ pub(crate) struct PgnInstructions {
     pub fields: Vec<Fields>,
 }
 
+fn deserialize_description<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<serde_json::Value>::deserialize(deserializer)?.map(|v| match v {
+        serde_json::Value::String(s) => s,
+        other => other.to_string(),
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 /// Field descriptor as provided by CANboat.
 pub(crate) struct Fields {
@@ -341,7 +351,13 @@ pub(crate) struct Fields {
     #[serde(rename = "PhysicalQuantity")]
     pub physical_qty: Option<String>,
     /// 14. Optional description.
-    #[serde(rename = "Description")]
+    /// Some upstream CANboat entries store this as a bare number (e.g. PGN 126720),
+    /// so accept anything JSON-scalar and stringify it.
+    #[serde(
+        rename = "Description",
+        default,
+        deserialize_with = "deserialize_description"
+    )]
     pub description: Option<String>,
     /// 15. Bitfield enumeration name for BITLOOKUP fields.
     #[serde(rename = "LookupBitEnumeration")]
