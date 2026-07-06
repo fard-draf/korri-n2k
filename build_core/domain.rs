@@ -299,10 +299,12 @@ fn deserialize_description<'de, D>(deserializer: D) -> Result<Option<String>, D:
 where
     D: serde::Deserializer<'de>,
 {
-    Ok(Option::<serde_json::Value>::deserialize(deserializer)?.map(|v| match v {
-        serde_json::Value::String(s) => s,
-        other => other.to_string(),
-    }))
+    Ok(
+        Option::<serde_json::Value>::deserialize(deserializer)?.map(|v| match v {
+            serde_json::Value::String(s) => s,
+            other => other.to_string(),
+        }),
+    )
 }
 
 #[derive(Debug, Deserialize)]
