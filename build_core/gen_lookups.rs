@@ -82,10 +82,6 @@ where
     Ok(())
 }
 //==================================================================================LOOKUP_ENUM_GENERATION
-//==================================================================================LOOKUP_ENUM_GENERATION
-//==================================================================================LOOKUP_ENUM_GENERATION
-//==================================================================================LOOKUP_ENUM_GENERATION
-//==================================================================================LOOKUP_ENUM_GENERATION
 /// Generate the full Rust code for a lookup enumeration (type plus helpers).
 fn generate_lookup_code(lookup: &dyn LookupGenerator) -> Result<String, BuildError> {
     // TODO!: Break the function into smaller pieces.
