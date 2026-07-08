@@ -36,4 +36,12 @@
     { "id": 130310, "name": "Environmental Parameters" },
     { "id": 130821, "name": "Manufacturer Proprietary fast-packet addressed" }
   ]
+        { "id": 126992, "name": "System Time" },
+        { "id": 127251, "name": "Rate of Turn" },
+        { "id": 127257, "name": "Attitude" },
+        { "id": 127508, "name": "Battery Status" },
+        { "id": 128275, "name": "Distance Log" },
+        { "id": 129809, "name": "AIS Class B static data (msg 24 Part A)" },
+        { "id": 129810, "name": "AIS Class B static data (msg 24 Part B)" },
+        { "id": 130311, "name": "Environmental Parameters" },
 }
