@@ -4,8 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.2] - 2026-07-11
 ### Added
 - **`full-pgns` feature**: generate code for every PGN the library currently supports, without hand-writing a manifest. Ideal for bridges/gateways that must handle anything on the bus. Backed by the bundled `build_core/var/pgn_manifest.full.json`. Selection precedence is `KORRI_N2K_MANIFEST_PATH` > `full-pgns` > default manifest.
+
+### Changed
+- Refactored `README.md` to introduce the "full-pgns" feature.
 
 ### Docs
 - **docs**: remove outdated and inaccurate canboat.json analysis

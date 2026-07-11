@@ -6,9 +6,23 @@
 
 `korri-n2k` is a NMEA 2000 / ISO 11783 protocol stack for Rust. It lets you both **send and receive** PGNs on the bus. Its core is `no_std` and zero-allocation, supporting both bare-metal microcontrollers and Linux embedded systems through interchangeable asynchronous runtimes.
 
-## Only the PGNs you need — nothing else
+## Fed by CANboat, compile only the PGNs you need
 
-The NMEA 2000 standard defines over 400 Parameter Group Numbers. `korri-n2k` never compiles them all: the build system generates Rust structs **only for the PGN IDs listed in your `pgn_manifest.json`**.
+Every PGN in `korri-n2k` is generated at build time from [**CANboat**](https://github.com/canboat/canboat), the reference open-source catalog of NMEA 2000 messages. You never hand-write a parser: the build script turns CANboat's JSON definitions into typed, zero-allocation Rust structs, and **you decide how many of them get compiled in.** CANboat currently describes **348 PGNs**; `korri-n2k` generates **313** of them today (~90 %).
+
+### Choose what you compile: one, a few, or all
+
+| Your project | What you compile | How |
+|---|---|---|
+| A **specific device** (depth sounder, GPS, autopilot…) | Only the PGNs you list (smallest binary) | Edit the default `pgn_manifest.json` |
+| A **custom / proprietary set** (Garmin, Victron, your own devices) | Your exact PGN IDs, kept outside the crate | Point `KORRI_N2K_MANIFEST_PATH` at your file |
+| A **bridge / gateway / logger** | Every PGN the library supports | `features = ["full-pgns"]` |
+
+Whatever you pick, everything you *don't* select is dead code the linker never sees. A depth sensor pulling two PGNs adds ~2 KiB of flash; a thirty-PGN nav bridge adds proportionally more.
+
+#### One or a few: the manifest
+
+The build generates structs **only for the PGN IDs listed in a `pgn_manifest.json`**:
 
 ```json
 {
@@ -19,30 +33,28 @@ The NMEA 2000 standard defines over 400 Parameter Group Numbers. `korri-n2k` nev
 }
 ```
 
-A depth sensor pulling two PGNs adds ~2 KiB of flash. A full navigation bridge pulling thirty adds proportionally more. Everything else is dead code the linker never sees.
+The default manifest already covers the most common marine PGNs (position, heading, AIS, depth, wind…). Swap or extend it in place, or keep your list outside the crate and point the build at it with `KORRI_N2K_MANIFEST_PATH=/path/to/your_manifest.json`. Names are documentation; matching is on `id` against the CANboat database.
 
-The default manifest already covers the most common marine PGNs (position, heading, AIS, depth, wind…). Swap or extend it to add proprietary PGNs from Garmin, Victron, or your own devices.
+#### All of them: the `full-pgns` feature
 
-### Building a bridge? Enable every supported PGN
-
-When you can't know in advance which PGNs you'll see on the bus (gateways, bridges, loggers, analyzers), hand-maintaining a manifest is tedious and drifts out of sync with CANboat. Enable the `full-pgns` feature to generate code for **every PGN the library currently supports** — no manifest to write, and it tracks the CANboat database shipped with the crate:
+When you can't know in advance which PGNs you'll see on the bus (gateways, bridges, loggers, analyzers), hand-maintaining a list is tedious and drifts out of sync with CANboat. Enable `full-pgns` to generate **every PGN the library supports**, with no manifest to write, and it tracks the CANboat database shipped with the crate:
 
 ```toml
 [dependencies]
 korri-n2k = { version = "0.3", features = ["full-pgns"] }
 ```
 
-This is a deliberate trade-off: the whole point of the manifest is a minimal footprint, so `full-pgns` produces a much larger binary and is meant for hosted targets rather than constrained microcontrollers. The bundled list lives in [`build_core/var/pgn_manifest.full.json`](build_core/var/pgn_manifest.full.json); its `unsupported` section documents the handful of PGNs the generator can't emit yet.
+This is a deliberate trade-off against the minimal-footprint default, so it produces a much larger binary and is meant for hosted targets rather than constrained microcontrollers. The bundled [`build_core/var/pgn_manifest.full.json`](build_core/var/pgn_manifest.full.json) covers all **348** CANboat PGNs: **313 are generated today**, and the `unsupported` section lists the remaining **35** the generator can't emit yet, each with the reason why.
 
-Manifest selection precedence: the `KORRI_N2K_MANIFEST_PATH` environment variable (your own file) wins over `full-pgns`, which wins over the default manifest.
+**Selection precedence:** `KORRI_N2K_MANIFEST_PATH` (your own file) → `full-pgns` → default manifest.
 
 ## Runtimes & Cargo Features
 
-These two features are mutually exclusive — choose the one that matches your target:
+These two features are mutually exclusive. Choose the one that matches your target:
 
 | Feature | Target | `std` | Heap |
 |---|---|---|---|
-| `embassy` *(default)* | Bare-metal (`no_std`) | No | **0 bytes** — fully static |
+| `embassy` *(default)* | Bare-metal (`no_std`) | No | **0 bytes** (fully static) |
 | `tokio` | Linux / OS (`std`) | Yes | Channel buffers allocated by Tokio |
 
 ```toml
@@ -55,7 +67,7 @@ korri-n2k = "0.3"
 korri-n2k = { version = "0.3", default-features = false, features = ["tokio"] }
 ```
 
-> In `tokio` mode the protocol logic (codec, address claiming, fast packet) is still zero-allocation. Only the `mpsc` channel buffers used by `AddressService` are heap-allocated — their capacity is set by the caller.
+> In `tokio` mode the protocol logic (codec, address claiming, fast packet) is still zero-allocation. Only the `mpsc` channel buffers used by `AddressService` are heap-allocated; their capacity is set by the caller.
 
 ## Core Architecture & Abstractions
 
@@ -72,7 +84,7 @@ Before transmitting on an NMEA 2000 network, a device must negotiate a logical a
 
 ### 3. The Async Socket (`AddressService`)
 `AddressService` splits network interaction into three decoupled components:
-- **`AddressHandle` (TX):** Queue outgoing PGNs from any task. Sends are fire-and-forget — if the runner is gone frames are silently dropped.
+- **`AddressHandle` (TX):** Queue outgoing PGNs from any task. Sends are fire-and-forget: if the runner is gone, frames are silently dropped.
 - **`AddressFrames` (RX):** Receive incoming application-level frames filtered by the manager.
 - **`AddressRunner` (Runner):** Background task that routes messages between the CAN bus and the application channels.
 
@@ -81,12 +93,12 @@ Before transmitting on an NMEA 2000 network, a device must negotiate a logical a
 On a typical **ARM Cortex-M4** target:
 
 - **Flash:** ~6–10 KiB for the protocol stack, plus the structs generated for your PGN manifest.
-- **RAM (embassy):** Near-zero static allocation — only your statically-defined channel buffers.
+- **RAM (embassy):** Near-zero static allocation; only your statically-defined channel buffers.
 - **RAM (tokio):** Protocol stack same as above; `AddressService` channel buffers heap-allocated at the capacity you specify.
 
 ## Implementation Guide
 
-### Option A — Bare-Metal (Embassy)
+### Option A: Bare-Metal (Embassy)
 
 Channels must be statically allocated to avoid the heap.
 
@@ -116,7 +128,7 @@ async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyEmbassyTimer
 }
 ```
 
-### Option B — Linux / OS (Tokio)
+### Option B: Linux / OS (Tokio)
 
 Channel capacities are passed as integers; Tokio allocates the buffers.
 
@@ -167,10 +179,10 @@ if let Ok(depth) = Pgn128267::from_payload(&frame.data) {
 
 ## Roadmap
 
-The codec covers **~98% of the CANboat data model** (275 of 280 PGNs). The remaining gap is one meaningful capability plus a few niche proprietary messages:
+The generator currently supports **313 of the 348 PGNs CANboat defines** (~90% of the data model). Enable [`full-pgns`](#all-of-them-the-full-pgns-feature) to pull them all in. The 35 it can't emit yet are listed with their reason in the manifest's `unsupported` section; the most impactful gaps are one meaningful capability plus a few niche proprietary messages:
 
-- **Device configuration & query (PGN 126208).** The NMEA Group Functions meta-protocol — reading and writing parameters on any device on the network (poll an autopilot, configure a sensor, request a value on demand). It needs two runtime-resolved field types (`FIELD_INDEX`, `VARIABLE`) and a second repeating group, which is why it isn't generated yet. This is the next priority.
-- **Proprietary B&G / Simnet key-value PGNs (130824, 130833, 130845, 130846).** Niche Navico-family messages using `DYNAMIC_FIELD_*` types; implemented on demand.
+- **Device configuration & query (PGN 126208).** The NMEA Group Functions meta-protocol: reading and writing parameters on any device on the network (poll an autopilot, configure a sensor, request a value on demand). It needs two runtime-resolved field types (`FIELD_INDEX`, `VARIABLE`) and a second repeating group, which is why it isn't generated yet. This is the next priority.
+- **Proprietary B&G / Simnet key-value PGNs (130824, 130845, 130846).** Niche Navico-family messages using `DYNAMIC_FIELD_*` types; implemented on demand.
 
 None of these are in the default PGN manifest, so a standard build is unaffected.
 
@@ -179,10 +191,14 @@ None of these are in the default PGN manifest, so a standard build is unaffected
 The library is hardware-agnostic. Hardware-specific implementations (STM32, SocketCAN) are maintained in a [dedicated external repository](https://github.com/fard-draf/korri-n2k-examples).
 
 `std` examples (no hardware required) live in [`examples/std/`](examples/std):
-- `cargo run --example quickstart` — ISO Name, PGN (de)serialization, CAN ID basics.
-- `cargo run --example lookup_enum_usage` — working with NMEA 2000 lookup enums.
-- `cargo run --example iso_name_usage` — ISO Name manipulation and address claiming.
+- `cargo run --example quickstart`: ISO Name, PGN (de)serialization, CAN ID basics.
+- `cargo run --example lookup_enum_usage`: working with NMEA 2000 lookup enums.
+- `cargo run --example iso_name_usage`: ISO Name manipulation and address claiming.
 
 ## License
 
-MIT OR Apache-2.0 — choose either license. See `LICENSE` for details.
+MIT OR Apache-2.0: choose either license. See `LICENSE` for details.
+
+### PGN definitions
+
+PGN definitions are generated from the [CANboat](https://github.com/canboat/canboat) project's database (`canboat.json`), licensed under Apache-2.0. `korri-n2k` bundles a copy of this database purely for build-time code generation. All credit for the underlying NMEA 2000 message catalog goes to the CANboat authors and contributors, without whom this library could not exist.
