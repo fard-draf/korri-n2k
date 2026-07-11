@@ -1,0 +1,1434 @@
+{
+  "description": "Every PGN defined in canboat.json. `pgns` is the set verified to compile together; `unsupported` is ignored by build.rs (it only reads `pgns`) and records why each PGN was rejected. Move an entry up into `pgns` once the generator handles it. Note: JSON has no comments, and build.rs deserializes with serde_json, so disabled PGNs live in a separate key rather than being commented out. Enabling ALL of `pgns` compiles but is far larger than any device needs — trim it to what you actually consume.",
+  "pgns": [
+    {
+      "id": 59904,
+      "name": "ISO Request"
+    },
+    {
+      "id": 60160,
+      "name": "ISO Transport Protocol, Data Transfer"
+    },
+    {
+      "id": 60416,
+      "name": "ISO Transport Protocol, Connection Management - Request To Send (+4 variants)"
+    },
+    {
+      "id": 60928,
+      "name": "ISO Address Claim"
+    },
+    {
+      "id": 61440,
+      "name": "0xF000-0xFEFF: Standardized single-frame non-addressed"
+    },
+    {
+      "id": 65001,
+      "name": "Bus #1 Phase C Basic AC Quantities"
+    },
+    {
+      "id": 65002,
+      "name": "Bus #1 Phase B Basic AC Quantities"
+    },
+    {
+      "id": 65003,
+      "name": "Bus #1 Phase A Basic AC Quantities"
+    },
+    {
+      "id": 65004,
+      "name": "Bus #1 Average Basic AC Quantities"
+    },
+    {
+      "id": 65005,
+      "name": "Utility Total AC Energy"
+    },
+    {
+      "id": 65006,
+      "name": "Utility Phase C AC Reactive Power"
+    },
+    {
+      "id": 65007,
+      "name": "Utility Phase C AC Power"
+    },
+    {
+      "id": 65008,
+      "name": "Utility Phase C Basic AC Quantities"
+    },
+    {
+      "id": 65009,
+      "name": "Utility Phase B AC Reactive Power"
+    },
+    {
+      "id": 65010,
+      "name": "Utility Phase B AC Power"
+    },
+    {
+      "id": 65011,
+      "name": "Utility Phase B Basic AC Quantities"
+    },
+    {
+      "id": 65012,
+      "name": "Utility Phase A AC Reactive Power"
+    },
+    {
+      "id": 65013,
+      "name": "Utility Phase A AC Power"
+    },
+    {
+      "id": 65014,
+      "name": "Utility Phase A Basic AC Quantities"
+    },
+    {
+      "id": 65015,
+      "name": "Utility Total AC Reactive Power"
+    },
+    {
+      "id": 65016,
+      "name": "Utility Total AC Power"
+    },
+    {
+      "id": 65017,
+      "name": "Utility Average Basic AC Quantities"
+    },
+    {
+      "id": 65018,
+      "name": "Generator Total AC Energy"
+    },
+    {
+      "id": 65019,
+      "name": "Generator Phase C AC Reactive Power"
+    },
+    {
+      "id": 65020,
+      "name": "Generator Phase C AC Power"
+    },
+    {
+      "id": 65021,
+      "name": "Generator Phase C Basic AC Quantities"
+    },
+    {
+      "id": 65022,
+      "name": "Generator Phase B AC Reactive Power"
+    },
+    {
+      "id": 65023,
+      "name": "Generator Phase B AC Power"
+    },
+    {
+      "id": 65024,
+      "name": "Generator Phase B Basic AC Quantities"
+    },
+    {
+      "id": 65025,
+      "name": "Generator Phase A AC Reactive Power"
+    },
+    {
+      "id": 65026,
+      "name": "Generator Phase A AC Power"
+    },
+    {
+      "id": 65027,
+      "name": "Generator Phase A Basic AC Quantities"
+    },
+    {
+      "id": 65028,
+      "name": "Generator Total AC Reactive Power"
+    },
+    {
+      "id": 65029,
+      "name": "Generator Total AC Power"
+    },
+    {
+      "id": 65030,
+      "name": "Generator Average Basic AC Quantities"
+    },
+    {
+      "id": 65240,
+      "name": "ISO Commanded Address"
+    },
+    {
+      "id": 65281,
+      "name": "Yanmar: Engine Data B (+1 variants)"
+    },
+    {
+      "id": 65282,
+      "name": "Maretron: Number of Channels (+1 variants)"
+    },
+    {
+      "id": 65283,
+      "name": "BEP Marine: CZone Channel State"
+    },
+    {
+      "id": 65284,
+      "name": "Maretron: Proprietary DC Breaker Current (+2 variants)"
+    },
+    {
+      "id": 65285,
+      "name": "Airmar: Boot State Acknowledgment (+2 variants)"
+    },
+    {
+      "id": 65286,
+      "name": "Chetco: Dimmer (+2 variants)"
+    },
+    {
+      "id": 65287,
+      "name": "Airmar: Access Level (+2 variants)"
+    },
+    {
+      "id": 65290,
+      "name": "Simnet: Paddle Wheel Speed Configuration (+2 variants)"
+    },
+    {
+      "id": 65291,
+      "name": "Maretron: Resistance"
+    },
+    {
+      "id": 65292,
+      "name": "Simnet: Clear Fluid Level Warnings (+1 variants)"
+    },
+    {
+      "id": 65293,
+      "name": "Simnet: LGC-2000 Configuration (+1 variants)"
+    },
+    {
+      "id": 65294,
+      "name": "BEP Marine: Proprietary PGN 65294"
+    },
+    {
+      "id": 65295,
+      "name": "BEP Marine: CZone Alarm"
+    },
+    {
+      "id": 65296,
+      "name": "BEP Marine: Proprietary PGN 65296"
+    },
+    {
+      "id": 65297,
+      "name": "BEP Marine: Proprietary PGN 65297"
+    },
+    {
+      "id": 65298,
+      "name": "Suzuki: Engine Data A"
+    },
+    {
+      "id": 65299,
+      "name": "Suzuki: Engine Data B (+1 variants)"
+    },
+    {
+      "id": 65300,
+      "name": "Suzuki: Engine Data C (+2 variants)"
+    },
+    {
+      "id": 65301,
+      "name": "BEP Marine: CZone 65301"
+    },
+    {
+      "id": 65302,
+      "name": "Simnet: AP Unknown 1"
+    },
+    {
+      "id": 65303,
+      "name": "Suzuki: Engine Data D (+1 variants)"
+    },
+    {
+      "id": 65304,
+      "name": "Suzuki: Engine Data E (+2 variants)"
+    },
+    {
+      "id": 65305,
+      "name": "Simnet: Device Status (+4 variants)"
+    },
+    {
+      "id": 65306,
+      "name": "BEP Marine: Proprietary PGN 65306"
+    },
+    {
+      "id": 65308,
+      "name": "BEP Marine: Proprietary PGN 65308"
+    },
+    {
+      "id": 65309,
+      "name": "Navico: Wireless Battery Status"
+    },
+    {
+      "id": 65310,
+      "name": "BEP Marine: Proprietary PGN 65310"
+    },
+    {
+      "id": 65311,
+      "name": "BEP Marine: Proprietary PGN 65311"
+    },
+    {
+      "id": 65312,
+      "name": "Navico: Wireless Signal Status"
+    },
+    {
+      "id": 65313,
+      "name": "Navico: Depth Quality"
+    },
+    {
+      "id": 65314,
+      "name": "BEP Marine: Proprietary PGN 65314 (+1 variants)"
+    },
+    {
+      "id": 65315,
+      "name": "Suzuki: Troll Mode Control"
+    },
+    {
+      "id": 65316,
+      "name": "BEP Marine: Proprietary PGN 65316"
+    },
+    {
+      "id": 65317,
+      "name": "Navico: Proprietary 2"
+    },
+    {
+      "id": 65323,
+      "name": "Simnet: Data Source Selection Request"
+    },
+    {
+      "id": 65324,
+      "name": "Simnet: Analog Telemetry"
+    },
+    {
+      "id": 65325,
+      "name": "BEP Marine: Proprietary PGN 65325"
+    },
+    {
+      "id": 65329,
+      "name": "Yamaha: Engine Data A"
+    },
+    {
+      "id": 65330,
+      "name": "B&G: Proprietary"
+    },
+    {
+      "id": 65332,
+      "name": "Yanmar: Engine Data C"
+    },
+    {
+      "id": 65340,
+      "name": "Simnet: Autopilot Mode State"
+    },
+    {
+      "id": 65341,
+      "name": "Simnet: Autopilot Angle"
+    },
+    {
+      "id": 65344,
+      "name": "Yamaha: Engine Data B"
+    },
+    {
+      "id": 65345,
+      "name": "Seatalk: Pilot Wind Datum"
+    },
+    {
+      "id": 65346,
+      "name": "Yanmar: Engine Data D"
+    },
+    {
+      "id": 65348,
+      "name": "Yanmar: Engine Data E"
+    },
+    {
+      "id": 65349,
+      "name": "Yanmar: Engine Data F"
+    },
+    {
+      "id": 65350,
+      "name": "Simnet: Magnetic Field"
+    },
+    {
+      "id": 65359,
+      "name": "Seatalk: Pilot Heading"
+    },
+    {
+      "id": 65360,
+      "name": "Seatalk: Pilot Locked Heading"
+    },
+    {
+      "id": 65361,
+      "name": "Seatalk: Silence Alarm"
+    },
+    {
+      "id": 65371,
+      "name": "Seatalk: Keypad Message"
+    },
+    {
+      "id": 65374,
+      "name": "SeaTalk: Keypad Heartbeat"
+    },
+    {
+      "id": 65379,
+      "name": "Seatalk: Pilot Mode"
+    },
+    {
+      "id": 65403,
+      "name": "Lumishore: Light Status"
+    },
+    {
+      "id": 65408,
+      "name": "Airmar: Depth Quality Factor"
+    },
+    {
+      "id": 65409,
+      "name": "Airmar: Speed Pulse Count"
+    },
+    {
+      "id": 65410,
+      "name": "Airmar: Device Information"
+    },
+    {
+      "id": 65420,
+      "name": "Simnet: AP Unknown 3"
+    },
+    {
+      "id": 65424,
+      "name": "Yamaha: Engine Data C"
+    },
+    {
+      "id": 65440,
+      "name": "Navico: Naviop Switch Status"
+    },
+    {
+      "id": 65441,
+      "name": "Navico: Naviop Switch Control"
+    },
+    {
+      "id": 65472,
+      "name": "Yamaha: Engine Data D"
+    },
+    {
+      "id": 65480,
+      "name": "Simnet: Autopilot Mode"
+    },
+    {
+      "id": 126464,
+      "name": "PGN List (Transmit and Receive)"
+    },
+    {
+      "id": 126720,
+      "name": "Garmin AHRS ATT: COG Source Valid Flag (+53 variants)"
+    },
+    {
+      "id": 126976,
+      "name": "0x1F000-0x1FEFF: Standardized mixed single/fast packet non-addressed"
+    },
+    {
+      "id": 126983,
+      "name": "Alert"
+    },
+    {
+      "id": 126984,
+      "name": "Alert Response"
+    },
+    {
+      "id": 126985,
+      "name": "Alert Text"
+    },
+    {
+      "id": 126986,
+      "name": "Alert Configuration"
+    },
+    {
+      "id": 126987,
+      "name": "Alert Threshold"
+    },
+    {
+      "id": 126988,
+      "name": "Alert Value"
+    },
+    {
+      "id": 126992,
+      "name": "System Time"
+    },
+    {
+      "id": 126993,
+      "name": "Heartbeat"
+    },
+    {
+      "id": 126996,
+      "name": "Product Information"
+    },
+    {
+      "id": 126998,
+      "name": "Configuration Information"
+    },
+    {
+      "id": 127237,
+      "name": "Heading/Track control"
+    },
+    {
+      "id": 127245,
+      "name": "Rudder"
+    },
+    {
+      "id": 127250,
+      "name": "Vessel Heading"
+    },
+    {
+      "id": 127251,
+      "name": "Rate of Turn"
+    },
+    {
+      "id": 127252,
+      "name": "Heave"
+    },
+    {
+      "id": 127257,
+      "name": "Attitude"
+    },
+    {
+      "id": 127258,
+      "name": "Magnetic Variation"
+    },
+    {
+      "id": 127488,
+      "name": "Engine Parameters, Rapid Update"
+    },
+    {
+      "id": 127489,
+      "name": "Engine Parameters, Dynamic"
+    },
+    {
+      "id": 127490,
+      "name": "Electric Drive Status, Dynamic"
+    },
+    {
+      "id": 127491,
+      "name": "Electric Energy Storage Status, Dynamic"
+    },
+    {
+      "id": 127493,
+      "name": "Transmission Parameters, Dynamic"
+    },
+    {
+      "id": 127494,
+      "name": "Electric Drive Information"
+    },
+    {
+      "id": 127495,
+      "name": "Electric Energy Storage Information"
+    },
+    {
+      "id": 127496,
+      "name": "Trip Parameters, Vessel"
+    },
+    {
+      "id": 127497,
+      "name": "Trip Parameters, Engine"
+    },
+    {
+      "id": 127498,
+      "name": "Engine Parameters, Static"
+    },
+    {
+      "id": 127500,
+      "name": "Load Controller Connection State/Control"
+    },
+    {
+      "id": 127501,
+      "name": "Binary Switch Bank Status"
+    },
+    {
+      "id": 127502,
+      "name": "Switch Bank Control"
+    },
+    {
+      "id": 127503,
+      "name": "AC Input Status"
+    },
+    {
+      "id": 127505,
+      "name": "Fluid Level"
+    },
+    {
+      "id": 127506,
+      "name": "DC Detailed Status"
+    },
+    {
+      "id": 127507,
+      "name": "Charger Status"
+    },
+    {
+      "id": 127508,
+      "name": "Battery Status"
+    },
+    {
+      "id": 127509,
+      "name": "Inverter Status"
+    },
+    {
+      "id": 127510,
+      "name": "Charger Configuration Status"
+    },
+    {
+      "id": 127511,
+      "name": "Inverter Configuration Status"
+    },
+    {
+      "id": 127512,
+      "name": "AGS Configuration Status"
+    },
+    {
+      "id": 127513,
+      "name": "Battery Configuration Status"
+    },
+    {
+      "id": 127514,
+      "name": "AGS Status"
+    },
+    {
+      "id": 127744,
+      "name": "AC Power / Current - Phase A"
+    },
+    {
+      "id": 127745,
+      "name": "AC Power / Current - Phase B"
+    },
+    {
+      "id": 127746,
+      "name": "AC Power / Current - Phase C"
+    },
+    {
+      "id": 127747,
+      "name": "AC Voltage / Frequency - Phase A"
+    },
+    {
+      "id": 127748,
+      "name": "AC Voltage / Frequency - Phase B"
+    },
+    {
+      "id": 127749,
+      "name": "AC Voltage / Frequency - Phase C"
+    },
+    {
+      "id": 127750,
+      "name": "Converter Status"
+    },
+    {
+      "id": 127751,
+      "name": "DC Voltage/Current"
+    },
+    {
+      "id": 128000,
+      "name": "Leeway Angle"
+    },
+    {
+      "id": 128001,
+      "name": "Vessel Acceleration"
+    },
+    {
+      "id": 128002,
+      "name": "Electric Drive Status, Rapid Update"
+    },
+    {
+      "id": 128003,
+      "name": "Electric Energy Storage Status, Rapid Update"
+    },
+    {
+      "id": 128006,
+      "name": "Thruster Control Status"
+    },
+    {
+      "id": 128007,
+      "name": "Thruster Information"
+    },
+    {
+      "id": 128008,
+      "name": "Thruster Motor Status"
+    },
+    {
+      "id": 128259,
+      "name": "Speed"
+    },
+    {
+      "id": 128267,
+      "name": "Water Depth"
+    },
+    {
+      "id": 128275,
+      "name": "Distance Log"
+    },
+    {
+      "id": 128520,
+      "name": "Tracked Target Data"
+    },
+    {
+      "id": 128538,
+      "name": "Elevator Car Status"
+    },
+    {
+      "id": 128768,
+      "name": "Elevator Motor Control"
+    },
+    {
+      "id": 128769,
+      "name": "Elevator Deck Push Button"
+    },
+    {
+      "id": 128776,
+      "name": "Windlass Control Status"
+    },
+    {
+      "id": 128777,
+      "name": "Anchor Windlass Operating Status"
+    },
+    {
+      "id": 128778,
+      "name": "Anchor Windlass Monitoring Status"
+    },
+    {
+      "id": 128780,
+      "name": "Linear Actuator Control/Status"
+    },
+    {
+      "id": 129025,
+      "name": "Position, Rapid Update"
+    },
+    {
+      "id": 129026,
+      "name": "COG & SOG, Rapid Update"
+    },
+    {
+      "id": 129027,
+      "name": "Position Delta, Rapid Update"
+    },
+    {
+      "id": 129028,
+      "name": "Altitude Delta, Rapid Update"
+    },
+    {
+      "id": 129029,
+      "name": "GNSS Position Data"
+    },
+    {
+      "id": 129033,
+      "name": "Time & Date"
+    },
+    {
+      "id": 129038,
+      "name": "AIS Class A Position Report"
+    },
+    {
+      "id": 129039,
+      "name": "AIS Class B Position Report"
+    },
+    {
+      "id": 129040,
+      "name": "AIS Class B Extended Position Report"
+    },
+    {
+      "id": 129041,
+      "name": "AIS Aids to Navigation (AtoN) Report"
+    },
+    {
+      "id": 129044,
+      "name": "Datum"
+    },
+    {
+      "id": 129045,
+      "name": "User Datum"
+    },
+    {
+      "id": 129283,
+      "name": "Cross Track Error"
+    },
+    {
+      "id": 129284,
+      "name": "Navigation Data"
+    },
+    {
+      "id": 129285,
+      "name": "Navigation - Route/WP Information"
+    },
+    {
+      "id": 129291,
+      "name": "Set & Drift, Rapid Update"
+    },
+    {
+      "id": 129301,
+      "name": "Navigation - Route / Time to+from Mark"
+    },
+    {
+      "id": 129302,
+      "name": "Bearing and Distance between two Marks"
+    },
+    {
+      "id": 129538,
+      "name": "GNSS Control Status"
+    },
+    {
+      "id": 129539,
+      "name": "GNSS DOPs"
+    },
+    {
+      "id": 129540,
+      "name": "GNSS Sats in View"
+    },
+    {
+      "id": 129541,
+      "name": "GPS Almanac Data"
+    },
+    {
+      "id": 129542,
+      "name": "GNSS Pseudorange Noise Statistics"
+    },
+    {
+      "id": 129545,
+      "name": "GNSS RAIM Output"
+    },
+    {
+      "id": 129546,
+      "name": "GNSS RAIM Settings"
+    },
+    {
+      "id": 129547,
+      "name": "GNSS Pseudorange Error Statistics"
+    },
+    {
+      "id": 129549,
+      "name": "DGNSS Corrections"
+    },
+    {
+      "id": 129550,
+      "name": "GNSS Differential Correction Receiver Interface"
+    },
+    {
+      "id": 129551,
+      "name": "GNSS Differential Correction Receiver Signal"
+    },
+    {
+      "id": 129556,
+      "name": "GLONASS Almanac Data"
+    },
+    {
+      "id": 129793,
+      "name": "AIS UTC and Date Report"
+    },
+    {
+      "id": 129794,
+      "name": "AIS Class A Static and Voyage Related Data"
+    },
+    {
+      "id": 129796,
+      "name": "AIS Acknowledge"
+    },
+    {
+      "id": 129798,
+      "name": "AIS SAR Aircraft Position Report"
+    },
+    {
+      "id": 129799,
+      "name": "Radio Frequency/Mode/Power"
+    },
+    {
+      "id": 129800,
+      "name": "AIS UTC/Date Inquiry"
+    },
+    {
+      "id": 129801,
+      "name": "AIS Addressed Safety Related Message"
+    },
+    {
+      "id": 129802,
+      "name": "AIS Safety Related Broadcast Message"
+    },
+    {
+      "id": 129803,
+      "name": "AIS Interrogation"
+    },
+    {
+      "id": 129804,
+      "name": "AIS Assignment Mode Command"
+    },
+    {
+      "id": 129805,
+      "name": "AIS Data Link Management Message"
+    },
+    {
+      "id": 129806,
+      "name": "AIS Channel Management"
+    },
+    {
+      "id": 129807,
+      "name": "AIS Class B Group Assignment"
+    },
+    {
+      "id": 129809,
+      "name": "AIS Class B static data (msg 24 Part A)"
+    },
+    {
+      "id": 129810,
+      "name": "AIS Class B static data (msg 24 Part B)"
+    },
+    {
+      "id": 129813,
+      "name": "AIS Long-Range Broadcast Message"
+    },
+    {
+      "id": 130052,
+      "name": "Loran-C TD Data"
+    },
+    {
+      "id": 130053,
+      "name": "Loran-C Range Data"
+    },
+    {
+      "id": 130054,
+      "name": "Loran-C Signal Data"
+    },
+    {
+      "id": 130060,
+      "name": "Label"
+    },
+    {
+      "id": 130061,
+      "name": "Channel Source Configuration"
+    },
+    {
+      "id": 130064,
+      "name": "Route and WP Service - Database List"
+    },
+    {
+      "id": 130065,
+      "name": "Route and WP Service - Route List"
+    },
+    {
+      "id": 130066,
+      "name": "Route and WP Service - Route/WP-List Attributes"
+    },
+    {
+      "id": 130070,
+      "name": "Route and WP Service - WP Comment"
+    },
+    {
+      "id": 130073,
+      "name": "Route and WP Service - Radius of Turn"
+    },
+    {
+      "id": 130306,
+      "name": "Wind Data"
+    },
+    {
+      "id": 130310,
+      "name": "Environmental Parameters (obsolete)"
+    },
+    {
+      "id": 130311,
+      "name": "Environmental Parameters"
+    },
+    {
+      "id": 130312,
+      "name": "Temperature"
+    },
+    {
+      "id": 130313,
+      "name": "Humidity"
+    },
+    {
+      "id": 130314,
+      "name": "Actual Pressure"
+    },
+    {
+      "id": 130315,
+      "name": "Set Pressure"
+    },
+    {
+      "id": 130316,
+      "name": "Temperature Extended Range"
+    },
+    {
+      "id": 130320,
+      "name": "Tide Station Data"
+    },
+    {
+      "id": 130321,
+      "name": "Salinity Station Data"
+    },
+    {
+      "id": 130322,
+      "name": "Current Station Data"
+    },
+    {
+      "id": 130323,
+      "name": "Meteorological Station Data"
+    },
+    {
+      "id": 130324,
+      "name": "Moored Buoy Station Data"
+    },
+    {
+      "id": 130329,
+      "name": "HVAC Status"
+    },
+    {
+      "id": 130330,
+      "name": "Lighting System Settings"
+    },
+    {
+      "id": 130560,
+      "name": "Payload Mass"
+    },
+    {
+      "id": 130561,
+      "name": "Lighting Zone"
+    },
+    {
+      "id": 130562,
+      "name": "Lighting Scene"
+    },
+    {
+      "id": 130563,
+      "name": "Lighting Device"
+    },
+    {
+      "id": 130564,
+      "name": "Lighting Device Enumeration"
+    },
+    {
+      "id": 130565,
+      "name": "Lighting Color Sequence"
+    },
+    {
+      "id": 130566,
+      "name": "Lighting Program"
+    },
+    {
+      "id": 130567,
+      "name": "Watermaker Input Setting and Status"
+    },
+    {
+      "id": 130568,
+      "name": "Entertainment - Diagnostic Status"
+    },
+    {
+      "id": 130569,
+      "name": "Current Status and File"
+    },
+    {
+      "id": 130570,
+      "name": "Library Data File"
+    },
+    {
+      "id": 130571,
+      "name": "Library Data Group"
+    },
+    {
+      "id": 130572,
+      "name": "Library Data Search"
+    },
+    {
+      "id": 130574,
+      "name": "Supported Zone Data"
+    },
+    {
+      "id": 130575,
+      "name": "Entertainment - Parental Control Status"
+    },
+    {
+      "id": 130576,
+      "name": "Small Craft Status"
+    },
+    {
+      "id": 130577,
+      "name": "Direction Data"
+    },
+    {
+      "id": 130578,
+      "name": "Vessel Speed Components"
+    },
+    {
+      "id": 130579,
+      "name": "System Configuration"
+    },
+    {
+      "id": 130580,
+      "name": "System Configuration (deprecated)"
+    },
+    {
+      "id": 130582,
+      "name": "Zone Volume"
+    },
+    {
+      "id": 130583,
+      "name": "Available Audio EQ presets"
+    },
+    {
+      "id": 130585,
+      "name": "Bluetooth source status"
+    },
+    {
+      "id": 130586,
+      "name": "Zone Configuration"
+    },
+    {
+      "id": 130817,
+      "name": "Navico: Unknown (+4 variants)"
+    },
+    {
+      "id": 130819,
+      "name": "Simnet: Request Reprogram (+4 variants)"
+    },
+    {
+      "id": 130821,
+      "name": "Navico: ASCII Data (+3 variants)"
+    },
+    {
+      "id": 130825,
+      "name": "Maretron: Data Instance Channel Correlation (+4 variants)"
+    },
+    {
+      "id": 130826,
+      "name": "Maretron: Switch Indicator Status (+2 variants)"
+    },
+    {
+      "id": 130827,
+      "name": "Lowrance: unknown"
+    },
+    {
+      "id": 130828,
+      "name": "Simnet: Set Serial Number (+1 variants)"
+    },
+    {
+      "id": 130829,
+      "name": "Mercury: Engine Status"
+    },
+    {
+      "id": 130830,
+      "name": "Maretron: Dometic HVAC Status (+1 variants)"
+    },
+    {
+      "id": 130831,
+      "name": "Maretron: Universal Configuration FP (+1 variants)"
+    },
+    {
+      "id": 130832,
+      "name": "Maretron: Vessel Operating Mode (+1 variants)"
+    },
+    {
+      "id": 130833,
+      "name": "Maretron: Vessel Data Recorder Status (+2 variants)"
+    },
+    {
+      "id": 130834,
+      "name": "Maretron: SMS Status (+2 variants)"
+    },
+    {
+      "id": 130835,
+      "name": "Maretron: SMS Text Message (+1 variants)"
+    },
+    {
+      "id": 130836,
+      "name": "Simnet: Fluid Level Sensor Configuration (+1 variants)"
+    },
+    {
+      "id": 130837,
+      "name": "Suzuki: Engine Sensor Data (+2 variants)"
+    },
+    {
+      "id": 130838,
+      "name": "Maretron: BNWAS (+2 variants)"
+    },
+    {
+      "id": 130839,
+      "name": "Simnet: Pressure Sensor Configuration"
+    },
+    {
+      "id": 130840,
+      "name": "Maretron: Generic Sensor (+1 variants)"
+    },
+    {
+      "id": 130841,
+      "name": "Maretron: CAN Frame Forwarding"
+    },
+    {
+      "id": 130842,
+      "name": "Maretron: Windlass Operating Status (+3 variants)"
+    },
+    {
+      "id": 130843,
+      "name": "Maretron: Windlass Control Command (+2 variants)"
+    },
+    {
+      "id": 130844,
+      "name": "Carling: Proprietary"
+    },
+    {
+      "id": 130847,
+      "name": "Navico: ASCII Identifier (+1 variants)"
+    },
+    {
+      "id": 130848,
+      "name": "SeaTalk: Waypoint Information"
+    },
+    {
+      "id": 130849,
+      "name": "Navico: Proprietary FP"
+    },
+    {
+      "id": 130850,
+      "name": "Simnet: Command AP Standby (+11 variants)"
+    },
+    {
+      "id": 130851,
+      "name": "Simnet: AP command Reply: Change Course (+1 variants)"
+    },
+    {
+      "id": 130856,
+      "name": "Simnet: Alarm Message"
+    },
+    {
+      "id": 130860,
+      "name": "Simnet: AP Unknown 4"
+    },
+    {
+      "id": 130880,
+      "name": "Airmar: Additional Weather Data"
+    },
+    {
+      "id": 130881,
+      "name": "Airmar: Heater Control"
+    },
+    {
+      "id": 130900,
+      "name": "Xantrex: AC Status"
+    },
+    {
+      "id": 130910,
+      "name": "Xantrex: DC Source Configuration Status"
+    },
+    {
+      "id": 130911,
+      "name": "Xantrex: AC Output Configuration Status"
+    },
+    {
+      "id": 130912,
+      "name": "Xantrex: Charger Configuration Status"
+    },
+    {
+      "id": 130913,
+      "name": "Xantrex: AC Input Configuration Status"
+    },
+    {
+      "id": 130918,
+      "name": "SeaTalk: Route Information"
+    },
+    {
+      "id": 130921,
+      "name": "Carling: Breaker Status and Configuration"
+    },
+    {
+      "id": 130939,
+      "name": "Lumishore: Light Control"
+    },
+    {
+      "id": 130944,
+      "name": "Airmar: POST"
+    },
+    {
+      "id": 130945,
+      "name": "Yamaha: Engine Data"
+    },
+    {
+      "id": 130946,
+      "name": "Yamaha: Engine Data 2"
+    },
+    {
+      "id": 130947,
+      "name": "Yamaha: Engine Data 3"
+    },
+    {
+      "id": 130951,
+      "name": "Yamaha: Engine Data 4"
+    },
+    {
+      "id": 131008,
+      "name": "Yamaha: Engine Data 5"
+    },
+    {
+      "id": 131011,
+      "name": "Yamaha: Engine Data 6"
+    },
+    {
+      "id": 131012,
+      "name": "Yamaha: Engine Data 7"
+    }
+  ],
+  "unsupported": [
+    {
+      "id": 59392,
+      "name": "0xE800-0xEE00: Standardized single-frame addressed (+1 variants)",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 36 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 61184,
+      "name": "0xEF00: Manufacturer Proprietary single-frame addressed (+4 variants)",
+      "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:value, [COMMENT]:build.rs / map_type"
+    },
+    {
+      "id": 65280,
+      "name": "0xFF00-0xFFFF: Manufacturer Proprietary single-frame non-addressed (+6 variants)",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 1 previous error; 64 warnings emitted"
+    },
+    {
+      "id": 65288,
+      "name": "Seatalk: Alarm (+1 variants)",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 7 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 65289,
+      "name": "Simnet: Trim Tab Sensor Calibration (+1 variants)",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 7 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 126208,
+      "name": "0x1ED00 - 0x1EE00: Standardized fast-packet addressed (+7 variants)",
+      "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:value, [COMMENT]:build.rs / map_type"
+    },
+    {
+      "id": 127233,
+      "name": "Man Overboard Notification",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 3 previous errors"
+    },
+    {
+      "id": 127504,
+      "name": "AC Output Status",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 15 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 129808,
+      "name": "DSC Distress Call Information (+1 variants)",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 44 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 129816,
+      "name": "AIS Acknowledge (Binary)",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130067,
+      "name": "Route and WP Service - Route - WP Name & Position",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 9 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130068,
+      "name": "Route and WP Service - Route - WP Name",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 10 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130069,
+      "name": "Route and WP Service - XTE Limit & Navigation Method",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 29 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130071,
+      "name": "Route and WP Service - Route Comment",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130072,
+      "name": "Route and WP Service - Database Comment",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130074,
+      "name": "Route and WP Service - WP List - WP Name & Position",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 9 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130573,
+      "name": "Supported Source Data",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 12 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130581,
+      "name": "Zone Configuration (deprecated)",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130584,
+      "name": "Available Bluetooth addresses",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 2 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130816,
+      "name": "0x1FF00-0x1FFFF: Manufacturer Specific fast-packet non-addressed (+23 variants)",
+      "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:(), [COMMENT]:Unsupported type for PgnValue"
+    },
+    {
+      "id": 130818,
+      "name": "Simnet: Reprogram Data (+4 variants)",
+      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+    },
+    {
+      "id": 130820,
+      "name": "BEP Marine: CZone Alarm String Response (+49 variants)",
+      "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:values, [COMMENT]:Binary field without BitLength"
+    },
+    {
+      "id": 130822,
+      "name": "Navico: UDB Database, Object Ping (+10 variants)",
+      "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:value, [COMMENT]:build.rs / map_type"
+    },
+    {
+      "id": 130823,
+      "name": "Maretron: Proprietary Temperature High Range (+2 variants)",
+      "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:source, [COMMENT]:build.rs / map_type"
+    },
+    {
+      "id": 130824,
+      "name": "B&G: key-value data (+2 variants)",
+      "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:value, [COMMENT]:build.rs / map_type"
+    },
+    {
+      "id": 130845,
+      "name": "Maretron: DC Energy (+2 variants)",
+      "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:value, [COMMENT]:build.rs / map_type"
+    },
+    {
+      "id": 129792,
+      "name": "AIS DGNSS Broadcast Binary Message",
+      "reason": "generator does not support Binary field without BitLength (binaryData)"
+    },
+    {
+      "id": 129795,
+      "name": "AIS Addressed Binary Message",
+      "reason": "generator does not support Binary field without BitLength (binaryData)"
+    },
+    {
+      "id": 129797,
+      "name": "AIS Binary Broadcast Message",
+      "reason": "generator does not support Binary field without BitLength (binaryData)"
+    },
+    {
+      "id": 129811,
+      "name": "AIS Single Slot Binary Message (Deprecated)",
+      "reason": "generator does not support Binary field without BitLength (binaryData)"
+    },
+    {
+      "id": 129812,
+      "name": "AIS Multi Slot Binary Message (Deprecated)",
+      "reason": "generator does not support Binary field without BitLength (binaryData)"
+    },
+    {
+      "id": 129814,
+      "name": "AIS Single Slot Binary Message",
+      "reason": "generator does not support Binary field without BitLength (binaryData)"
+    },
+    {
+      "id": 129815,
+      "name": "AIS Multi Slot Binary Message",
+      "reason": "generator does not support Binary field without BitLength (binaryData)"
+    },
+    {
+      "id": 130846,
+      "name": "Simnet: Key Value - Long (+2 variants)",
+      "reason": "generator cannot map field 'value' bit length (build.rs / map_type)"
+    },
+    {
+      "id": 130852,
+      "name": "Navico: Diagnostic Data",
+      "reason": "generator cannot map field 'value' bit length (build.rs / map_type)"
+    }
+  ]
+}

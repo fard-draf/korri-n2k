@@ -2,6 +2,9 @@
 //==================================================================================CONF
 /// Manifest containing the list of PGNs to generate.
 pub(crate) const PGN_MANIFEST_PATH: &str = "build_core/var/pgn_manifest.json";
+/// Manifest listing every PGN the generator currently supports.
+/// Selected by the `full-pgns` Cargo feature.
+pub(crate) const PGN_MANIFEST_FULL_PATH: &str = "build_core/var/pgn_manifest.full.json";
 /// Complete CANboat database (PGNs + metadata).
 pub(crate) const CANBOAT_DOC_PATH: &str = "build_core/var/canboat.json";
 /// Generated PGN file name (written to `OUT_DIR`).
