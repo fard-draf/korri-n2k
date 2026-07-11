@@ -23,6 +23,19 @@ A depth sensor pulling two PGNs adds ~2 KiB of flash. A full navigation bridge p
 
 The default manifest already covers the most common marine PGNs (position, heading, AIS, depth, wind…). Swap or extend it to add proprietary PGNs from Garmin, Victron, or your own devices.
 
+### Building a bridge? Enable every supported PGN
+
+When you can't know in advance which PGNs you'll see on the bus (gateways, bridges, loggers, analyzers), hand-maintaining a manifest is tedious and drifts out of sync with CANboat. Enable the `full-pgns` feature to generate code for **every PGN the library currently supports** — no manifest to write, and it tracks the CANboat database shipped with the crate:
+
+```toml
+[dependencies]
+korri-n2k = { version = "0.3", features = ["full-pgns"] }
+```
+
+This is a deliberate trade-off: the whole point of the manifest is a minimal footprint, so `full-pgns` produces a much larger binary and is meant for hosted targets rather than constrained microcontrollers. The bundled list lives in [`build_core/var/pgn_manifest.full.json`](build_core/var/pgn_manifest.full.json); its `unsupported` section documents the handful of PGNs the generator can't emit yet.
+
+Manifest selection precedence: the `KORRI_N2K_MANIFEST_PATH` environment variable (your own file) wins over `full-pgns`, which wins over the default manifest.
+
 ## Runtimes & Cargo Features
 
 These two features are mutually exclusive — choose the one that matches your target:

@@ -33,11 +33,26 @@ fn main() -> Result<(), BuildError> {
     // 1. Load the manifest to know which PGNs must be generated.
     // Priority order:
     //   1. KORRI_N2K_MANIFEST_PATH environment variable (absolute or relative path)
-    //   2. Default manifest shipped with the crate
+    //   2. `full-pgns` Cargo feature: bundled manifest with every supported PGN
+    //   3. Default manifest shipped with the crate
     let default_manifest_path =
         PathBuf::from_str(PGN_MANIFEST_PATH).map_err(|_| BuildError::ReadPath {
             path: PGN_MANIFEST_PATH,
         })?;
+
+    // Cargo exposes enabled features to build scripts as `CARGO_FEATURE_<NAME>` vars.
+    let full_pgns = std::env::var_os("CARGO_FEATURE_FULL_PGNS").is_some();
+
+    let feature_manifest_path = if full_pgns {
+        println!("cargo:rerun-if-changed={}", PGN_MANIFEST_FULL_PATH);
+        Some(
+            PathBuf::from_str(PGN_MANIFEST_FULL_PATH).map_err(|_| BuildError::ReadPath {
+                path: PGN_MANIFEST_FULL_PATH,
+            })?,
+        )
+    } else {
+        None
+    };
 
     let user_manifest_path = std::env::var("KORRI_N2K_MANIFEST_PATH")
         .ok()
@@ -59,6 +74,12 @@ fn main() -> Result<(), BuildError> {
             println!("cargo:warning=Falling back to the default pgn_manifest");
             default_manifest_path
         }
+    } else if let Some(path) = feature_manifest_path {
+        println!(
+            "cargo:warning=full-pgns feature enabled: generating every supported PGN from {}",
+            PGN_MANIFEST_FULL_PATH
+        );
+        path
     } else {
         println!("cargo:warning=Using default pgn_manifest");
         default_manifest_path
