@@ -142,17 +142,13 @@ where
                         pin_mut!(recv_future);
 
                         match select(recv_future, cmd_future).await {
-                            Either::Left((result, pending_cmd)) => {
-                                match result {
-                                    Ok(Some(frame)) => frame_to_forward = Some(frame),
-                                    Ok(None) => {}
-                                    Err(err) => recv_error = Some(err),
-                                }
-                                drop(pending_cmd);
-                            }
-                            Either::Right((command, pending_recv)) => {
+                            Either::Left((result, _pending_cmd)) => match result {
+                                Ok(Some(frame)) => frame_to_forward = Some(frame),
+                                Ok(None) => {}
+                                Err(err) => recv_error = Some(err),
+                            },
+                            Either::Right((command, _pending_recv)) => {
                                 command_to_process = Some(command);
-                                drop(pending_recv);
                             }
                         }
                     }

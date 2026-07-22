@@ -97,7 +97,7 @@ impl IsoName {
     /// Full 8-bit instance (merge of upper and lower parts).
     #[inline]
     pub const fn device_instance(&self) -> u8 {
-        (self.device_instance_lower() | (self.device_instance_upper() << 3)) & 0xFF
+        self.device_instance_lower() | (self.device_instance_upper() << 3)
     }
 
     /// Device function (bits 40-47, 8 bits).
