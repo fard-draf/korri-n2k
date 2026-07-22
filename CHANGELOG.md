@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-07-22
 ### Added
 - `AddressClaimStrategy` enum with `Fixed`, `SelfConfigurable` and
   `Arbitrary` variants, letting a device declare how it may claim addresses.
@@ -29,8 +31,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - **BREAKING**: `claim_address` now takes an `AddressClaimStrategy` instead
   of a raw `preferred_address: u8`.
 - AAC capability is no longer inferred from NAME bit 63 alone.
-- The arbitrary range is narrowed from `128..=247` to the marine dynamic
-  range `128..=207`.
+- **BREAKING** — a node may now claim any address in `0..=251`, up from
+  `0..=207`, and an Arbitrary Address Capable node walks upwards from its
+  preferred address over that whole range instead of jumping into `128..=207`.
+
+  J1939-81 reserves `0..=127` for SAE-assigned preferred addresses and keeps
+  `128..=247` for self-configurable nodes, but NMEA 2000 does not inherit that
+  split. The reference C++ stack caps addresses at `251`, its documentation
+  states that "each device will get device source address (0-251)", and a
+  28-minute capture of an 18-device bus shows every node — all Arbitrary
+  Address Capable — between 0 and 43. The previous range parked a node in an
+  empty part of the bus, where arbitration never happens.
+
+  `MARINE_DYNAMIC_START`, `MARINE_DYNAMIC_END` and `MARINE_DYNAMIC_COUNT` are
+  replaced by `MIN_CLAIMABLE`, `MAX_CLAIMABLE` and `CLAIMABLE_COUNT`.
 - **BREAKING** — `FastPacketAssembler::process_frame` now takes `now_ms: u32`
   and `pgn: u32` in addition to the source address and payload. Sessions are
   keyed by (source, PGN, sequence id), so a device interleaving two Fast Packet
