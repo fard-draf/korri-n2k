@@ -15,8 +15,9 @@ use futures_util::pin_mut;
 ///
 /// Strategy:
 /// 1. Try the preferred address first.
-/// 2. If the equipment is Arbitrary Address Capable (AAC), iterate over the
-///    marine dynamic range (`128..=207`, see [`address`]).
+/// 2. If the equipment is Arbitrary Address Capable (AAC), walk upwards from
+///    the preferred address over the whole claimable range, wrapping around
+///    (see [`address`]).
 /// 3. After each attempt, listen for competing claims for 250 ms.
 /// 4. Defend the address if the local NAME wins, otherwise move to the next one.
 pub async fn claim_address<'a, C: CanBus, T: KorriTimer>(
@@ -183,7 +184,8 @@ enum AddressClaimIterator<'a> {
     Arbitrary {
         preferred: u8,
         tried_preferred: bool,
-        next: u16,
+        /// Distance walked from `preferred`, wrapping over the claimable range.
+        offset: usize,
     },
 }
 
@@ -199,7 +201,7 @@ impl<'a> AddressClaimIterator<'a> {
             AddressClaimStrategy::Arbitrary { preferred } => Self::Arbitrary {
                 preferred,
                 tried_preferred: false,
-                next: address::MARINE_DYNAMIC_START as u16,
+                offset: 0,
             },
         }
     }
@@ -219,10 +221,14 @@ impl<'a> Iterator for AddressClaimIterator<'a> {
                     return Some(candidate);
                 }
             },
+            // Preferred address first, then the rest of the claimable range
+            // walked upwards and wrapping around. This mirrors what real nodes
+            // do — increment on conflict — instead of jumping into a dedicated
+            // block where no other device sits.
             Self::Arbitrary {
                 preferred,
                 tried_preferred,
-                next,
+                offset,
             } => {
                 if !*tried_preferred {
                     *tried_preferred = true;
@@ -230,9 +236,11 @@ impl<'a> Iterator for AddressClaimIterator<'a> {
                         return Some(*preferred);
                     }
                 }
-                while *next <= address::MARINE_DYNAMIC_END as u16 {
-                    let candidate = *next as u8;
-                    *next += 1;
+
+                while *offset < address::CLAIMABLE_COUNT {
+                    *offset += 1;
+                    let candidate =
+                        ((*preferred as usize + *offset) % address::CLAIMABLE_COUNT) as u8;
                     if candidate != *preferred {
                         return Some(candidate);
                     }
@@ -340,18 +348,52 @@ fn addr_capable_and_isoname_match() {
 }
 
 #[test]
-fn arbitrary_emits_the_preferred_once_then_the_dynamic_range() {
+fn arbitrary_emits_the_preferred_then_walks_upwards() {
     let mut it = AddressClaimIterator::new(AddressClaimStrategy::Arbitrary { preferred: 130 });
     assert_eq!(it.next(), Some(130));
-    assert_eq!(it.next(), Some(128));
-    assert_eq!(it.next(), Some(129));
-    assert_eq!(it.next(), Some(131)); // 130 is jumped
+    assert_eq!(it.next(), Some(131));
+    assert_eq!(it.next(), Some(132));
 }
 
 #[test]
-fn arbitrary_covers_each_address_of_the_range_exactly_once() {
-    let it = AddressClaimIterator::new(AddressClaimStrategy::Arbitrary { preferred: 130 });
-    assert_eq!(it.count(), address::MARINE_DYNAMIC_COUNT);
+fn arbitrary_wraps_around_to_reach_the_low_addresses() {
+    // Real buses cluster near zero, so a node preferring a high address must
+    // still be able to walk down to them.
+    let mut it = AddressClaimIterator::new(AddressClaimStrategy::Arbitrary {
+        preferred: address::MAX_CLAIMABLE - 1,
+    });
+    assert_eq!(it.next(), Some(address::MAX_CLAIMABLE - 1));
+    assert_eq!(it.next(), Some(address::MAX_CLAIMABLE));
+    assert_eq!(it.next(), Some(address::MIN_CLAIMABLE));
+    assert_eq!(it.next(), Some(address::MIN_CLAIMABLE + 1));
+}
+
+#[test]
+fn arbitrary_covers_each_claimable_address_exactly_once() {
+    for preferred in [address::MIN_CLAIMABLE, 43, 130, address::MAX_CLAIMABLE] {
+        let mut seen = [false; address::CLAIMABLE_COUNT];
+        let mut count = 0;
+        for addr in AddressClaimIterator::new(AddressClaimStrategy::Arbitrary { preferred }) {
+            assert!(address::is_claimable(addr), "yielded {addr}, not claimable");
+            assert!(!seen[addr as usize], "yielded {addr} twice");
+            seen[addr as usize] = true;
+            count += 1;
+        }
+        assert_eq!(count, address::CLAIMABLE_COUNT, "preferred={preferred}");
+    }
+}
+
+#[test]
+fn every_claimable_address_is_reachable_including_the_low_ones() {
+    // The bug this replaces: scanning started at 128, so a node could never
+    // claim an address where real devices actually live.
+    let mut reachable = [false; address::CLAIMABLE_COUNT];
+    for addr in AddressClaimIterator::new(AddressClaimStrategy::Arbitrary { preferred: 130 }) {
+        reachable[addr as usize] = true;
+    }
+    for addr in [0u8, 10, 43, 127, 208, address::MAX_CLAIMABLE] {
+        assert!(reachable[addr as usize], "{addr} unreachable");
+    }
 }
 
 #[test]
@@ -364,7 +406,7 @@ fn fixed_round_with_preferred() {
 
 #[test]
 fn self_configurable_round_with_sorted_array_and_unvalid_address() {
-    // Anything above MAX_CLAIMABLE is not claimable and must be skipped.
+    // Only 252..=255 are out of reach; 210 and 222 are ordinary addresses.
     const ADDRESSES: &[u8] = &[128, 158, 199, 210, 222, 252, 253, 254, 255];
     let mut it = AddressClaimIterator::new(AddressClaimStrategy::SelfConfigurable {
         addresses: ADDRESSES,
@@ -373,19 +415,23 @@ fn self_configurable_round_with_sorted_array_and_unvalid_address() {
     assert_eq!(it.next(), Some(128));
     assert_eq!(it.next(), Some(158));
     assert_eq!(it.next(), Some(199));
+    assert_eq!(it.next(), Some(210));
+    assert_eq!(it.next(), Some(222));
     assert_eq!(it.next(), None);
 }
 
 #[test]
 fn self_configurable_round_with_unsorted_array_and_unvalid_addresses() {
-    // Anything above MAX_CLAIMABLE is not claimable and must be skipped;
-    // 108 is below the dynamic range but still claimable.
+    // Order is preserved, and only 252..=255 are filtered out.
     const ADDRESSES: &[u8] = &[253, 245, 254, 235, 255, 128, 222, 108, 252];
     let mut it = AddressClaimIterator::new(AddressClaimStrategy::SelfConfigurable {
         addresses: ADDRESSES,
     });
 
+    assert_eq!(it.next(), Some(245));
+    assert_eq!(it.next(), Some(235));
     assert_eq!(it.next(), Some(128));
+    assert_eq!(it.next(), Some(222));
     assert_eq!(it.next(), Some(108));
     assert_eq!(it.next(), None);
 }

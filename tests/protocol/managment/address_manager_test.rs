@@ -215,7 +215,6 @@ async fn test_address_manager_reclaim_on_conflict_lose() {
     let my_name = 0x9234567890ABCDEF; // AAC enabled
     let their_name = 0x1234567890ABCDEE; // Lower NAME → we lose
     assert!(my_name > their_name);
-    // High address, but inside the marine dynamic range so it stays claimable.
     let preferred = 200;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
@@ -241,14 +240,15 @@ async fn test_address_manager_reclaim_on_conflict_lose() {
             let conflict_frame = build_conflict_frame(their_name, preferred);
             host_bus.send(&conflict_frame).await.expect("Send conflict");
 
-            // The manager should reclaim another address (128)
+            // Losing an address moves the node to the next one, not to a
+            // separate block: real buses have no such block.
             let reclaim = tokio::time::timeout(
                 Duration::from_millis(500),
                 host_bus.recv()
             ).await.expect("Should receive reclaim within timeout").expect("Reclaim");
 
             assert_eq!(reclaim.id.pgn(), 60928);
-            assert_eq!(reclaim.id.source_address(), 128);
+            assert_eq!(reclaim.id.source_address(), preferred + 1);
         } => {
             // Test complete
         }

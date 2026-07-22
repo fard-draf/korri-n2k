@@ -7,6 +7,7 @@ use helpers::{simulate_no_conflict, MockCanBus, MockTimer};
 use korri_n2k::{
     error::ClaimError,
     protocol::{
+        constants::address,
         managment::address_claiming::{claim_address, AddressClaimStrategy},
         transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus},
     },
@@ -96,15 +97,15 @@ async fn test_claim_address_with_conflict_win() {
 
 #[tokio::test]
 async fn test_claim_address_with_conflict_lose() {
-    // Remote NAME has priority: switch to the arbitrary address range.
+    // Remote NAME has priority: walk up to the next free address.
     let (mut dut_bus, mut host_bus) = MockCanBus::create_pair();
 
     let my_name: u64 = 0x9234567890ABCDEF; // MSB is 1 -> Arbitrary Capable
     let their_name: u64 = 0x1234567890ABCDEE; // Lower than my_name → we lose
     assert!(my_name > their_name);
     let preferred = 207;
-    let preferred2 = 128;
-    let preferred3 = 129;
+    let preferred2 = 208;
+    let preferred3 = 209;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
     let mut timer = MockTimer;
 
@@ -114,8 +115,14 @@ async fn test_claim_address_with_conflict_lose() {
             let claimed_address = claim_result.unwrap();
             dbg!("claimed_address: {:?}", claimed_address);
             assert_ne!(claimed_address, preferred, "Preferred address should have been lost");
-            assert_eq!(claimed_address, 130, "Should claim first arbitrary address (130)");
-            assert!((128..=207).contains(&claimed_address), "Claimed address is outside the valid range");
+            assert_eq!(
+                claimed_address, 210,
+                "Should walk up past every contested address"
+            );
+            assert!(
+                address::is_claimable(claimed_address),
+                "Claimed address is outside the valid range"
+            );
 
         }
 
@@ -180,7 +187,11 @@ async fn test_claim_address_with_conflict_lose_and_with_no_address_available() {
                 .await
                 .expect("DUT did not send the initial claim");
             assert_eq!(frame1.id.source_address(), preferred);
-            for address in 128..255 {
+            // Contest every address in the order the node walks them —
+            // starting at `preferred` and wrapping — so each conflict lands
+            // while the node is actually sitting on that address.
+            for offset in 0..address::CLAIMABLE_COUNT {
+                let address = ((preferred as usize + offset) % address::CLAIMABLE_COUNT) as u8;
                 let conflict_frame = build_conflict_frame(their_name, address);
                 host_bus
                     .send(&conflict_frame)
