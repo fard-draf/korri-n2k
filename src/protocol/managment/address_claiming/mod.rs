@@ -1,6 +1,7 @@
 //! SAE J1939 / NMEA 2000 address-claim algorithm:
 //! emit PGN 60928, listen for conflicts, and fall back to alternative addresses when needed.
 use crate::error::{CanIdBuildError, ExtractionError};
+use crate::protocol::constants::address;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
 use crate::{
@@ -14,23 +15,26 @@ use futures_util::pin_mut;
 ///
 /// Strategy:
 /// 1. Try the preferred address first.
-/// 2. If the equipment is Arbitrary Address Capable (AAC), iterate over the 128–247 range.
+/// 2. If the equipment is Arbitrary Address Capable (AAC), iterate over the
+///    marine dynamic range (`128..=207`, see [`address`]).
 /// 3. After each attempt, listen for competing claims for 250 ms.
 /// 4. Defend the address if the local NAME wins, otherwise move to the next one.
-pub async fn claim_address<C: CanBus, T: KorriTimer>(
+pub async fn claim_address<'a, C: CanBus, T: KorriTimer>(
     can_bus: &mut C,
     timer: &mut T,
     my_name: u64,
-    preferred_address: u8,
+    strategy: AddressClaimStrategy<'a>,
 ) -> Result<u8, ClaimError<C::Error>>
 where
     C::Error: core::fmt::Debug,
 {
-    // Determine AAC capabilities (bit 63 of the NAME).
-    let is_arbitrary_capable = (my_name >> 63) & 1 == 1;
-    // Iterate over allowed addresses (preferred, then 128-247).
-    let addr_iterator = AddressClaimIterator::new(preferred_address, is_arbitrary_capable);
+    // Determine consistency between IsoName and Addr Claim Strategy.
+    if !is_addr_capable_and_isoname_match(my_name, strategy) {
+        return Err(ClaimError::InconsistentStrategy);
+    };
 
+    // Iterate over allowed addresses (preferred, then 128-207).
+    let addr_iterator = AddressClaimIterator::<'a>::new(strategy);
     for address_to_claim in addr_iterator {
         // Step 1: propose our claim.
         #[cfg(feature = "defmt")]
@@ -106,12 +110,16 @@ where
                                         defmt::warn!(
                                             "I LOSE (higher name), trying next address..."
                                         );
-
-                                        if is_arbitrary_capable {
-                                            // Lost arbitration, try the next address
-                                            break 'listen_loop;
-                                        } else {
-                                            return Err(ClaimError::NoAddressAvailable);
+                                        match strategy {
+                                            AddressClaimStrategy::Fixed { preferred: _ } => {
+                                                return Err(ClaimError::NoAddressAvailable);
+                                            }
+                                            AddressClaimStrategy::SelfConfigurable {
+                                                addresses: _,
+                                            } => break 'listen_loop,
+                                            AddressClaimStrategy::Arbitrary { preferred: _ } => {
+                                                break 'listen_loop
+                                            }
                                         }
                                     } else {
                                         #[cfg(feature = "defmt")]
@@ -150,78 +158,86 @@ where
     Err(ClaimError::NoAddressAvailable)
 }
 
+//==================================================================================ADDRESS_CLAIM_STRATEGY
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddressClaimStrategy<'a> {
+    /// SAC (Single Address Capable) with only one source address who may be attempted
+    Fixed { preferred: u8 },
+
+    /// SAC (Single Address Capable) with a finite, predefined set of valid addresses.
+    SelfConfigurable { addresses: &'a [u8] },
+
+    /// AAC (Arbitrary Address Capable): preferred address followed by dynamic-address candidates.
+    Arbitrary { preferred: u8 },
+}
+
 //==================================================================================ADDRESS_CLAIM_ITERATOR
 /// Generates candidate addresses following the J1939 rules.
-struct AddressClaimIterator {
-    preferred: u8,
-    next_arbitrary: u16,
-    state: AddressClaimState,
-    arbitrary_capable: bool,
+enum AddressClaimIterator<'a> {
+    Fixed {
+        remaining: Option<u8>,
+    },
+    SelfConfigurable {
+        remaining: &'a [u8],
+    },
+    Arbitrary {
+        preferred: u8,
+        tried_preferred: bool,
+        next: u16,
+    },
 }
 
-#[derive(PartialEq)]
-/// Iteration states (preferred address, then AAC range).
-enum AddressClaimState {
-    TryPreferred,
-    TryArbitrary,
-    Done,
-}
-
-impl AddressClaimIterator {
-    /// Prepare the iterator with the preferred address and AAC capability flag.
-    pub fn new(preferred_address: u8, arbitrary_capable: bool) -> Self {
-        Self {
-            preferred: preferred_address,
-            next_arbitrary: 128,
-            state: AddressClaimState::TryPreferred,
-            arbitrary_capable,
+impl<'a> AddressClaimIterator<'a> {
+    fn new(strategy: AddressClaimStrategy<'a>) -> Self {
+        match strategy {
+            AddressClaimStrategy::Fixed { preferred } => Self::Fixed {
+                remaining: Some(preferred),
+            },
+            AddressClaimStrategy::SelfConfigurable { addresses } => Self::SelfConfigurable {
+                remaining: addresses,
+            },
+            AddressClaimStrategy::Arbitrary { preferred } => Self::Arbitrary {
+                preferred,
+                tried_preferred: false,
+                next: address::MARINE_DYNAMIC_START as u16,
+            },
         }
     }
 }
 
-impl Iterator for AddressClaimIterator {
+impl<'a> Iterator for AddressClaimIterator<'a> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.state {
-                AddressClaimState::TryPreferred => {
-                    // After trying the preferred address, move on.
-                    self.state = if self.arbitrary_capable {
-                        AddressClaimState::TryArbitrary
-                    } else {
-                        // Non-AAC equipment only gets a single attempt.
-                        AddressClaimState::Done
-                    };
+        match self {
+            Self::Fixed { remaining } => remaining.take().filter(|&a| address::is_claimable(a)),
 
-                    if self.preferred <= 247 {
-                        return Some(self.preferred);
+            Self::SelfConfigurable { remaining } => loop {
+                let (&candidate, rest) = remaining.split_first()?;
+                *remaining = rest;
+                if address::is_claimable(candidate) {
+                    return Some(candidate);
+                }
+            },
+            Self::Arbitrary {
+                preferred,
+                tried_preferred,
+                next,
+            } => {
+                if !*tried_preferred {
+                    *tried_preferred = true;
+                    if address::is_claimable(*preferred) {
+                        return Some(*preferred);
                     }
                 }
-                AddressClaimState::TryArbitrary => {
-                    // Safeguard in case of inconsistent usage (should not happen).
-                    if !self.arbitrary_capable {
-                        self.state = AddressClaimState::Done;
-                        continue;
+                while *next <= address::MARINE_DYNAMIC_END as u16 {
+                    let candidate = *next as u8;
+                    *next += 1;
+                    if candidate != *preferred {
+                        return Some(candidate);
                     }
-                    // Iterate through the standard 128-247 range.
-                    if self.next_arbitrary > 247 {
-                        self.state = AddressClaimState::Done;
-                        continue;
-                    }
-
-                    let addr_to_try = self.next_arbitrary as u8;
-                    self.next_arbitrary += 1;
-
-                    // Skip the preferred address (already tested).
-                    if addr_to_try == self.preferred {
-                        continue;
-                    }
-                    return Some(addr_to_try);
                 }
-                AddressClaimState::Done => {
-                    return None;
-                }
+                None
             }
         }
     }
@@ -237,7 +253,7 @@ pub fn build_address_claim_frame(
     Ok(CanFrame {
         id: {
             match CanId::builder(60928, address_to_claim)
-                .to_destination(255)
+                .to_destination(address::GLOBAL)
                 .with_priority(6)
                 .build()
             {
@@ -269,4 +285,107 @@ pub(super) fn extract_name_from_claim(frame: &CanFrame) -> Result<u64, Extractio
     }
 
     Ok(u64::from_le_bytes(frame.data))
+}
+
+pub(super) fn is_addr_capable_and_isoname_match(
+    my_name: u64,
+    strategy: AddressClaimStrategy<'_>,
+) -> bool {
+    let is_addr_capable = ((my_name >> 63) & 0x01) as u8;
+    match strategy {
+        AddressClaimStrategy::Fixed { preferred: _ } => is_addr_capable == 0,
+        AddressClaimStrategy::SelfConfigurable { addresses: _ } => is_addr_capable == 0,
+        AddressClaimStrategy::Arbitrary { preferred: _ } => is_addr_capable == 1,
+    }
+}
+
+#[test]
+fn addr_capable_and_isoname_match() {
+    let dut_name_no_aac: u64 = 0x0234567890ABCDEF; // AAC disabled
+    let dut_name_aac: u64 = 0xF234567890ABCDEE; // AAC enabled
+
+    const DUT_ADDRESSES: &[u8] = &[145, 158];
+    let preferred = 145;
+
+    let strategy_fixed = AddressClaimStrategy::Fixed { preferred };
+    let strategy_arbitrary = AddressClaimStrategy::Arbitrary { preferred };
+    let strategy_self_conf = AddressClaimStrategy::SelfConfigurable {
+        addresses: DUT_ADDRESSES,
+    };
+
+    assert!(is_addr_capable_and_isoname_match(
+        dut_name_no_aac,
+        strategy_fixed
+    ));
+    assert!(!is_addr_capable_and_isoname_match(
+        dut_name_aac,
+        strategy_fixed
+    ));
+    assert!(is_addr_capable_and_isoname_match(
+        dut_name_aac,
+        strategy_arbitrary
+    ));
+    assert!(!is_addr_capable_and_isoname_match(
+        dut_name_no_aac,
+        strategy_arbitrary
+    ));
+    assert!(is_addr_capable_and_isoname_match(
+        dut_name_no_aac,
+        strategy_self_conf
+    ));
+    assert!(!is_addr_capable_and_isoname_match(
+        dut_name_aac,
+        strategy_self_conf
+    ));
+}
+
+#[test]
+fn arbitrary_emits_the_preferred_once_then_the_dynamic_range() {
+    let mut it = AddressClaimIterator::new(AddressClaimStrategy::Arbitrary { preferred: 130 });
+    assert_eq!(it.next(), Some(130));
+    assert_eq!(it.next(), Some(128));
+    assert_eq!(it.next(), Some(129));
+    assert_eq!(it.next(), Some(131)); // 130 is jumped
+}
+
+#[test]
+fn arbitrary_covers_each_address_of_the_range_exactly_once() {
+    let it = AddressClaimIterator::new(AddressClaimStrategy::Arbitrary { preferred: 130 });
+    assert_eq!(it.count(), address::MARINE_DYNAMIC_COUNT);
+}
+
+#[test]
+fn fixed_round_with_preferred() {
+    let preferred = 177;
+    let mut it = AddressClaimIterator::new(AddressClaimStrategy::Fixed { preferred });
+    assert_eq!(it.next(), Some(177));
+    assert_eq!(it.next(), None);
+}
+
+#[test]
+fn self_configurable_round_with_sorted_array_and_unvalid_address() {
+    // Anything above MAX_CLAIMABLE is not claimable and must be skipped.
+    const ADDRESSES: &[u8] = &[128, 158, 199, 210, 222, 252, 253, 254, 255];
+    let mut it = AddressClaimIterator::new(AddressClaimStrategy::SelfConfigurable {
+        addresses: ADDRESSES,
+    });
+
+    assert_eq!(it.next(), Some(128));
+    assert_eq!(it.next(), Some(158));
+    assert_eq!(it.next(), Some(199));
+    assert_eq!(it.next(), None);
+}
+
+#[test]
+fn self_configurable_round_with_unsorted_array_and_unvalid_addresses() {
+    // Anything above MAX_CLAIMABLE is not claimable and must be skipped;
+    // 108 is below the dynamic range but still claimable.
+    const ADDRESSES: &[u8] = &[253, 245, 254, 235, 255, 128, 222, 108, 252];
+    let mut it = AddressClaimIterator::new(AddressClaimStrategy::SelfConfigurable {
+        addresses: ADDRESSES,
+    });
+
+    assert_eq!(it.next(), Some(128));
+    assert_eq!(it.next(), Some(108));
+    assert_eq!(it.next(), None);
 }

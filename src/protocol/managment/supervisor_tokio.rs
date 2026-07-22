@@ -20,25 +20,25 @@ use crate::protocol::transport::traits::can_bus::CanBus;
 use crate::protocol::transport::traits::korri_timer::KorriTimer;
 
 /// Service assembling the supervisor components.
-pub struct AddressService<C: CanBus, T: KorriTimer>
+pub struct AddressService<'a, C: CanBus, T: KorriTimer>
 where
     C::Error: Debug,
 {
-    manager: AddressManager<C, T>,
+    manager: AddressManager<'a, C, T>,
     command_rx: Option<Receiver<SupervisorCommand>>,
     frame_tx: Option<Sender<CanFrame>>,
     handle: Option<AddressHandle>,
     frames: Option<AddressFrames>,
 }
 
-impl<C, T> AddressService<C, T>
+impl<'a, C, T> AddressService<'a, C, T>
 where
     C: CanBus,
     C::Error: Debug,
     T: KorriTimer,
 {
     /// Wrap an already-initialised [`AddressManager`].
-    pub fn new(manager: AddressManager<C, T>, cmd_cap: usize, frame_cap: usize) -> Self {
+    pub fn new(manager: AddressManager<'a, C, T>, cmd_cap: usize, frame_cap: usize) -> Self {
         let (cmd_tx, cmd_rx) = if cmd_cap > 0 {
             let (tx, rx) = channel(cmd_cap);
             (Some(tx), Some(rx))
@@ -67,16 +67,16 @@ where
         can_bus: C,
         timer: T,
         my_name: u64,
-        preferred_address: u8,
+        strategy: crate::protocol::managment::address_claiming::AddressClaimStrategy<'a>,
         cmd_cap: usize,
         frame_cap: usize,
     ) -> Result<Self, ClaimError<C::Error>> {
-        let manager = AddressManager::new(can_bus, timer, my_name, preferred_address).await?;
+        let manager = AddressManager::new(can_bus, timer, my_name, strategy).await?;
         Ok(Self::new(manager, cmd_cap, frame_cap))
     }
 
     /// Split into handle/receiver/runner components.
-    pub fn into_parts(self) -> AddressServiceParts<C, T> {
+    pub fn into_parts(self) -> AddressServiceParts<'a, C, T> {
         AddressServiceParts {
             handle: self.handle,
             frames: self.frames,
@@ -90,7 +90,7 @@ where
 }
 
 /// Bundle returned by [`AddressService::into_parts`].
-pub struct AddressServiceParts<C, T>
+pub struct AddressServiceParts<'a, C, T>
 where
     C: CanBus,
     C::Error: Debug,
@@ -98,22 +98,22 @@ where
 {
     pub handle: Option<AddressHandle>,
     pub frames: Option<AddressFrames>,
-    pub runner: AddressRunner<C, T>,
+    pub runner: AddressRunner<'a, C, T>,
 }
 
 /// Runner that drives the supervisor loop.
-pub struct AddressRunner<C, T>
+pub struct AddressRunner<'a, C, T>
 where
     C: CanBus,
     C::Error: Debug,
     T: KorriTimer,
 {
-    manager: AddressManager<C, T>,
+    manager: AddressManager<'a, C, T>,
     command_rx: Option<Receiver<SupervisorCommand>>,
     frame_tx: Option<Sender<CanFrame>>,
 }
 
-impl<C, T> AddressRunner<C, T>
+impl<'a, C, T> AddressRunner<'a, C, T>
 where
     C: CanBus,
     C::Error: Debug,
@@ -264,8 +264,8 @@ pub enum AddressSupervisorRunError<E: Debug> {
     SendPgn(SendPgnError<E>),
 }
 
-async fn handle_command<C: CanBus, T: KorriTimer>(
-    manager: &mut AddressManager<C, T>,
+async fn handle_command<'a, C: CanBus, T: KorriTimer>(
+    manager: &mut AddressManager<'a, C, T>,
     command: SupervisorCommand,
 ) -> Result<(), AddressSupervisorRunError<C::Error>>
 where

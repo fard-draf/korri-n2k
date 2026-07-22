@@ -3,6 +3,7 @@ mod helpers {
 }
 
 use helpers::{MockCanBus, MockTimer};
+use korri_n2k::protocol::managment::address_claiming::AddressClaimStrategy;
 use korri_n2k::protocol::managment::address_manager::AddressManager;
 use korri_n2k::protocol::managment::address_supervisor::{
     AddressService, AddressSupervisorRunError,
@@ -16,10 +17,11 @@ use tokio::time::Duration;
 async fn supervisor_tokio_queues_and_sends_pgn() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
-    let my_name = 0x1234_5678_90AB_CDEF;
+    let my_name = 0xF234_5678_90AB_CDEF;
     let preferred = 142u8;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
-    let manager = AddressManager::new(dut_bus, timer, my_name, preferred)
+    let manager = AddressManager::new(dut_bus, timer, my_name, strategy)
         .await
         .expect("claim must succeed");
 
@@ -69,10 +71,11 @@ async fn supervisor_tokio_queues_and_sends_pgn() {
 async fn supervisor_tokio_exits_on_can_bus_error() {
     let (dut_bus, host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
-    let my_name = 0x1234_5678_90AB_CDEF;
+    let my_name = 0x8234_5678_90AB_CDEF;
     let preferred = 142u8;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
-    let manager = AddressManager::new(dut_bus, timer, my_name, preferred)
+    let manager = AddressManager::new(dut_bus, timer, my_name, strategy)
         .await
         .expect("claim must succeed");
 
@@ -94,10 +97,11 @@ async fn supervisor_tokio_exits_on_can_bus_error() {
 async fn supervisor_tokio_handles_cmd_channel_close() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
-    let my_name = 0x1234_5678_90AB_CDEF;
+    let my_name = 0xF234_5678_90AB_CDEF;
     let preferred = 142u8;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
-    let manager = AddressManager::new(dut_bus, timer, my_name, preferred)
+    let manager = AddressManager::new(dut_bus, timer, my_name, strategy)
         .await
         .expect("claim must succeed");
 
@@ -138,10 +142,11 @@ async fn supervisor_tokio_handles_cmd_channel_close() {
 async fn supervisor_tokio_handles_frame_channel_close() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
-    let my_name = 0x1234_5678_90AB_CDEF;
+    let my_name = 0xF234_5678_90AB_CDEF;
     let preferred = 142u8;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
-    let manager = AddressManager::new(dut_bus, timer, my_name, preferred)
+    let manager = AddressManager::new(dut_bus, timer, my_name, strategy)
         .await
         .expect("claim must succeed");
 

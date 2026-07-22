@@ -7,7 +7,7 @@ use helpers::{simulate_no_conflict, MockCanBus, MockTimer};
 use korri_n2k::{
     error::ClaimError,
     protocol::{
-        managment::address_claiming::claim_address,
+        managment::address_claiming::{claim_address, AddressClaimStrategy},
         transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus},
     },
 };
@@ -37,15 +37,16 @@ async fn test_claim_address_no_conflict() {
     tokio::spawn(simulate_no_conflict(host_bus));
 
     let mut timer = MockTimer;
-    let my_name = 0x1234567890ABCDEF;
-    let preferred_address = 42;
+    let my_name = 0x8234567890ABCDEF;
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
     // Invoke claim_address
-    let result = claim_address(&mut dut_bus, &mut timer, my_name, preferred_address).await;
+    let result = claim_address(&mut dut_bus, &mut timer, my_name, strategy).await;
 
     // Assertions
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), preferred_address);
+    assert_eq!(result.unwrap(), preferred)
 }
 
 #[tokio::test]
@@ -53,17 +54,18 @@ async fn test_claim_address_with_conflict_win() {
     // Local NAME is smaller: we defend and keep the address.
     let (mut dut_bus, mut host_bus) = MockCanBus::create_pair();
 
-    let my_name = 0x1234567890ABCDEE;
-    let their_name = 0x1234567890ABCDEF; // Larger than my_name → we win
+    let my_name = 0x8234567890ABCDEE; // AAC enable
+    let their_name = 0x8234567890ABCDEF; // Larger than my_name → we win // AAC enable
     assert!(my_name < their_name);
-    let preferred_address = 42;
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
     let mut timer = MockTimer;
 
     tokio::select! {
-    claim_result = claim_address(&mut dut_bus, &mut timer, my_name, preferred_address) => {
+    claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
         assert!(claim_result.is_ok());
         let claimed_address = claim_result.unwrap();
-        assert_eq!(claimed_address, preferred_address, "Should keep preferred (win)");
+        assert_eq!(claimed_address, preferred, "Should keep preferred (win)");
         assert!(claimed_address > 0 && claimed_address <= 247, "Claimed address is outside the valid range");
         dbg!("claimed_address: {:?}", claimed_address);
 
@@ -75,9 +77,9 @@ async fn test_claim_address_with_conflict_win() {
             .recv()
             .await
             .expect("DUT did not send the initial claim");
-        assert_eq!(frame1.id.source_address(), preferred_address);
+        assert_eq!(frame1.id.source_address(), preferred);
 
-        let conflict_frame = build_conflict_frame(their_name, preferred_address);
+        let conflict_frame = build_conflict_frame(their_name, preferred);
         host_bus
             .send(&conflict_frame)
             .await
@@ -100,19 +102,20 @@ async fn test_claim_address_with_conflict_lose() {
     let my_name: u64 = 0x9234567890ABCDEF; // MSB is 1 -> Arbitrary Capable
     let their_name: u64 = 0x1234567890ABCDEE; // Lower than my_name → we lose
     assert!(my_name > their_name);
-    let preferred_address = 247;
-    let preferred_address2 = 128;
-    let preferred_address3 = 129;
+    let preferred = 207;
+    let preferred2 = 128;
+    let preferred3 = 129;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
     let mut timer = MockTimer;
 
     tokio::select! {
-        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, preferred_address) => {
+        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
             // assert!(claim_result.is_ok());
             let claimed_address = claim_result.unwrap();
             dbg!("claimed_address: {:?}", claimed_address);
-            assert_ne!(claimed_address, preferred_address, "Preferred address should have been lost");
+            assert_ne!(claimed_address, preferred, "Preferred address should have been lost");
             assert_eq!(claimed_address, 130, "Should claim first arbitrary address (130)");
-            assert!((128..=247).contains(&claimed_address), "Claimed address is outside the valid range");
+            assert!((128..=207).contains(&claimed_address), "Claimed address is outside the valid range");
 
         }
 
@@ -122,21 +125,21 @@ async fn test_claim_address_with_conflict_lose() {
                 .recv()
                 .await
                 .expect("DUT did not send the initial claim");
-            assert_eq!(frame1.id.source_address(), preferred_address);
+            assert_eq!(frame1.id.source_address(), preferred);
 
-            let conflict_frame = build_conflict_frame(their_name, preferred_address);
+            let conflict_frame = build_conflict_frame(their_name, preferred);
             host_bus
                 .send(&conflict_frame)
                 .await
                 .expect("Failed to send conflict frame");
 
-            let conflict_frame2 = build_conflict_frame(their_name, preferred_address2);
+            let conflict_frame2 = build_conflict_frame(their_name, preferred2);
             host_bus
                 .send(&conflict_frame2)
                 .await
                 .expect("Failed to send conflict frame #2");
 
-            let conflict_frame3 = build_conflict_frame(their_name, preferred_address3);
+            let conflict_frame3 = build_conflict_frame(their_name, preferred3);
             host_bus
                 .send(&conflict_frame3)
                 .await
@@ -161,11 +164,12 @@ async fn test_claim_address_with_conflict_lose_and_with_no_address_available() {
     let my_name: u64 = 0x9234567890ABCDEF; // MSB is 1 -> Arbitrary
     let their_name: u64 = 0x1234567890ABCDEE; // Lower than my_name → we lose
     assert!(my_name > their_name);
-    let preferred_address = 128;
+    let preferred = 128;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
     let mut timer = MockTimer;
 
     tokio::select! {
-        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, preferred_address) => {
+        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
             // assert!(claim_result.is_ok());
             assert!(matches!(claim_result.unwrap_err(), ClaimError::NoAddressAvailable));
         }
@@ -175,7 +179,7 @@ async fn test_claim_address_with_conflict_lose_and_with_no_address_available() {
                 .recv()
                 .await
                 .expect("DUT did not send the initial claim");
-            assert_eq!(frame1.id.source_address(), preferred_address);
+            assert_eq!(frame1.id.source_address(), preferred);
             for address in 128..255 {
                 let conflict_frame = build_conflict_frame(their_name, address);
                 host_bus
@@ -199,11 +203,12 @@ async fn test_claim_address_non_arbitrary_loses_and_fails() {
     let my_name: u64 = 0x1234567890ABCDEF; // MSB is 0 → not arbitrary capable
     let their_name: u64 = 0x1234567890ABCDEE; // Lower than my_name → we lose
     assert!(my_name > their_name);
-    let preferred_address = 42;
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Fixed { preferred };
     let mut timer = MockTimer;
 
     tokio::select! {
-        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, preferred_address) => {
+        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
             assert!(matches!(claim_result, Err(ClaimError::NoAddressAvailable)));
         }
 
@@ -213,10 +218,10 @@ async fn test_claim_address_non_arbitrary_loses_and_fails() {
                 .recv()
                 .await
                 .expect("DUT did not send the initial claim");
-            assert_eq!(frame1.id.source_address(), preferred_address);
+            assert_eq!(frame1.id.source_address(), preferred);
 
             //2. Send a conflict from a higher-priority device (lower NAME)
-            let conflict_frame = build_conflict_frame(their_name, preferred_address);
+            let conflict_frame = build_conflict_frame(their_name, preferred);
             host_bus
                 .send(&conflict_frame)
                 .await
@@ -243,15 +248,16 @@ async fn test_claim_address_non_arbitrary_conflict_and_win() {
     let my_name: u64 = 0x1234567890ABCDEF; // MSB is 0 -> non arbitrary capable
     let their_name: u64 = 0x1934567890ABCDEE; // Greater than my_name → we win
     assert!(my_name < their_name);
-    let preferred_address = 42;
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Fixed { preferred };
     let mut timer = MockTimer;
 
     tokio::select! {
-        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, preferred_address) => {
+        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
             // assert!(claim_result.is_ok());
             let claimed_address = claim_result.unwrap();
             dbg!("claimed_address: {:?}", claimed_address);
-            assert_eq!(claimed_address, preferred_address, "Should retain preferred address");
+            assert_eq!(claimed_address, preferred, "Should retain preferred address");
         }
 
 
@@ -260,9 +266,9 @@ async fn test_claim_address_non_arbitrary_conflict_and_win() {
                 .recv()
                 .await
                 .expect("DUT did not send the initial claim");
-            assert_eq!(frame1.id.source_address(), preferred_address);
+            assert_eq!(frame1.id.source_address(), preferred);
 
-            let conflict_frame = build_conflict_frame(their_name, preferred_address);
+            let conflict_frame = build_conflict_frame(their_name, preferred);
             host_bus
                 .send(&conflict_frame)
                 .await
@@ -273,7 +279,7 @@ async fn test_claim_address_non_arbitrary_conflict_and_win() {
                 .expect("DUT should have defended its address with a claim")
                 .expect("Failed to read defense frame");
 
-            assert_eq!(defense_frame.id.source_address(), preferred_address, "Defense must use the preferred address");
+            assert_eq!(defense_frame.id.source_address(), preferred, "Defense must use the preferred address");
             assert_eq!(defense_frame.data, frame1.data, "Defense frame must reuse the same NAME");
 
             if tokio::time::timeout(Duration::from_millis(50), host_bus.recv()).await.is_ok() {
