@@ -9,6 +9,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   `Arbitrary` variants, letting a device declare how it may claim addresses.
 - `ClaimError::InconsistentStrategy`, returned when the NAME's AAC bit
   contradicts the chosen strategy.
+- Session timeout: an incomplete session whose slot goes 500 ms without a new
+  fragment is released and its slot reused. Late fragments are ignored rather
+  than appended to stale data.
+- Four cumulative diagnostic counters on `FastPacketAssembler`, read through
+  `expired_sessions()`, `pool_exhausted()`, `lost_fragments()` and
+  `rejected_frames()`. The first three report dropped data and should stay at
+  zero on a healthy bus:
+  - `expired_sessions` — an incomplete session was reclaimed after timing out.
+  - `pool_exhausted` — a new message was refused, every slot being in use.
+  - `lost_fragments` — a continuation frame arrived out of sequence, or with no
+    live session behind it.
+
+  The fourth is not a loss and is expected to be non-zero on a real bus:
+  - `rejected_frames` — a first frame announced a size outside the Fast Packet
+    range, so the frame is not a message this assembler handles.
 
 ### Changed
 - **BREAKING**: `claim_address` now takes an `AddressClaimStrategy` instead
@@ -16,7 +31,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - AAC capability is no longer inferred from NAME bit 63 alone.
 - The arbitrary range is narrowed from `128..=247` to the marine dynamic
   range `128..=207`.
-
+- **BREAKING** — `FastPacketAssembler::process_frame` now takes `now_ms: u32`
+  and `pgn: u32` in addition to the source address and payload. Sessions are
+  keyed by (source, PGN, sequence id), so a device interleaving two Fast Packet
+  PGNs no longer corrupts either message.
 
 ## [0.3.2] - 2026-07-11
 ### Added

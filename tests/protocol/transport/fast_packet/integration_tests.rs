@@ -25,6 +25,8 @@ use korri_n2k::protocol::transport::fast_packet::{
 /// The test checks that GPS data (latitude, longitude, altitude) is properly
 /// fragmented and reassembled.
 fn test_roundtrip_pgn_129029() {
+    let pgn = 129029;
+    let fake_timer_ms: u32 = 10;
     // Create a GNSS message with realistic coordinates (Paris, France)
     let mut gnss = Pgn129029::new();
     gnss.latitude = 48.8566; // Latitude for Paris
@@ -44,7 +46,7 @@ fn test_roundtrip_pgn_129029() {
     );
 
     // Build fragmented CAN frames
-    let builder = FastPacketBuilder::new(129029, 42, None, &buffer[..len]);
+    let builder = FastPacketBuilder::new(pgn, 42, None, &buffer[..len]);
     let mut frames = builder.build();
 
     // Reassemble frames with the assembler
@@ -56,7 +58,9 @@ fn test_roundtrip_pgn_129029() {
         let frame = frame_result.expect("Frame construction should succeed");
         frame_count += 1;
 
-        if let ProcessResult::MessageComplete(msg) = assembler.process_frame(42, &frame.data) {
+        if let ProcessResult::MessageComplete(msg) =
+            assembler.process_frame(fake_timer_ms, pgn, 42, &frame.data)
+        {
             complete = Some(msg);
             break;
         }
@@ -128,9 +132,14 @@ fn test_interleaved_multiple_pgns() {
     assert!(len_ais > 8, "AIS must be a Fast Packet");
     assert!(len_gnss > 8, "GNSS must be a Fast Packet");
 
+    let pgn_ais = 129040;
+    let pgn_gnss = 129029;
+
+    let fake_timer_ms: u32 = 10;
+
     // Build frame iterators for two different sources
-    let builder_ais = FastPacketBuilder::new(129040, 10, None, &buffer_ais[..len_ais]);
-    let builder_gnss = FastPacketBuilder::new(129029, 20, None, &buffer_gnss[..len_gnss]);
+    let builder_ais = FastPacketBuilder::new(pgn_ais, 10, None, &buffer_ais[..len_ais]);
+    let builder_gnss = FastPacketBuilder::new(pgn_gnss, 20, None, &buffer_gnss[..len_gnss]);
 
     let mut frames_ais = builder_ais.build();
     let mut frames_gnss = builder_gnss.build();
@@ -151,7 +160,7 @@ fn test_interleaved_multiple_pgns() {
             if let Some(frame_result) = frames_ais.next() {
                 let frame = frame_result.expect("Valid AIS frame");
                 if let ProcessResult::MessageComplete(msg) =
-                    assembler.process_frame(10, &frame.data)
+                    assembler.process_frame(fake_timer_ms, pgn_ais, 10, &frame.data)
                 {
                     ais_complete = Some(msg);
                 }
@@ -165,7 +174,7 @@ fn test_interleaved_multiple_pgns() {
             if let Some(frame_result) = frames_gnss.next() {
                 let frame = frame_result.expect("Valid GNSS frame");
                 if let ProcessResult::MessageComplete(msg) =
-                    assembler.process_frame(20, &frame.data)
+                    assembler.process_frame(fake_timer_ms, pgn_gnss, 20, &frame.data)
                 {
                     gnss_complete = Some(msg);
                 }
@@ -210,24 +219,26 @@ fn test_interleaved_multiple_pgns() {
 fn test_assembler_sequence_wrap() {
     let mut assembler = FastPacketAssembler::new();
     let source = 42;
+    let pgn = 129540;
+    let fake_timer_ms: u32 = 10;
 
     // Complete message using sequence identifier 7 (upper bits)
     let frame_seq7: [u8; 8] = [0b111_00000, 15, 1, 2, 3, 4, 5, 6];
-    let result = assembler.process_frame(source, &frame_seq7);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source, &frame_seq7);
     assert!(
         matches!(result, ProcessResult::FragmentConsumed),
         "Frame with sequence 7 should be consumed"
     );
 
     let frame_seq7_cont: [u8; 8] = [0b111_00001, 7, 8, 9, 10, 11, 12, 13];
-    let result = assembler.process_frame(source, &frame_seq7_cont);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source, &frame_seq7_cont);
     assert!(
         matches!(result, ProcessResult::FragmentConsumed),
         "Second frame with the same sequence should be accepted"
     );
 
     let frame_seq7_end: [u8; 8] = [0b111_00010, 14, 15, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-    let result = assembler.process_frame(source, &frame_seq7_end);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source, &frame_seq7_end);
 
     // Ensure the message is considered complete
     assert!(
@@ -237,7 +248,7 @@ fn test_assembler_sequence_wrap() {
 
     // New message: wrap sequence counter 7 → 0
     let frame_seq0_new: [u8; 8] = [0b000_00000, 9, 42, 43, 44, 45, 46, 47];
-    let result = assembler.process_frame(source, &frame_seq0_new);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source, &frame_seq0_new);
     assert!(
         matches!(result, ProcessResult::FragmentConsumed),
         "Next message with sequence 0 should be accepted after wrapping"
@@ -252,10 +263,12 @@ fn test_assembler_sequence_wrap() {
 fn test_assembler_out_of_order() {
     let mut assembler = FastPacketAssembler::new();
     let source = 50;
+    let pgn = 129540;
+    let fake_timer_ms: u32 = 10;
 
     // First frame: start of session (sequence 0)
     let frame0: [u8; 8] = [0b000_00000, 20, 1, 2, 3, 4, 5, 6];
-    let result = assembler.process_frame(source, &frame0);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source, &frame0);
     assert!(
         matches!(result, ProcessResult::FragmentConsumed),
         "First frame should be consumed"
@@ -263,7 +276,7 @@ fn test_assembler_out_of_order() {
 
     // Send frame 2 before frame 1 (out of order)
     let frame2: [u8; 8] = [0b000_00010, 14, 15, 16, 17, 18, 19, 20];
-    let result = assembler.process_frame(source, &frame2);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source, &frame2);
     assert!(
         matches!(result, ProcessResult::Ignored),
         "Out-of-sequence frame should be ignored"
@@ -271,7 +284,7 @@ fn test_assembler_out_of_order() {
 
     // Check that the session resets and a new frame 0 starts a new session
     let new_frame0: [u8; 8] = [0b000_00000, 10, 100, 101, 102, 103, 104, 105];
-    let result = assembler.process_frame(source, &new_frame0);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source, &new_frame0);
     assert!(
         matches!(result, ProcessResult::FragmentConsumed),
         "A new session should start after reset"
@@ -286,16 +299,18 @@ fn test_assembler_out_of_order() {
 fn test_assembler_partial_message() {
     let mut assembler = FastPacketAssembler::new();
     let source = 60;
+    let pgn = 129540;
+    let fake_timer_ms: u32 = 10;
 
     // Start of message: three frames required
     let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
-    assembler.process_frame(source, &frame0);
+    assembler.process_frame(fake_timer_ms, pgn, source, &frame0);
 
     // ⚠️ Simulate loss of frame 1
 
     // Receive frame 2 directly (invalid sequence)
     let frame2: [u8; 8] = [0b000_00010, 14, 15, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-    let result = assembler.process_frame(source, &frame2);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source, &frame2);
 
     assert!(
         matches!(result, ProcessResult::Ignored),
@@ -311,14 +326,16 @@ fn test_assembler_partial_message() {
 fn test_assembler_duplicate_frame() {
     let mut assembler = FastPacketAssembler::new();
     let source = 70;
+    let pgn = 129540;
+    let fake_timer_ms: u32 = 10;
 
     // First frame
     let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
-    let result1 = assembler.process_frame(source, &frame0);
+    let result1 = assembler.process_frame(fake_timer_ms, pgn, source, &frame0);
     assert!(matches!(result1, ProcessResult::FragmentConsumed));
 
     // ⚠️ Retransmit the same frame (duplicate)
-    let result2 = assembler.process_frame(source, &frame0);
+    let result2 = assembler.process_frame(fake_timer_ms, pgn, source, &frame0);
 
     // Acceptable behavior: ignore or reset, but never crash or corrupt data
     assert!(
@@ -337,11 +354,13 @@ fn test_assembler_duplicate_frame() {
 /// sessions must be rejected.
 fn test_assembler_max_sessions() {
     let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let fake_timer_ms: u32 = 10;
 
     // Start four concurrent sessions (current limit = 4)
     for source_addr in 1..=4 {
         let frame: [u8; 8] = [0b000_00000, 20, source_addr, 0, 0, 0, 0, 0];
-        let result = assembler.process_frame(source_addr, &frame);
+        let result = assembler.process_frame(fake_timer_ms, pgn, source_addr, &frame);
         assert!(
             matches!(result, ProcessResult::FragmentConsumed),
             "Session {source_addr} should be accepted"
@@ -350,7 +369,7 @@ fn test_assembler_max_sessions() {
 
     // Attempt to create a fifth session (must fail)
     let frame5: [u8; 8] = [0b000_00000, 20, 5, 0, 0, 0, 0, 0];
-    let result = assembler.process_frame(5, &frame5);
+    let result = assembler.process_frame(fake_timer_ms, pgn, 5, &frame5);
 
     assert!(
         matches!(result, ProcessResult::Ignored),
@@ -372,6 +391,9 @@ fn test_stress_100_pgns() {
 
     for i in 0..100 {
         let source = (i % 4) as u8; // Rotate across four sources
+        let pgn_ais = 129040;
+
+        let fake_timer_ms: u32 = 10;
 
         // Create an AIS message with varying data
         let mut ais = Pgn129040::new();
@@ -384,12 +406,12 @@ fn test_stress_100_pgns() {
             .expect("Serialization succeeded");
 
         // Build and send the frames
-        let builder = FastPacketBuilder::new(129040, source, None, &buffer[..len]);
+        let builder = FastPacketBuilder::new(pgn_ais, source, None, &buffer[..len]);
         let mut frames = builder.build();
 
         while let Some(frame_result) = frames.next() {
             let frame = frame_result.expect("Valid frame");
-            let result = assembler.process_frame(source, &frame.data);
+            let result = assembler.process_frame(fake_timer_ms, pgn_ais, source, &frame.data);
 
             if let ProcessResult::MessageComplete(msg) = result {
                 // Quick validation of the message
@@ -403,7 +425,7 @@ fn test_stress_100_pgns() {
         }
     }
 
-    // Reaching this point without panic means the stability test passed ✅
+    // Reaching this point without panic means the stability test passed
 }
 
 #[test]
@@ -412,6 +434,7 @@ fn test_stress_100_pgns() {
 /// Serves as a performance indicator for the assembler and helps spot regressions.
 fn test_builder_throughput() {
     // Prepare a maximum-sized message
+    let pgn_ais = 129040;
     let mut ais = Pgn129040::new();
     ais.user_id = 987_654_321;
 
@@ -423,7 +446,7 @@ fn test_builder_throughput() {
     let mut total_frames = 0;
 
     for _ in 0..iterations {
-        let builder = FastPacketBuilder::new(129040, 42, None, &buffer[..len]);
+        let builder = FastPacketBuilder::new(pgn_ais, 42, None, &buffer[..len]);
         let frames: Vec<_> = builder.build().collect();
         total_frames += frames.len();
     }
@@ -433,7 +456,7 @@ fn test_builder_throughput() {
         total_frames > 0,
         "At least one frame must be generated per iteration"
     );
-    println!("✅ Throughput test: {total_frames} frames generated over {iterations} iterations");
+    println!("Throughput test: {total_frames} frames generated over {iterations} iterations");
 }
 
 #[test]
@@ -454,5 +477,5 @@ fn test_assembler_memory_footprint() {
         "Assembler must remain compact: {size} bytes (max: {MAX_SIZE_BYTES})"
     );
 
-    println!("✅ FastPacketAssembler memory footprint: {size} bytes");
+    println!("FastPacketAssembler memory footprint: {size} bytes");
 }
