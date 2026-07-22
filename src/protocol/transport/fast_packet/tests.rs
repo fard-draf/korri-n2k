@@ -8,9 +8,11 @@ use crate::protocol::transport::fast_packet::{
 /// Validate a round-trip for a modest 15-byte payload.
 fn test_roundtrip_15_bytes() {
     let original = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let pgn = 129540;
+    let fake_timer_ms = 10;
 
     // Fragmentation
-    let builder = FastPacketBuilder::new(129540, 42, None, &original);
+    let builder = FastPacketBuilder::new(pgn, 42, None, &original);
     let mut iter = builder.build();
 
     // Reassembly
@@ -19,7 +21,9 @@ fn test_roundtrip_15_bytes() {
 
     while let Some(frame_result) = iter.next() {
         let frame = frame_result.unwrap();
-        if let ProcessResult::MessageComplete(msg) = assembler.process_frame(42, &frame.data) {
+        if let ProcessResult::MessageComplete(msg) =
+            assembler.process_frame(fake_timer_ms, pgn, 42, &frame.data)
+        {
             result = Some(msg);
             break;
         }
@@ -34,9 +38,11 @@ fn test_roundtrip_15_bytes() {
 /// Maximum payload: 223 bytes fragmented and reassembled.
 fn test_roundtrip_max_payload() {
     let original = [0x42; 223];
+    let pgn = 129540;
+    let fake_timer_ms: u32 = 10;
 
     // PGN 129540 is PDU2 (broadcast)
-    let builder = FastPacketBuilder::new(129540, 30, None, &original);
+    let builder = FastPacketBuilder::new(pgn, 30, None, &original);
     let mut iter = builder.build();
 
     let mut assembler = FastPacketAssembler::new();
@@ -44,7 +50,9 @@ fn test_roundtrip_max_payload() {
 
     while let Some(frame_result) = iter.next() {
         let frame = frame_result.unwrap();
-        if let ProcessResult::MessageComplete(msg) = assembler.process_frame(30, &frame.data) {
+        if let ProcessResult::MessageComplete(msg) =
+            assembler.process_frame(fake_timer_ms, pgn, 30, &frame.data)
+        {
             result = Some(msg);
             break;
         }
@@ -58,6 +66,8 @@ fn test_roundtrip_max_payload() {
 #[test]
 /// Interleaved sessions must remain independent.
 fn test_roundtrip_with_interleaved_frames() {
+    let pgn = 129540;
+    let fake_timer_ms: u32 = 10;
     let payload_a = [0xAA; 20];
     let payload_b = [
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
@@ -77,13 +87,14 @@ fn test_roundtrip_with_interleaved_frames() {
         let mut done_b = false;
 
         if let Some(frame_result) = iter_a.next() {
-            assembler.process_frame(10, &frame_result.unwrap().data);
+            assembler.process_frame(fake_timer_ms, pgn, 10, &frame_result.unwrap().data);
         } else {
             done_a = true;
         }
 
         if let Some(frame_result) = iter_b.next() {
-            let result = assembler.process_frame(20, &frame_result.unwrap().data);
+            let result =
+                assembler.process_frame(fake_timer_ms, pgn, 20, &frame_result.unwrap().data);
             if let ProcessResult::MessageComplete(msg) = result {
                 // Stream B completes first (shorter payload)
                 assert_eq!(msg.len, 15);

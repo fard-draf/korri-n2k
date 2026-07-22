@@ -20,22 +20,24 @@ impl Eq for ProcessResult {}
 fn test_full_fast_packet_reassembly() {
     let mut assembler = FastPacketAssembler::new();
     let source_address = 42;
+    let fake_timer_ms: u32 = 40;
+    let pgn = 129540;
     // --- Frame 1 (start) ---
     // Total length = 15 bytes
     // Data: 6 bytes
     let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
-    let result = assembler.process_frame(source_address, &frame0);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source_address, &frame0);
     assert_eq!(result, ProcessResult::FragmentConsumed);
 
     // --- Frame 2 (continuation) ---
     // Data: 7 bytes
     let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 11, 12, 13];
-    let result = assembler.process_frame(source_address, &frame1);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source_address, &frame1);
     assert_eq!(result, ProcessResult::FragmentConsumed);
     // --- Frame 3 (final) ---
     // Data: 2 bytes (remaining bytes are padding)
     let frame2: [u8; 8] = [0b000_00010, 14, 15, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-    let result = assembler.process_frame(source_address, &frame2);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source_address, &frame2);
 
     // --- Verification ---
     let mut expected_payload_array = [0; MAX_FAST_PACKET_PAYLOAD];
@@ -55,11 +57,14 @@ fn test_full_fast_packet_reassembly() {
 fn test_out_of_sequence_packet() {
     let mut assembler = FastPacketAssembler::new();
     let source_address = 10;
+    let fake_timer_ms: u32 = 10;
+    let pgn = 129540;
+
     let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
-    assembler.process_frame(source_address, &frame0);
+    assembler.process_frame(fake_timer_ms, pgn, source_address, &frame0);
     // Send frame index 2 while skipping frame index 1
     let frame2: [u8; 8] = [0b000_00010, 14, 15, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-    let result = assembler.process_frame(source_address, &frame2);
+    let result = assembler.process_frame(fake_timer_ms, pgn, source_address, &frame2);
     // The assembler must drop the frame and abandon the message
     assert_eq!(result, ProcessResult::Ignored);
     // Ensure the session was released
@@ -72,16 +77,18 @@ fn test_multiple_concurrent_sessions() {
     let mut assembler = FastPacketAssembler::new();
     let source_a = 10;
     let source_b = 20;
+    let fake_timer_ms: u32 = 10;
+    let pgn = 129540;
     // Start message A
     let frame_a0: [u8; 8] = [0, 10, 1, 2, 3, 4, 5, 6];
     assert_eq!(
-        assembler.process_frame(source_a, &frame_a0),
+        assembler.process_frame(fake_timer_ms, pgn, source_a, &frame_a0),
         ProcessResult::FragmentConsumed
     );
     // Start message B
     let frame_b0: [u8; 8] = [0, 9, 100, 101, 102, 103, 104, 105];
     assert_eq!(
-        assembler.process_frame(source_b, &frame_b0),
+        assembler.process_frame(fake_timer_ms, pgn, source_b, &frame_b0),
         ProcessResult::FragmentConsumed
     );
     // Finish message A
@@ -93,7 +100,7 @@ fn test_multiple_concurrent_sessions() {
         len: 10,
     };
     assert_eq!(
-        assembler.process_frame(source_a, &frame_a1),
+        assembler.process_frame(fake_timer_ms, pgn, source_a, &frame_a1),
         ProcessResult::MessageComplete(expected_a)
     );
     // Finish message B
@@ -105,7 +112,7 @@ fn test_multiple_concurrent_sessions() {
         len: 9,
     };
     assert_eq!(
-        assembler.process_frame(source_b, &frame_b1),
+        assembler.process_frame(fake_timer_ms, pgn, source_b, &frame_b1),
         ProcessResult::MessageComplete(expected_b)
     );
 }
@@ -115,18 +122,20 @@ fn test_multiple_concurrent_sessions() {
 fn test_interleaved_sequences_same_source() {
     let mut assembler = FastPacketAssembler::new();
     let source = 7;
+    let pgn = 129740;
+    let fake_timer_ms: u32 = 10;
 
     // Message A: sequence 1 (upper bits = 0b001)
     let frame_a0: [u8; 8] = [0b001_00000, 10, 1, 2, 3, 4, 5, 6];
     assert_eq!(
-        assembler.process_frame(source, &frame_a0),
+        assembler.process_frame(fake_timer_ms, pgn, source, &frame_a0),
         ProcessResult::FragmentConsumed
     );
 
     // Message B: sequence 2 (upper bits = 0b010)
     let frame_b0: [u8; 8] = [0b010_00000, 9, 21, 22, 23, 24, 25, 26];
     assert_eq!(
-        assembler.process_frame(source, &frame_b0),
+        assembler.process_frame(fake_timer_ms, pgn, source, &frame_b0),
         ProcessResult::FragmentConsumed
     );
 
@@ -139,7 +148,7 @@ fn test_interleaved_sequences_same_source() {
         len: 9,
     };
     assert_eq!(
-        assembler.process_frame(source, &frame_b1),
+        assembler.process_frame(fake_timer_ms, pgn, source, &frame_b1),
         ProcessResult::MessageComplete(expected_b)
     );
 
@@ -152,7 +161,365 @@ fn test_interleaved_sequences_same_source() {
         len: 10,
     };
     assert_eq!(
-        assembler.process_frame(source, &frame_a1),
+        assembler.process_frame(fake_timer_ms, pgn, source, &frame_a1),
         ProcessResult::MessageComplete(expected_a)
     );
+}
+
+//==================================================================================Session timeout
+
+#[test]
+/// A session must survive a long uptime: the timeout compares elapsed time,
+/// not the absolute clock. Regression test for `last_seen_ms` left at zero,
+/// which made every session look expired past `SESSION_TIMEOUT_MS` of uptime.
+fn test_reassembly_unaffected_by_uptime() {
+    let pgn = 129540;
+    let source = 42;
+
+    for now_ms in [0, 400, SESSION_TIMEOUT_MS + 1, 60_000, 3_600_000] {
+        let mut assembler = FastPacketAssembler::new();
+
+        let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+        assert_eq!(
+            assembler.process_frame(now_ms, pgn, source, &frame0),
+            ProcessResult::FragmentConsumed,
+            "first frame refused at now_ms={now_ms}"
+        );
+
+        let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+        let mut payload = [0; MAX_FAST_PACKET_PAYLOAD];
+        payload[..10].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+        assert_eq!(
+            assembler.process_frame(now_ms, pgn, source, &frame1),
+            ProcessResult::MessageComplete(CompletedMessage { payload, len: 10 }),
+            "message not reassembled at now_ms={now_ms}"
+        );
+    }
+}
+
+#[test]
+/// A fragment arriving past the timeout is dropped: the sender went silent and
+/// the partial message must not be completed with stale data.
+fn test_session_expires_after_timeout() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let source = 42;
+    let start = 1_000;
+
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+    assembler.process_frame(start, pgn, source, &frame0);
+
+    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+    assert_eq!(
+        assembler.process_frame(start + SESSION_TIMEOUT_MS + 1, pgn, source, &frame1),
+        ProcessResult::Ignored
+    );
+}
+
+#[test]
+/// A fragment arriving exactly on the timeout boundary is still accepted.
+fn test_session_survives_up_to_timeout() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let source = 42;
+    let start = 1_000;
+
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+    assembler.process_frame(start, pgn, source, &frame0);
+
+    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+    assert!(matches!(
+        assembler.process_frame(start + SESSION_TIMEOUT_MS, pgn, source, &frame1),
+        ProcessResult::MessageComplete(_)
+    ));
+}
+
+#[test]
+/// Each fragment refreshes the deadline, so a slow message completes even when
+/// its total duration exceeds the timeout. Only silence between two fragments
+/// kills a session.
+fn test_timeout_is_refreshed_by_each_fragment() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let source = 42;
+    let step = SESSION_TIMEOUT_MS - 100;
+
+    let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
+    assembler.process_frame(0, pgn, source, &frame0);
+
+    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 11, 12, 13];
+    assert_eq!(
+        assembler.process_frame(step, pgn, source, &frame1),
+        ProcessResult::FragmentConsumed
+    );
+
+    // Total elapsed time is now above the timeout, but no single gap was.
+    let frame2: [u8; 8] = [0b000_00010, 14, 15, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+    assert!(2 * step > SESSION_TIMEOUT_MS);
+    assert!(matches!(
+        assembler.process_frame(2 * step, pgn, source, &frame2),
+        ProcessResult::MessageComplete(_)
+    ));
+}
+
+#[test]
+/// Elapsed time must be computed with wrapping arithmetic, so a session started
+/// just before the `u32` millisecond counter rolls over still completes.
+fn test_timeout_across_u32_wrap() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let source = 42;
+    let start = u32::MAX - 100;
+
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+    assembler.process_frame(start, pgn, source, &frame0);
+
+    // 151 ms later, on the other side of the wrap.
+    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+    assert!(matches!(
+        assembler.process_frame(50, pgn, source, &frame1),
+        ProcessResult::MessageComplete(_)
+    ));
+}
+
+//==================================================================================Session pool
+
+#[test]
+/// An expired session releases its slot to a new sender, and the loss is counted.
+fn test_expired_session_slot_is_reused_and_counted() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
+
+    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+        assembler.process_frame(0, pgn, source, &frame0);
+    }
+    assert_eq!(assembler.expired_sessions(), 0);
+
+    // Every session is now stale; a new sender must still be served.
+    let latecomer = MAX_CONCURRENT_SESSIONS as u8 + 10;
+    assert_eq!(
+        assembler.process_frame(SESSION_TIMEOUT_MS + 1, pgn, latecomer, &frame0),
+        ProcessResult::FragmentConsumed
+    );
+    assert_eq!(
+        assembler.expired_sessions(),
+        1,
+        "reclaiming a live session must be counted as a lost message"
+    );
+}
+
+#[test]
+/// A full pool of fresh sessions refuses a new sender rather than destroying
+/// a message in flight.
+fn test_pool_exhaustion_preserves_active_sessions() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let now = 100;
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+
+    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+        assembler.process_frame(now, pgn, source, &frame0);
+    }
+
+    let latecomer = MAX_CONCURRENT_SESSIONS as u8 + 10;
+    assert_eq!(
+        assembler.process_frame(now, pgn, latecomer, &frame0),
+        ProcessResult::Ignored
+    );
+    assert_eq!(
+        assembler.expired_sessions(),
+        0,
+        "no live session was reclaimed, so nothing was stolen"
+    );
+    assert_eq!(
+        assembler.pool_exhausted(),
+        1,
+        "a message refused for lack of a slot must be counted, never silent"
+    );
+
+    // The sessions already in flight must be intact.
+    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+        assert!(
+            matches!(
+                assembler.process_frame(now, pgn, source, &frame1),
+                ProcessResult::MessageComplete(_)
+            ),
+            "session of source {source} was disturbed by the refused sender"
+        );
+    }
+}
+
+//==================================================================================PGN keying
+
+#[test]
+/// Two Fast Packet streams from the same source sharing a sequence ID but
+/// carrying different PGNs must not be merged.
+fn test_same_source_same_sequence_different_pgn() {
+    let mut assembler = FastPacketAssembler::new();
+    let source = 7;
+    let now = 10;
+    let (pgn_a, pgn_b) = (129540, 129029);
+
+    let a0: [u8; 8] = [0b001_00000, 10, 1, 2, 3, 4, 5, 6];
+    let b0: [u8; 8] = [0b001_00000, 9, 21, 22, 23, 24, 25, 26];
+    assert_eq!(
+        assembler.process_frame(now, pgn_a, source, &a0),
+        ProcessResult::FragmentConsumed
+    );
+    assert_eq!(
+        assembler.process_frame(now, pgn_b, source, &b0),
+        ProcessResult::FragmentConsumed
+    );
+
+    let a1: [u8; 8] = [0b001_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+    let mut payload_a = [0; MAX_FAST_PACKET_PAYLOAD];
+    payload_a[..10].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert_eq!(
+        assembler.process_frame(now, pgn_a, source, &a1),
+        ProcessResult::MessageComplete(CompletedMessage {
+            payload: payload_a,
+            len: 10
+        })
+    );
+
+    let b1: [u8; 8] = [0b001_00001, 27, 28, 29, 0xFF, 0xFF, 0xFF, 0xFF];
+    let mut payload_b = [0; MAX_FAST_PACKET_PAYLOAD];
+    payload_b[..9].copy_from_slice(&[21, 22, 23, 24, 25, 26, 27, 28, 29]);
+    assert_eq!(
+        assembler.process_frame(now, pgn_b, source, &b1),
+        ProcessResult::MessageComplete(CompletedMessage {
+            payload: payload_b,
+            len: 9
+        })
+    );
+}
+
+#[test]
+/// Refusals pile up in the counter, and a message accepted on a free slot must
+/// not be counted as a refusal.
+fn test_pool_exhaustion_counter_tracks_every_refusal() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let now = 100;
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+
+    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+        assembler.process_frame(now, pgn, source, &frame0);
+    }
+    assert_eq!(
+        assembler.pool_exhausted(),
+        0,
+        "a fitting message is not a refusal"
+    );
+
+    for extra in 0..3u8 {
+        assembler.process_frame(now, pgn, 100 + extra, &frame0);
+    }
+    assert_eq!(assembler.pool_exhausted(), 3);
+}
+
+//==================================================================================Diagnostic counters
+
+#[test]
+/// A first frame announcing a size outside the Fast Packet range is not a loss:
+/// it is traffic the assembler does not handle. It must never be mixed with the
+/// counters that report dropped data.
+fn test_rejected_frames_is_not_a_loss() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 130824;
+    let source = 12;
+
+    // Announced size below the Fast Packet minimum, as seen on a real bus.
+    let too_short: [u8; 8] = [0b000_00000, 2, 1, 2, 3, 4, 5, 6];
+    // Announced size above the payload buffer.
+    let too_long: [u8; 8] = [0b000_00000, 255, 1, 2, 3, 4, 5, 6];
+
+    for frame in [&too_short, &too_long] {
+        assert_eq!(
+            assembler.process_frame(100, pgn, source, frame),
+            ProcessResult::Ignored
+        );
+    }
+
+    assert_eq!(assembler.rejected_frames(), 2);
+    assert_eq!(
+        assembler.lost_fragments(),
+        0,
+        "an unhandled frame must not be reported as lost data"
+    );
+    assert_eq!(assembler.expired_sessions(), 0);
+    assert_eq!(assembler.pool_exhausted(), 0);
+}
+
+#[test]
+/// An out-of-sequence continuation loses the message being assembled.
+fn test_lost_fragments_counts_out_of_sequence() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let source = 42;
+
+    let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
+    assembler.process_frame(100, pgn, source, &frame0);
+
+    // Frame index 2 while index 1 was never seen.
+    let frame2: [u8; 8] = [0b000_00010, 14, 15, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+    assert_eq!(
+        assembler.process_frame(100, pgn, source, &frame2),
+        ProcessResult::Ignored
+    );
+
+    assert_eq!(assembler.lost_fragments(), 1);
+    assert_eq!(assembler.rejected_frames(), 0);
+}
+
+#[test]
+/// A continuation frame with no live session behind it is a lost fragment,
+/// whether the session expired or never existed.
+fn test_lost_fragments_counts_orphan_continuation() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+    let source = 42;
+    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+
+    // No session was ever opened for this source.
+    assert_eq!(
+        assembler.process_frame(100, pgn, source, &frame1),
+        ProcessResult::Ignored
+    );
+    assert_eq!(assembler.lost_fragments(), 1);
+
+    // A session that timed out no longer accepts its own fragments.
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+    assembler.process_frame(200, pgn, source, &frame0);
+    assert_eq!(
+        assembler.process_frame(200 + SESSION_TIMEOUT_MS + 1, pgn, source, &frame1),
+        ProcessResult::Ignored
+    );
+    assert_eq!(assembler.lost_fragments(), 2);
+}
+
+#[test]
+/// A clean exchange must leave every counter at zero.
+fn test_counters_stay_zero_on_healthy_traffic() {
+    let mut assembler = FastPacketAssembler::new();
+    let pgn = 129540;
+
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+
+    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+        assembler.process_frame(100, pgn, source, &frame0);
+        assert!(matches!(
+            assembler.process_frame(150, pgn, source, &frame1),
+            ProcessResult::MessageComplete(_)
+        ));
+    }
+
+    assert_eq!(assembler.expired_sessions(), 0);
+    assert_eq!(assembler.pool_exhausted(), 0);
+    assert_eq!(assembler.rejected_frames(), 0);
+    assert_eq!(assembler.lost_fragments(), 0);
 }

@@ -13,6 +13,8 @@ use korri_n2k::protocol::{
 #[test]
 fn test_pgn_129040_fast_packet_roundtrip() {
     // Serialize → segment → reassemble → deserialize and compare to original values.
+    let pgn = 129040;
+    let fake_timer_ms: u32 = 10;
     let mut ais = Pgn129040::new();
     ais.user_id = 123_456_789;
     ais.latitude = 48.8566;
@@ -25,7 +27,7 @@ fn test_pgn_129040_fast_packet_roundtrip() {
         "PGN 129040 should generate a Fast Packet; current length: {len}"
     );
 
-    let builder = FastPacketBuilder::new(129040, 42, None, &buffer[..len]);
+    let builder = FastPacketBuilder::new(pgn, 42, None, &buffer[..len]);
     let mut frames = builder.build();
 
     let mut assembler = FastPacketAssembler::new();
@@ -36,7 +38,9 @@ fn test_pgn_129040_fast_packet_roundtrip() {
         let frame = frame_result.expect("frame build");
         frame_count += 1;
 
-        if let ProcessResult::MessageComplete(msg) = assembler.process_frame(42, &frame.data) {
+        if let ProcessResult::MessageComplete(msg) =
+            assembler.process_frame(fake_timer_ms, pgn, 42, &frame.data)
+        {
             complete = Some(msg);
             break;
         }
@@ -62,6 +66,8 @@ fn test_pgn_129040_fast_packet_roundtrip() {
 fn test_pgn_126996_fast_packet_roundtrip() {
     // PGN 126996 carries several fixed ASCII strings (32 bytes each).
     // Verify serialization preserves size, padding, and metadata ordering.
+    let pgn = 126996;
+    let fake_timer_ms: u32 = 10;
     let mut product = Pgn126996::new();
     product.nmea2000_version = 2.005; // version 02.005
     product.product_code = 0x42AF;
@@ -89,7 +95,7 @@ fn test_pgn_126996_fast_packet_roundtrip() {
         "PGN 126996 should produce a Fast Packet; current length: {len}"
     );
 
-    let builder = FastPacketBuilder::new(126996, 35, None, &buffer[..len]);
+    let builder = FastPacketBuilder::new(pgn, 35, None, &buffer[..len]);
     let mut frames = builder.build();
     let mut assembler = FastPacketAssembler::new();
     let mut complete = None;
@@ -99,7 +105,9 @@ fn test_pgn_126996_fast_packet_roundtrip() {
         let frame = frame_result.expect("frame build");
         frame_count += 1;
 
-        if let ProcessResult::MessageComplete(msg) = assembler.process_frame(35, &frame.data) {
+        if let ProcessResult::MessageComplete(msg) =
+            assembler.process_frame(fake_timer_ms, pgn, 35, &frame.data)
+        {
             complete = Some(msg);
             break;
         }
@@ -143,6 +151,8 @@ fn test_pgn_126998_fast_packet_roundtrip() {
         }
     }
 
+    let pgn = 126998;
+    let fake_timer_ms: u32 = 10;
     let mut config = Pgn126998::new();
     let mut desc1 = PgnBytes::new();
     let mut desc2 = PgnBytes::new();
@@ -165,14 +175,16 @@ fn test_pgn_126998_fast_packet_roundtrip() {
         .expect("serialize PGN 126998");
     assert!(len > 8, "PGN 126998 must be encoded as a Fast Packet");
 
-    let builder = FastPacketBuilder::new(126998, 77, None, &buffer[..len]);
+    let builder = FastPacketBuilder::new(pgn, 77, None, &buffer[..len]);
     let mut frames = builder.build();
     let mut assembler = FastPacketAssembler::new();
     let mut complete = None;
 
     while let Some(frame_result) = frames.next() {
         let frame = frame_result.expect("frame build");
-        if let ProcessResult::MessageComplete(msg) = assembler.process_frame(77, &frame.data) {
+        if let ProcessResult::MessageComplete(msg) =
+            assembler.process_frame(fake_timer_ms, pgn, 77, &frame.data)
+        {
             complete = Some(msg);
             break;
         }
