@@ -5,6 +5,7 @@ mod helpers {
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use helpers::{MockCanBus, MockTimer};
+use korri_n2k::protocol::managment::address_claiming::AddressClaimStrategy;
 use korri_n2k::protocol::managment::address_manager::AddressManager;
 use korri_n2k::protocol::managment::address_supervisor::{AddressService, SupervisorCommand};
 use korri_n2k::protocol::messages::Pgn129025;
@@ -21,10 +22,11 @@ async fn supervisor_queues_and_sends_pgn() {
 
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
-    let my_name = 0x1234_5678_90AB_CDEF;
+    let my_name = 0xF234_5678_90AB_CDEF; // AAC enabled
     let preferred = 142u8;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
-    let manager = AddressManager::new(dut_bus, timer, my_name, preferred)
+    let manager = AddressManager::new(dut_bus, timer, my_name, strategy)
         .await
         .expect("claim must succeed");
 

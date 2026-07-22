@@ -50,6 +50,10 @@ pub enum ClaimError<E: core::fmt::Debug> {
     #[error("Invalid incoming frame")]
     InvalidIncomingFrame,
 
+    /// IsoName and Address Claim Strategy are inconsistents.
+    #[error("Inconsistent match between IsoName and Address Claim Strategy")]
+    InconsistentStrategy,
+
     /// Payload length is incompatible with the PGN definition.
     #[error("Invalid data length")]
     InvalidDataLen,

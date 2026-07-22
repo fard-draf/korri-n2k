@@ -1,5 +1,4 @@
-//! ISO 11783 NAME field implementation (64 bits). This field uniquely
-//! identifies equipment on the NMEA 2000 network and is used throughout
+//! ISO 11783 NAME field implementation (64 bits). This field uniquely//! identifies equipment on the NMEA 2000 network and is used throughout
 //! the address-claim procedure. The module provides a typed wrapper around
 //! the raw `u64` plus safe accessors/builders.
 //!
@@ -173,7 +172,7 @@ impl From<Pgn60928> for IsoName {
             .manufacturer_code(u16::from(pgn.manufacturer_code))
             .device_instance_lower(pgn.device_instance_lower)
             .device_instance_upper(pgn.device_instance_upper)
-            .device_function(pgn.device_function) // device_function est u8 (INDIRECT_LOOKUP)
+            .device_function(pgn.device_function) // device_function is u8 (INDIRECT_LOOKUP)
             .spare(false) // Reserved field, always false
             .device_class(u8::from(pgn.device_class))
             .system_instance(pgn.system_instance)
@@ -558,15 +557,14 @@ mod tests {
     #[test]
     fn test_pgn60928_isoname_round_trip() {
         // Create a Pgn60928 (using valid enum values)
-        // Note: device_function is an INDIRECT_LOOKUP
         let mut original_pgn = Pgn60928::new();
         original_pgn.unique_number = 999888;
-        original_pgn.manufacturer_code = ManufacturerCode::try_from(88).unwrap(); // HemisphereGpsInc
+        original_pgn.manufacturer_code = ManufacturerCode::try_from(88).unwrap(); // SAE // HemisphereGpsInc
         original_pgn.device_instance_lower = 1;
         original_pgn.device_instance_upper = 31;
         // Use helper to assign DeviceFunction
-        original_pgn.set_device_function(DeviceFunction::AlarmEnunciator5230); // 5230 = 0x146E
-        original_pgn.device_class = DeviceClass::try_from(30).unwrap(); // ElectricalDistribution
+        original_pgn.set_device_function(DeviceFunction::AlarmEnunciator5230); // SAE // 5230 = 0x146E
+        original_pgn.device_class = DeviceClass::try_from(30).unwrap(); // SAE //  ElectricalDistribution
         original_pgn.system_instance = 15;
         original_pgn.arbitrary_address_capable = YesNo::Yes;
 
@@ -589,9 +587,7 @@ mod tests {
             restored_pgn.device_instance_upper
         );
         // device_function is an INDIRECT_LOOKUP stored as two u8 values.
-        // The low byte must match.
         assert_eq!(original_pgn.device_function, restored_pgn.device_function);
-        // spare field is private, cannot be tested
         assert_eq!(original_pgn.device_class, restored_pgn.device_class);
         assert_eq!(original_pgn.system_instance, restored_pgn.system_instance);
         assert_eq!(original_pgn.industry_group, restored_pgn.industry_group);

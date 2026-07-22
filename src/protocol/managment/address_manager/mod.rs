@@ -4,7 +4,10 @@ use crate::{
     error::{ClaimError, SendPgnError},
     infra::codec::traits::PgnData,
     protocol::{
-        managment::address_claiming::claim_address,
+        constants::address,
+        managment::address_claiming::{
+            claim_address, is_addr_capable_and_isoname_match, AddressClaimStrategy,
+        },
         transport::{
             can_frame::CanFrame,
             can_id::CanId,
@@ -17,20 +20,20 @@ use crate::{
 
 /// NMEA2000/J1939-compliant address manager.
 /// Handles address defense and automatic reclaim.
-pub struct AddressManager<C: CanBus, T: KorriTimer> {
+pub struct AddressManager<'a, C: CanBus, T: KorriTimer> {
     /// CAN bus implementation used to send/receive frames.
     can_bus: C,
     /// Asynchronous timer enforcing delays between claim attempts.
     timer: T,
     /// Node NAME identifier (64 bits).
     my_name: u64,
-    /// Preferred address used during the initial claim and subsequent reclaims.
-    preferred_address: u8,
+    /// Address Claim strategy used.
+    strategy: AddressClaimStrategy<'a>,
     /// Active address currently owned by the node.
     current_address: u8,
 }
 
-impl<C: CanBus, T: KorriTimer> AddressManager<C, T>
+impl<'a, C: CanBus, T: KorriTimer> AddressManager<'a, C, T>
 where
     C::Error: core::fmt::Debug,
 {
@@ -42,17 +45,21 @@ where
         mut can_bus: C,
         mut timer: T,
         my_name: u64,
-        preferred_address: u8,
+        strategy: AddressClaimStrategy<'a>,
     ) -> Result<Self, ClaimError<C::Error>> {
         // Perform the initial claim
-        let current_address =
-            claim_address(&mut can_bus, &mut timer, my_name, preferred_address).await?;
+
+        if !is_addr_capable_and_isoname_match(my_name, strategy) {
+            return Err(ClaimError::InconsistentStrategy);
+        };
+
+        let current_address = claim_address(&mut can_bus, &mut timer, my_name, strategy).await?;
 
         Ok(Self {
             can_bus,
             timer,
             my_name,
-            preferred_address,
+            strategy,
             current_address,
         })
     }
@@ -107,8 +114,8 @@ where
                 if let Err(e) = self.reclaim().await {
                     match e {
                         ClaimError::SendError(e) | ClaimError::ReceiveError(e) => return Err(e),
-                        // No address available: mark as null address (0xFE = "Cannot Claim")
-                        _ => self.current_address = 254,
+                        // No address available: fall back to the null address
+                        _ => self.current_address = address::NULL,
                     }
                 }
                 Ok(None)
@@ -141,10 +148,10 @@ where
     async fn defend(&mut self) -> Result<(), C::Error> {
         let claim_frame = CanFrame {
             id: CanId::builder(60928, self.current_address)
-                .to_destination(255)
+                .to_destination(address::GLOBAL)
                 .with_priority(6)
                 .build()
-                .expect("PGN 60928 with destination 255 must always produce a valid CanId"),
+                .expect("PGN 60928 with a global destination must always produce a valid CanId"),
             data: self.my_name.to_le_bytes(),
             len: 8,
         };
@@ -189,7 +196,7 @@ where
             &mut self.can_bus,
             &mut self.timer,
             self.my_name,
-            self.preferred_address,
+            self.strategy,
         )
         .await?;
 

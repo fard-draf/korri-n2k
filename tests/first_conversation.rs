@@ -4,7 +4,7 @@
 use korri_n2k::{
     infra::codec::traits::PgnData,
     protocol::{
-        managment::address_claiming::claim_address,
+        managment::address_claiming::{claim_address, AddressClaimStrategy},
         messages::{Pgn129025, Pgn59904},
         transport::{
             can_frame::CanFrame,
@@ -68,7 +68,7 @@ impl KorriTimer for MockTimer {
 }
 
 #[tokio::test]
-async fn test_premiere_conversation() {
+async fn test_first_conversation() {
     // Steps: emitter claim → reader claim → request → response → assertions.
     // Create simulated buses for emitter and reader
     let (mut emitter_bus, mut reader_bus) = MockCanBus::create_pair();
@@ -83,14 +83,21 @@ async fn test_premiere_conversation() {
 
     // Preferred addresses
     let emitter_preferred_address = 42;
+    let emitter_strategy = AddressClaimStrategy::Arbitrary {
+        preferred: emitter_preferred_address,
+    };
+
     let reader_preferred_address = 43;
+    let reader_strategy = AddressClaimStrategy::Arbitrary {
+        preferred: reader_preferred_address,
+    };
 
     // 1. CLAIM ADDRESS – Emitter
     let emitter_claimed_address = claim_address(
         &mut emitter_bus.clone(),
         &mut emitter_timer,
         emitter_name,
-        emitter_preferred_address,
+        emitter_strategy,
     )
     .await
     .expect("Emitter must successfully claim its address");
@@ -102,7 +109,7 @@ async fn test_premiere_conversation() {
         &mut reader_bus.clone(),
         &mut reader_timer,
         reader_name,
-        reader_preferred_address,
+        reader_strategy,
     )
     .await
     .expect("Reader must successfully claim its address");

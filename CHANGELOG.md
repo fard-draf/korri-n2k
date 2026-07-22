@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `AddressClaimStrategy` enum with `Fixed`, `SelfConfigurable` and
+  `Arbitrary` variants, letting a device declare how it may claim addresses.
+- `ClaimError::InconsistentStrategy`, returned when the NAME's AAC bit
+  contradicts the chosen strategy.
+
+### Changed
+- **BREAKING**: `claim_address` now takes an `AddressClaimStrategy` instead
+  of a raw `preferred_address: u8`.
+- AAC capability is no longer inferred from NAME bit 63 alone.
+- The arbitrary range is narrowed from `128..=247` to the marine dynamic
+  range `128..=207`.
+
 
 ## [0.3.2] - 2026-07-11
 ### Added

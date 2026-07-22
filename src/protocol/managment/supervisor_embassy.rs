@@ -35,7 +35,7 @@ pub struct AddressService<
 > where
     C::Error: Debug,
 {
-    manager: AddressManager<C, T>,
+    manager: AddressManager<'a, C, T>,
     command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
     frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
 }
@@ -49,7 +49,7 @@ where
 {
     /// Wrap an already-initialised [`AddressManager`].
     pub fn new(
-        manager: AddressManager<C, T>,
+        manager: AddressManager<'a, C, T>,
         command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
         frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
     ) -> Self {
@@ -65,11 +65,11 @@ where
         can_bus: C,
         timer: T,
         my_name: u64,
-        preferred_address: u8,
+        strategy: super::address_claiming::AddressClaimStrategy<'a>,
         command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
         frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
     ) -> Result<Self, ClaimError<C::Error>> {
-        let manager = AddressManager::new(can_bus, timer, my_name, preferred_address).await?;
+        let manager = AddressManager::new(can_bus, timer, my_name, strategy).await?;
         Ok(Self::new(manager, command_channel, frame_channel))
     }
 
@@ -112,7 +112,7 @@ where
     C::Error: Debug,
     T: KorriTimer,
 {
-    manager: AddressManager<C, T>,
+    manager: AddressManager<'a, C, T>,
     command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
     frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
 }
@@ -263,8 +263,8 @@ pub enum AddressSupervisorRunError<E: Debug> {
     SendPgn(SendPgnError<E>),
 }
 
-async fn handle_command<C: CanBus, T: KorriTimer>(
-    manager: &mut AddressManager<C, T>,
+async fn handle_command<'a, C: CanBus, T: KorriTimer>(
+    manager: &mut AddressManager<'a, C, T>,
     command: SupervisorCommand,
 ) -> Result<(), AddressSupervisorRunError<C::Error>>
 where

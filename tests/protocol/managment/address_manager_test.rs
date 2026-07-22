@@ -4,9 +4,12 @@ mod helpers {
 }
 
 use helpers::{MockCanBus, MockTimer};
-use korri_n2k::protocol::{
-    managment::address_manager::AddressManager,
-    transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus},
+use korri_n2k::{
+    error::ClaimError,
+    protocol::{
+        managment::{address_claiming::AddressClaimStrategy, address_manager::AddressManager},
+        transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus},
+    },
 };
 use tokio::time::Duration;
 
@@ -43,14 +46,15 @@ async fn test_address_manager_initial_claim() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
 
-    let my_name = 0x1234567890ABCDEF;
-    let preferred_address = 42;
+    let my_name = 0xF234567890ABCDEF; // AAC enabled
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
     tokio::select! {
-        result = AddressManager::new(dut_bus, timer, my_name, preferred_address) => {
+        result = AddressManager::new(dut_bus, timer, my_name, strategy) => {
             assert!(result.is_ok());
             let manager = result.unwrap();
-            assert_eq!(manager.current_address(), preferred_address);
+            assert_eq!(manager.current_address(), preferred);
         }
 
         _ = async {
@@ -64,20 +68,64 @@ async fn test_address_manager_initial_claim() {
 }
 
 #[tokio::test]
-async fn test_address_manager_defend_on_conflict_win() {
+async fn test_address_manager_defend_on_conflict_loose_fixed() {
     // The manager must defend its address when it wins the conflict.
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
 
-    let my_name = 0x1234567890ABCDEE;
-    let their_name = 0x1234567890ABCDEF; // Higher NAME → we win
-    assert!(my_name < their_name);
-    let preferred_address = 42;
+    let my_name = 0x0234567890ABCDEF; // AAC disabled
+    let their_name = 0x0234567890ABCDEE; // Lower NAME → we loose
+    assert!(my_name > their_name);
+    let preferred = 142;
+    let strategy = AddressClaimStrategy::Fixed { preferred };
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, preferred_address).await.unwrap();
-            assert_eq!(manager.current_address(), preferred_address);
+            let manager = AddressManager::new(dut_bus, timer, my_name, strategy).await;
+            assert!(matches!(manager, Err(ClaimError::NoAddressAvailable)));
+        } => {
+            // panic!("Manager task should not complete");
+        }
+
+        _ = async {
+            // Wait for the initial claim
+            let _initial_claim = host_bus.recv().await.expect("Should receive initial claim");
+
+            // Inject a conflicting claim
+            let conflict_frame = build_conflict_frame(their_name, preferred);
+            host_bus.send(&conflict_frame).await.expect("Send conflict");
+
+            // The manager should defend the address by issuing its own claim
+            let defense_claim = tokio::time::timeout(
+                Duration::from_millis(500),
+                host_bus.recv()
+            ).await.unwrap_err();
+
+            // assert_eq!(defense_claim.id.pgn(), 60928);
+            // assert_eq!(defense_claim.id.source_address(), 254);
+            // assert_eq!(u64::from_le_bytes(defense_claim.data), my_name);
+        } => {
+            // Test complete
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_address_manager_defend_on_conflict_win_fixed() {
+    // The manager must defend its address when it wins the conflict.
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let timer = MockTimer;
+
+    let my_name = 0x0234567890ABCDEE; // AAC enabled
+    let their_name = 0x0234567890ABCDEF; // Higher NAME → we win
+    assert!(my_name < their_name);
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Fixed { preferred };
+
+    tokio::select! {
+        _ = async {
+            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
+            assert_eq!(manager.current_address(), preferred);
 
             // Receive in a loop so the manager processes claim frames
             loop {
@@ -92,7 +140,7 @@ async fn test_address_manager_defend_on_conflict_win() {
             let _initial_claim = host_bus.recv().await.expect("Should receive initial claim");
 
             // Inject a conflicting claim
-            let conflict_frame = build_conflict_frame(their_name, preferred_address);
+            let conflict_frame = build_conflict_frame(their_name, preferred);
             host_bus.send(&conflict_frame).await.expect("Send conflict");
 
             // The manager should defend the address by issuing its own claim
@@ -102,7 +150,55 @@ async fn test_address_manager_defend_on_conflict_win() {
             ).await.expect("Should receive defense claim within timeout").expect("Defense claim");
 
             assert_eq!(defense_claim.id.pgn(), 60928);
-            assert_eq!(defense_claim.id.source_address(), preferred_address);
+            assert_eq!(defense_claim.id.source_address(), preferred);
+            assert_eq!(u64::from_le_bytes(defense_claim.data), my_name);
+        } => {
+            // Test complete
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_address_manager_defend_on_conflict_win() {
+    // The manager must defend its address when it wins the conflict.
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let timer = MockTimer;
+
+    let my_name = 0xF234567890ABCDEE; // AAC enabled
+    let their_name = 0xF234567890ABCDEF; // Higher NAME → we win
+    assert!(my_name < their_name);
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
+
+    tokio::select! {
+        _ = async {
+            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
+            assert_eq!(manager.current_address(), preferred);
+
+            // Receive in a loop so the manager processes claim frames
+            loop {
+                let _ = manager.recv().await;
+            }
+        } => {
+            panic!("Manager task should not complete");
+        }
+
+        _ = async {
+            // Wait for the initial claim
+            let _initial_claim = host_bus.recv().await.expect("Should receive initial claim");
+
+            // Inject a conflicting claim
+            let conflict_frame = build_conflict_frame(their_name, preferred);
+            host_bus.send(&conflict_frame).await.expect("Send conflict");
+
+            // The manager should defend the address by issuing its own claim
+            let defense_claim = tokio::time::timeout(
+                Duration::from_millis(500),
+                host_bus.recv()
+            ).await.expect("Should receive defense claim within timeout").expect("Defense claim");
+
+            assert_eq!(defense_claim.id.pgn(), 60928);
+            assert_eq!(defense_claim.id.source_address(), preferred);
             assert_eq!(u64::from_le_bytes(defense_claim.data), my_name);
         } => {
             // Test complete
@@ -119,12 +215,14 @@ async fn test_address_manager_reclaim_on_conflict_lose() {
     let my_name = 0x9234567890ABCDEF; // AAC enabled
     let their_name = 0x1234567890ABCDEE; // Lower NAME → we lose
     assert!(my_name > their_name);
-    let preferred_address = 247;
+    // High address, but inside the marine dynamic range so it stays claimable.
+    let preferred = 200;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, preferred_address).await.unwrap();
-            assert_eq!(manager.current_address(), preferred_address);
+            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
+            assert_eq!(manager.current_address(), preferred);
 
             // Receive continuously; the manager handles conflicts automatically
             loop {
@@ -135,12 +233,12 @@ async fn test_address_manager_reclaim_on_conflict_lose() {
         }
 
         _ = async {
-            // Wait for the initial claim (address 247)
+            // Wait for the initial claim on the preferred address
             let initial_claim = host_bus.recv().await.expect("Should receive initial claim");
-            assert_eq!(initial_claim.id.source_address(), 247);
+            assert_eq!(initial_claim.id.source_address(), preferred);
 
             // Send a conflicting claim that forces the manager to yield
-            let conflict_frame = build_conflict_frame(their_name, preferred_address);
+            let conflict_frame = build_conflict_frame(their_name, preferred);
             host_bus.send(&conflict_frame).await.expect("Send conflict");
 
             // The manager should reclaim another address (128)
@@ -163,12 +261,13 @@ async fn test_address_manager_filters_claim_frames() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
 
-    let my_name = 0x1234567890ABCDEF;
-    let preferred_address = 42;
+    let my_name = 0xF234567890ABCDEF; // ACC enabled
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, preferred_address).await.unwrap();
+            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
 
             // Send non-claim data frames to the manager
             let data_frame = build_data_frame(129025, 50);
@@ -197,20 +296,21 @@ async fn test_address_manager_ignores_own_claims() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer;
 
-    let my_name = 0x1234567890ABCDEF;
-    let preferred_address = 42;
+    let my_name = 0xF234567890ABCDEF;
+    let preferred = 42;
+    let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, preferred_address).await.unwrap();
+            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
 
             // Send our own claim (same NAME)
-            let own_claim = build_conflict_frame(my_name, preferred_address);
+            let own_claim = build_conflict_frame(my_name, preferred);
             let handled = manager.handle_frame(&own_claim).await.unwrap();
 
             // Our own claim must be ignored (no defense, no reclaim)
             assert!(handled.is_none());
-            assert_eq!(manager.current_address(), preferred_address);
+            assert_eq!(manager.current_address(), preferred);
         } => {
             // Test complete
         }
