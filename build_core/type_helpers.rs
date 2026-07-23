@@ -121,8 +121,12 @@ pub(crate) fn map_type(
                 path: field.id.clone(),
                 comment: "Duration without BitLength",
             })?;
+            let scaled = field.resolution.is_some_and(|res| res as u8 != 1);
             Ok(match bits {
-                1..=32 if field.resolution.is_some_and(|res| res as u8 != 1) => "f32".to_string(),
+                // Same mantissa limit as the generic path above: past 24 bits a
+                // scaled value no longer fits an f32 without losing its low bits.
+                1..=24 if scaled => "f32".to_string(),
+                25..=32 if scaled => "f64".to_string(),
                 1..=16 => "u16".to_string(),
                 17..=32 => "u32".to_string(),
                 _ => {
