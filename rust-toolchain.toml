@@ -1,2 +1,12 @@
+# This file is a rustup directory override: it wins over `rustup default`, so it
+# is the single source of truth for the toolchain, here and in CI. The targets
+# and components belong here too — pinning them in the workflow installed them
+# for a toolchain this file then overrode, and the cross-compilation jobs failed
+# on a missing `core`.
+#
+# Keep `channel` in step with `rust-version` in Cargo.toml and with the
+# dtolnay/rust-toolchain ref in .github/workflows/ci.yml.
 [toolchain]
-channel = "stable"
+channel = "1.96.0"
+targets = ["thumbv7em-none-eabihf", "riscv32imc-unknown-none-elf"]
+components = ["clippy", "rustfmt"]
