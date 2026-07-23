@@ -62,11 +62,22 @@ pub fn deserialize_into<T: FieldAccess>(
                 .ok_or(DeserializationError::InvalidDataLength)?;
 
             // Fetch the counter value from the instance
-            match instance.field(counter_field.id) {
+            let raw = match instance.field(counter_field.id) {
                 Some(PgnValue::U8(v)) => v as usize,
                 Some(PgnValue::U16(v)) => v as usize,
                 Some(PgnValue::U32(v)) => v as usize,
                 _ => return Err(DeserializationError::InvalidDataLength),
+            };
+
+            // An all-ones counter is the N2K "not available" sentinel, not a
+            // count. A GNSS receiver with no DGNSS station sends 0xFF here, and
+            // reading it literally rejected every real 129029 on the bus.
+            let counter_bits = counter_field.bits_length.unwrap_or(8).min(64);
+            let unavailable = (u64::MAX >> (64 - counter_bits)) as usize;
+            if raw == unavailable {
+                0
+            } else {
+                raw
             }
         } else {
             // No explicit counter: would require computing the length on the fly.
@@ -76,8 +87,18 @@ pub fn deserialize_into<T: FieldAccess>(
             });
         };
 
-        // Clamp the counter against the maximum allowed repetitions
-        let count = count.min(rfs.max_repetitions);
+        // Clamp against the storage available, then against the payload itself:
+        // a group announcing more repetitions than the frame carries should yield
+        // the ones that are there, not discard the scalar fields already parsed.
+        let group_bits: usize = descriptor
+            .fields
+            .iter()
+            .skip(rfs.start_field_index)
+            .take(rfs.size)
+            .map(|f| f.bits_length.unwrap_or(0) as usize)
+            .sum();
+        let fits = reader.bits_remaining().checked_div(group_bits).unwrap_or(0);
+        let count = count.min(rfs.max_repetitions).min(fits);
 
         // 2. Set the number of valid elements through the FieldAccess trait
         instance
@@ -299,7 +320,10 @@ fn read_field_value(
             let num_bits = field_desc
                 .bits_length
                 .ok_or(DeserializationError::InvalidDataLength)?;
-            let num_bytes = (num_bits / 8) as usize;
+            // The declared size is the field's capacity, not the bytes on the wire:
+            // Navico 130821 reserves 230 for its text and sends about 155, the real
+            // length being carried by the Fast Packet header. Read what is there.
+            let num_bytes = ((num_bits / 8) as usize).min(reader.bits_remaining() / 8);
             let slice = reader
                 .read_slice(num_bytes)
                 .map_err(|e| DeserializationError::BitReaderError { err: e })?;
@@ -339,20 +363,25 @@ fn read_field_value(
                 return Err(DeserializationError::InvalidDataLength);
             }
             let mut pgn_bytes = PgnBytes::default();
-            if total_len > 0 {
+            // Below two bytes there is no room for the encoding byte: the field is
+            // empty and nothing follows the length itself.
+            if total_len >= 2 {
                 let encoding = reader
                     .read_u8(8)
                     .map_err(|e| DeserializationError::BitReaderError { err: e })?;
                 pgn_bytes.data[0] = encoding;
-                let payload_len = total_len.saturating_sub(1);
+                // The declared length counts itself and the encoding byte, so the
+                // text is two bytes shorter. Reading one byte too many swallowed
+                // the following field and derailed the rest of the message.
+                let payload_len = total_len.saturating_sub(2);
                 if payload_len > 0 {
                     let slice = reader
                         .read_slice(payload_len)
                         .map_err(|e| DeserializationError::BitReaderError { err: e })?;
                     pgn_bytes.data[1..1 + payload_len].copy_from_slice(slice);
                 }
+                pgn_bytes.len = 1 + payload_len;
             }
-            pgn_bytes.len = total_len;
             Ok(Some(PgnValue::Bytes(pgn_bytes)))
         }
 
@@ -662,11 +691,15 @@ fn write_field(
         }
         FieldKind::StringLau => {
             if let PgnValue::Bytes(val) = value {
-                if val.len > u8::MAX as usize {
+                // `val` holds the encoding byte followed by the text; the declared
+                // length also counts the length byte itself. An empty field
+                // declares zero, so that reading it back consumes one byte too.
+                let declared = if val.len == 0 { 0 } else { val.len + 1 };
+                if declared > u8::MAX as usize {
                     return Err(SerializationError::InvalidData);
                 }
                 writer
-                    .write_u64(val.len as u64, 8)
+                    .write_u64(declared as u64, 8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
                 if val.len > 0 {
                     writer

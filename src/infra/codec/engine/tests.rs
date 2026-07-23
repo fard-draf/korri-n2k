@@ -345,7 +345,8 @@ fn test_string_lau_roundtrip() {
     let mut buffer = [0xFF; 64];
     let bytes_written = serialize(&payload, &mut buffer, &PgnStringLau::DESCRIPTOR).unwrap();
     assert_eq!(bytes_written, payload.description.len() + 1);
-    assert_eq!(buffer[0], payload.description.len() as u8);
+    // The declared length counts itself and the encoding byte.
+    assert_eq!(buffer[0], payload.description.len() as u8 + 1);
     assert_eq!(buffer[1], 1);
     assert_eq!(
         &buffer[2..2 + text.len()],

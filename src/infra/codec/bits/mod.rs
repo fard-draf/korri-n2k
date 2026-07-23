@@ -27,6 +27,16 @@ impl<'a> BitReader<'a> {
         self.bit_cursor = bit_offset;
     }
 
+    /// Current position in bits from the start of the buffer.
+    pub fn bit_cursor(&self) -> usize {
+        self.bit_cursor
+    }
+
+    /// Bits left before the end of the buffer, zero once the cursor is past it.
+    pub fn bits_remaining(&self) -> usize {
+        (self.buffer.len() * 8).saturating_sub(self.bit_cursor)
+    }
+
     /// Read `num_bits` bits starting at the current cursor and return a `u64`.
     /// `num_bits` must stay in the [1, 64] range.
     pub fn read_u64(&mut self, num_bits: u8) -> Result<u64, BitReaderError> {
