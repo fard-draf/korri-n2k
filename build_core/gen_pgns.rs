@@ -761,24 +761,22 @@ fn generate_trait_impl(
         } else {
             match map_to_fieldkind(field) {
                 FieldKind::Lookup => {
-                    if let Some(repr) = lookup_repr {
-                        let (pgn_variant, cast_type) = match repr {
-                            "u16" => ("PgnValue::U16", "u16"),
-                            "u32" => ("PgnValue::U32", "u32"),
-                            _ => ("PgnValue::U8", "u8"),
-                        };
-                        writeln!(
-                            buffer,
-                            "\t\t\t\"{}\" => Some({}({}::from(self.{}))),",
-                            field_name_pascal, pgn_variant, cast_type, field_name_snake
-                        )?;
+                    // The engine sizes the value by the field's bit length, which the
+                    // enum's own repr may exceed. Convert through the repr, expose the
+                    // wire width.
+                    let enum_repr = lookup_repr.unwrap_or("u8");
+                    let wire = wire_type_from_bits(field);
+                    let variant = get_pgn_value_variant_from_type(wire, field)?;
+                    let narrowing = if wire == enum_repr {
+                        String::new()
                     } else {
-                        writeln!(
-                            buffer,
-                            "\t\t\t\"{}\" => Some(PgnValue::U8(u8::from(self.{}))),",
-                            field_name_pascal, field_name_snake
-                        )?;
-                    }
+                        format!(" as {}", wire)
+                    };
+                    writeln!(
+                        buffer,
+                        "\t\t\t\"{}\" => Some({}({}::from(self.{}){})),",
+                        field_name_pascal, variant, enum_repr, field_name_snake, narrowing
+                    )?;
                 }
                 // INDIRECT_LOOKUP: keep raw u8 fields without conversion
                 FieldKind::IndirectLookup => {
@@ -920,18 +918,22 @@ fn generate_trait_impl(
             // one the getter already uses. Routing it here forced `PgnValue::U8`
             // on fields the engine decodes as U16/U32.
             FieldKind::Lookup => {
-                // `From` never fails: a value CANboat does not name lands in
+                // Mirror of the getter: match on the wire width, widen to the repr.
+                // `From` never fails — a value CANboat does not name lands in
                 // `Unrecognized` rather than sinking the whole message.
-                let variant = match lookup_repr {
-                    Some("u16") => "PgnValue::U16",
-                    Some("u32") => "PgnValue::U32",
-                    _ => "PgnValue::U8",
+                let enum_repr = lookup_repr.unwrap_or("u8");
+                let wire = wire_type_from_bits(field);
+                let variant = get_pgn_value_variant_from_type(wire, field)?;
+                let widening = if wire == enum_repr {
+                    String::new()
+                } else {
+                    format!(" as {}", enum_repr)
                 };
                 writeln!(buffer, "\t\t\t\tif let {}(val) = value {{", variant)?;
                 writeln!(
                     buffer,
-                    "\t\t\t\t\tself.{} = {}::from(val);",
-                    field_name_snake, field_type_str
+                    "\t\t\t\t\tself.{} = {}::from(val{});",
+                    field_name_snake, field_type_str, widening
                 )?;
                 writeln!(buffer, "\t\t\t\t\tSome(())")?;
                 writeln!(buffer, "\t\t\t\t}} else {{")?;

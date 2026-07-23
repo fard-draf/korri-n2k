@@ -8,6 +8,18 @@ use crate::core::FieldKind;
 use std::collections::HashMap;
 
 /// Determine the `repr` integer type for an enumeration based on its max value.
+/// Unsigned type the engine yields for a field, derived from its width on the wire.
+/// A lookup's own repr follows the enum's declared `MaxValue`, which may be wider
+/// than the field carrying it — the wire always wins.
+pub(crate) fn wire_type_from_bits(field: &Fields) -> &'static str {
+    match field.bits_length.unwrap_or(8) {
+        1..=8 => "u8",
+        9..=16 => "u16",
+        17..=32 => "u32",
+        _ => "u64",
+    }
+}
+
 pub(crate) fn generate_repr_attribute(max_value: u32) -> &'static str {
     match max_value {
         0..=255 => "u8",
@@ -348,6 +360,11 @@ pub(crate) fn map_to_fieldkind(field: &Fields) -> FieldKind {
         "RESERVED" => FieldKind::Reserved,
         "SPARE" => FieldKind::Spare,
         "ISO_NAME" => FieldKind::IsoName,
+        // Fixed-width unsigned integers despite the "dynamic" naming: they carry a
+        // key, an index or a length, and it is the *following* field they size.
+        "DYNAMIC_FIELD_KEY" | "DYNAMIC_FIELD_LENGTH" | "FIELD_INDEX" => FieldKind::Number,
+        // DYNAMIC_FIELD_VALUE and VARIABLE have no BitLength: their width is only
+        // known at runtime, which the engine cannot express yet.
         _ => FieldKind::Unimplemented,
     }
 }
