@@ -915,7 +915,11 @@ fn generate_trait_impl(
 
         writeln!(buffer, "\t\t\t\"{}\" => {{ ", field_name_pascal)?;
         match map_to_fieldkind(field) {
-            FieldKind::Lookup | FieldKind::BitLookup => {
+            // BitLookup is deliberately absent: a bitmask is a plain unsigned
+            // integer, not an enum, so it takes the generic path below — the same
+            // one the getter already uses. Routing it here forced `PgnValue::U8`
+            // on fields the engine decodes as U16/U32.
+            FieldKind::Lookup => {
                 if let Some(repr) = lookup_repr {
                     let variant = match repr {
                         "u16" => "PgnValue::U16",
