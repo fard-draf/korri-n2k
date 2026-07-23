@@ -355,10 +355,19 @@ fn read_field_value(
                     .ok_or(DeserializationError::InvalidFieldBits {
                         field_name: field_desc.id,
                     })?;
+            // A BINARY field that does not fill whole bytes is a scalar, not a
+            // buffer — that is how the generator types it too. AIS 129038/129039
+            // carry a 19-bit `CommunicationState` this way.
             if num_bits % 8 != 0 {
-                return Err(DeserializationError::InvalidFieldBits {
-                    field_name: field_desc.id,
-                });
+                let raw_val = reader
+                    .read_u64(num_bits as u8)
+                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+                return Ok(Some(match num_bits {
+                    1..=8 => PgnValue::U8(raw_val as u8),
+                    9..=16 => PgnValue::U16(raw_val as u16),
+                    17..=32 => PgnValue::U32(raw_val as u32),
+                    _ => PgnValue::U64(raw_val),
+                }));
             }
             let num_bytes = (num_bits / 8) as usize;
             let slice = reader
@@ -662,18 +671,23 @@ fn write_field(
             }
         }
         FieldKind::Binary => {
-            if let PgnValue::Bytes(val) = value {
-                let expected_bits =
-                    field_desc
-                        .bits_length
-                        .ok_or(SerializationError::InvalidFieldBits {
-                            field_name: field_desc.id,
-                        })?;
-                if expected_bits % 8 != 0 {
-                    return Err(SerializationError::InvalidFieldBits {
+            let expected_bits =
+                field_desc
+                    .bits_length
+                    .ok_or(SerializationError::InvalidFieldBits {
                         field_name: field_desc.id,
-                    });
-                }
+                    })?;
+
+            // Mirror of the read path: a sub-byte BINARY field is a scalar.
+            if expected_bits % 8 != 0 {
+                let raw_val = pgn_value_to_u64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                return writer
+                    .write_u64(raw_val, expected_bits as u8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e });
+            }
+
+            if let PgnValue::Bytes(val) = value {
                 let expected_len = (expected_bits / 8) as usize;
                 if val.len != expected_len {
                     return Err(SerializationError::InvalidData);

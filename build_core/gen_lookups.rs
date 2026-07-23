@@ -131,6 +131,27 @@ fn generate_lookup_code(lookup: &dyn LookupGenerator) -> Result<String, BuildErr
         writeln!(buffer)?;
     }
 
+    // Resolve a variant to its emitted name and value, applying the duplicate rule.
+    let variant_ident = |v: &VariantData| -> (String, u32) {
+        let (name, value) = match v {
+            VariantData::Simple { name, value } => (name, *value),
+            VariantData::Full(VariantMetaData { name, value, .. }) => (name, *value),
+        };
+        let dup = hash_count.get(name) > Some(&1)
+            || (matches!(v, VariantData::Simple { .. }) && hash_count.contains_key("Error"));
+        let ident = if dup {
+            format!("{}{}", name, value)
+        } else {
+            name.clone()
+        };
+        (ident, value)
+    };
+
+    // A BITLOOKUP enumeration names bit *positions*, not field values: it is only
+    // ever cast to an integer by the generated bit helpers, never parsed from a
+    // payload. It keeps explicit discriminants and takes no catch-all variant.
+    let is_bitfield = lookup.is_bitfield();
+
     //======================Enum generation
     writeln!(buffer, "#[repr({})]", enum_repr)?;
     writeln!(buffer, "#[derive(Debug, PartialEq, Copy, Clone)]")?;
@@ -139,102 +160,97 @@ fn generate_lookup_code(lookup: &dyn LookupGenerator) -> Result<String, BuildErr
     let mut first_variant_name: Option<String> = None;
 
     for variant_data in &variants {
-        match &variant_data {
-            VariantData::Simple { name, value } => {
-                let field_name =
-                    if hash_count.get(name) > Some(&1) || hash_count.contains_key("Error") {
-                        format!("{}{}", name, value)
-                    } else {
-                        name.clone()
-                    };
-                if first_variant_name.is_none() {
-                    first_variant_name = Some(field_name.clone());
-                }
-                writeln!(buffer, "\t{} = {},", field_name, value)?;
-            }
-            &VariantData::Full(VariantMetaData {
-                name,
-                value,
-                field_type: _,
-                resolution: _,
-                unit: _,
-                bits: _,
-                lookup_bit_enum: _,
-            }) => {
-                let field_name = if hash_count.get(name) > Some(&1) {
-                    format!("{}{}", name, value)
-                } else {
-                    name.clone()
-                };
-                if first_variant_name.is_none() {
-                    first_variant_name = Some(field_name.clone());
-                }
-                writeln!(buffer, "\t{} = {},", field_name, value)?;
-            }
+        let (field_name, value) = variant_ident(variant_data);
+        if first_variant_name.is_none() {
+            first_variant_name = Some(field_name.clone());
         }
+        if is_bitfield {
+            writeln!(buffer, "\t{} = {},", field_name, value)?;
+        } else {
+            // Discriminants stay implicit: Rust forbids mixing them with a data variant.
+            writeln!(buffer, "\t{},", field_name)?;
+        }
+    }
+    if !is_bitfield {
+        // CANboat enumerates only the values it names. A field may legitimately
+        // carry any other bit pattern — TIME_STAMP names 60..=63 while 0..=59 are
+        // seconds — so keep the raw value instead of rejecting the whole message.
+        writeln!(buffer, "\tUnrecognized({}),", enum_repr)?;
     }
     writeln!(buffer, "}}")?;
     writeln!(buffer)?;
-    writeln!(buffer, "#[derive (Debug, PartialEq)]")?;
-    writeln!(buffer, "pub struct Invalid{}({});", enum_name, enum_repr)?;
-    writeln!(buffer)?;
+
+    if !is_bitfield {
+        // Inherent and `const` so it stays callable from the const helpers below,
+        // which `From::from` is not.
+        writeln!(buffer, "impl {} {{", enum_name)?;
+        writeln!(
+            buffer,
+            "\t/// The value carried on the wire, including an unnamed one."
+        )?;
+        writeln!(buffer, "\tpub const fn raw(self) -> {} {{", enum_repr)?;
+        writeln!(buffer, "\t\tmatch self {{")?;
+        for variant_data in &variants {
+            let (field_name, value) = variant_ident(variant_data);
+            writeln!(buffer, "\t\t\tSelf::{} => {},", field_name, value)?;
+        }
+        writeln!(buffer, "\t\t\tSelf::Unrecognized(raw) => raw,")?;
+        writeln!(buffer, "\t\t}}")?;
+        writeln!(buffer, "\t}}")?;
+        writeln!(buffer, "}}")?;
+        writeln!(buffer)?;
+    }
+
     writeln!(buffer, "impl From<{}> for {} {{", enum_name, enum_repr)?;
     writeln!(buffer, "\tfn from(status: {}) -> Self {{", enum_name)?;
-    writeln!(buffer, "\t\tstatus as {}", enum_repr)?;
+    if is_bitfield {
+        writeln!(buffer, "\t\tstatus as {}", enum_repr)?;
+    } else {
+        writeln!(buffer, "\t\tstatus.raw()")?;
+    }
     writeln!(buffer, "\t}}")?;
     writeln!(buffer, "}}")?;
     writeln!(buffer)?;
-    writeln!(buffer, "impl TryFrom<{}> for {} {{", enum_repr, enum_name)?;
-    writeln!(buffer, "\ttype Error = Invalid{};", enum_name)?;
-    writeln!(
-        buffer,
-        "\tfn try_from(value: {}) -> Result<Self, Self::Error> {{",
-        enum_repr
-    )?;
-    writeln!(buffer, "\t\tmatch value {{")?;
 
-    for variant in &variants {
-        match &variant {
-            VariantData::Simple { name, value } => {
-                let field_name =
-                    if hash_count.get(name) > Some(&1) || hash_count.contains_key("Error") {
-                        format!("{}{}", name, value)
-                    } else {
-                        name.clone()
-                    };
-                writeln!(
-                    buffer,
-                    "\t\t\t{} => Ok({}::{}),",
-                    value, enum_name, field_name
-                )?;
-            }
-            #[allow(unused_variables)]
-            &VariantData::Full(VariantMetaData {
-                name,
-                value,
-                field_type,
-                resolution,
-                unit,
-                bits,
-                lookup_bit_enum,
-            }) => {
-                let field_name = if hash_count.get(name) > Some(&1) {
-                    format!("{}{}", name, value)
-                } else {
-                    name.clone()
-                };
-                writeln!(
-                    buffer,
-                    "\t\t\t{} => Ok({}::{}),",
-                    value, enum_name, field_name
-                )?;
-            }
+    if is_bitfield {
+        writeln!(buffer, "#[derive (Debug, PartialEq)]")?;
+        writeln!(buffer, "pub struct Invalid{}({});", enum_name, enum_repr)?;
+        writeln!(buffer)?;
+        writeln!(buffer, "impl TryFrom<{}> for {} {{", enum_repr, enum_name)?;
+        writeln!(buffer, "\ttype Error = Invalid{};", enum_name)?;
+        writeln!(
+            buffer,
+            "\tfn try_from(value: {}) -> Result<Self, Self::Error> {{",
+            enum_repr
+        )?;
+        writeln!(buffer, "\t\tmatch value {{")?;
+        for variant_data in &variants {
+            let (field_name, value) = variant_ident(variant_data);
+            writeln!(
+                buffer,
+                "\t\t\t{} => Ok({}::{}),",
+                value, enum_name, field_name
+            )?;
         }
+        writeln!(buffer, "\t\t\tother => Err(Invalid{}(other)),", enum_name)?;
+        writeln!(buffer, "\t\t}}")?;
+        writeln!(buffer, "\t}}")?;
+        writeln!(buffer, "}}")?;
+    } else {
+        // `From` gives `TryFrom` for free through the blanket impl in core, with
+        // `Error = Infallible`. Existing `try_from` call sites keep compiling.
+        writeln!(buffer, "impl From<{}> for {} {{", enum_repr, enum_name)?;
+        writeln!(buffer, "\tfn from(value: {}) -> Self {{", enum_repr)?;
+        writeln!(buffer, "\t\tmatch value {{")?;
+        for variant_data in &variants {
+            let (field_name, value) = variant_ident(variant_data);
+            writeln!(buffer, "\t\t\t{} => {}::{},", value, enum_name, field_name)?;
+        }
+        writeln!(buffer, "\t\t\tother => {}::Unrecognized(other),", enum_name)?;
+        writeln!(buffer, "\t\t}}")?;
+        writeln!(buffer, "\t}}")?;
+        writeln!(buffer, "}}")?;
     }
-    writeln!(buffer, "\t\t\tother => Err(Invalid{}(other)),", enum_name)?;
-    writeln!(buffer, "\t\t}}")?;
-    writeln!(buffer, "\t}}")?;
-    writeln!(buffer, "}}")?;
     writeln!(buffer)?;
     if let Some(default_variant) = first_variant_name {
         // Default implementation
@@ -259,11 +275,11 @@ fn generate_lookup_code(lookup: &dyn LookupGenerator) -> Result<String, BuildErr
     if lookup.metadata_code() == 1 {
         writeln!(buffer, "impl {} {{", enum_name)?;
         writeln!(buffer, "\tpub const fn value1(&self) -> u8 {{")?;
-        writeln!(buffer, "\t\t(*self as u16 >> 8) as u8")?;
+        writeln!(buffer, "\t\t(self.raw() >> 8) as u8")?;
         writeln!(buffer, "\t}}")?;
         writeln!(buffer)?;
         writeln!(buffer, "\tpub const fn value2(&self) -> u8 {{")?;
-        writeln!(buffer, "\t\t(*self as u16 & 0x00FF) as u8")?;
+        writeln!(buffer, "\t\t(self.raw() & 0x00FF) as u8")?;
         writeln!(buffer, "\t}}")?;
         writeln!(buffer)?;
         writeln!(
@@ -323,16 +339,14 @@ pub(super) fn generate_indirect_lookup_helpers(
         "\tpub fn {}(&mut self, value: {}) {{",
         setter_name, enum_name_pascal
     )?;
-    // Note: the master field may be a Lookup enum, so convert via `try_from`
+    // The master field is a Lookup enum; the conversion keeps unnamed values.
     writeln!(buffer, "\t\tlet val1 = value.value1();")?;
     writeln!(buffer, "\t\tlet val2 = value.value2();")?;
     writeln!(
         buffer,
-        "\t\tif let Ok(master_enum) = {}::try_from(val1) {{",
-        master_field_type
+        "\t\tself.{} = {}::from(val1);",
+        master_field_snake, master_field_type
     )?;
-    writeln!(buffer, "\t\t\tself.{} = master_enum;", master_field_snake)?;
-    writeln!(buffer, "\t\t}}")?;
     writeln!(buffer, "\t\tself.{} = val2;", slave_field_snake)?;
 
     writeln!(buffer, "\t}}")?;

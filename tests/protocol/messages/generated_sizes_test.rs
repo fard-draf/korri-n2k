@@ -30,10 +30,12 @@ fn generated_artifacts_memory_footprint_is_stable() {
             size_of::<Pgn60416IsoTransportProtocolConnectionManagementRequestToSend>(),
             12usize,
         ),
+        // 16 B before lookup enums gained their `Unrecognized(repr)` variant:
+        // a payload byte on top of the tag, so a lookup field costs twice its repr.
         (
             "PGN 60928 (ISO Address Claim)",
             size_of::<Pgn60928>(),
-            16usize,
+            20usize,
         ),
         (
             "PGN 129025 (Position Rapid Update)",
@@ -72,10 +74,11 @@ fn generated_artifacts_memory_footprint_is_stable() {
     println!("Total PGNs : {} bytes\n", total_pgn_size);
 
     // The corresponding lookup tables must remain minimal.
+    // Each was one repr wide before `Unrecognized(repr)`: tag plus payload now.
     let lookup_expectations = [
-        ("IsoCommand", size_of::<IsoCommand>(), 1usize),
-        ("IndustryCode", size_of::<IndustryCode>(), 1usize),
-        ("ManufacturerCode", size_of::<ManufacturerCode>(), 2usize),
+        ("IsoCommand", size_of::<IsoCommand>(), 2usize),
+        ("IndustryCode", size_of::<IndustryCode>(), 2usize),
+        ("ManufacturerCode", size_of::<ManufacturerCode>(), 4usize),
     ];
 
     println!("LOOKUP ENUMS (Mapping tables):");

@@ -920,52 +920,23 @@ fn generate_trait_impl(
             // one the getter already uses. Routing it here forced `PgnValue::U8`
             // on fields the engine decodes as U16/U32.
             FieldKind::Lookup => {
-                if let Some(repr) = lookup_repr {
-                    let variant = match repr {
-                        "u16" => "PgnValue::U16",
-                        "u32" => "PgnValue::U32",
-                        _ => "PgnValue::U8",
-                    };
-                    writeln!(buffer, "\t\t\t\tif let {}(val) = value {{", variant)?;
-                    writeln!(
-                        buffer,
-                        "\t\t\t\t\tmatch {}::try_from(val) {{",
-                        field_type_str
-                    )?;
-                    writeln!(buffer, "\t\t\t\t\t\tOk(enum_val) => {{")?;
-                    writeln!(
-                        buffer,
-                        "\t\t\t\t\t\t\tself.{} = enum_val;",
-                        field_name_snake
-                    )?;
-                    writeln!(buffer, "\t\t\t\t\t\t\tSome(())")?;
-                    writeln!(buffer, "\t\t\t\t\t\t}}")?;
-                    writeln!(buffer, "\t\t\t\t\t\tErr(_) => None")?;
-                    writeln!(buffer, "\t\t\t\t\t}}")?;
-                    writeln!(buffer, "\t\t\t\t}} else {{")?;
-                    writeln!(buffer, "\t\t\t\t\tNone")?;
-                    writeln!(buffer, "\t\t\t\t}}")?;
-                } else {
-                    writeln!(buffer, "\t\t\t\tif let PgnValue::U8(val) = value {{")?;
-                    writeln!(
-                        buffer,
-                        "\t\t\t\t\tmatch {}::try_from(val) {{",
-                        field_type_str
-                    )?;
-                    writeln!(buffer, "\t\t\t\t\t\tOk(enum_val) => {{")?;
-                    writeln!(
-                        buffer,
-                        "\t\t\t\t\t\t\tself.{} = enum_val;",
-                        field_name_snake
-                    )?;
-                    writeln!(buffer, "\t\t\t\t\t\t\tSome(())")?;
-                    writeln!(buffer, "\t\t\t\t\t\t}}")?;
-                    writeln!(buffer, "\t\t\t\t\t\tErr(_) => None")?;
-                    writeln!(buffer, "\t\t\t\t\t}}")?;
-                    writeln!(buffer, "\t\t\t\t}} else {{")?;
-                    writeln!(buffer, "\t\t\t\t\tNone")?;
-                    writeln!(buffer, "\t\t\t\t}}")?;
-                }
+                // `From` never fails: a value CANboat does not name lands in
+                // `Unrecognized` rather than sinking the whole message.
+                let variant = match lookup_repr {
+                    Some("u16") => "PgnValue::U16",
+                    Some("u32") => "PgnValue::U32",
+                    _ => "PgnValue::U8",
+                };
+                writeln!(buffer, "\t\t\t\tif let {}(val) = value {{", variant)?;
+                writeln!(
+                    buffer,
+                    "\t\t\t\t\tself.{} = {}::from(val);",
+                    field_name_snake, field_type_str
+                )?;
+                writeln!(buffer, "\t\t\t\t\tSome(())")?;
+                writeln!(buffer, "\t\t\t\t}} else {{")?;
+                writeln!(buffer, "\t\t\t\t\tNone")?;
+                writeln!(buffer, "\t\t\t\t}}")?;
             }
             // INDIRECT_LOOKUP: les champs restent u8, pas de conversion
             FieldKind::IndirectLookup => {

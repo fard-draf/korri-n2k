@@ -53,6 +53,11 @@ pub(crate) trait LookupGenerator {
     // OTHER -> 0
     /// Internal code used to qualify the enumeration kind.
     fn metadata_code(&self) -> u8;
+    /// True for BITLOOKUP enumerations, whose variants name bit *positions*
+    /// rather than field values. They stay castable and take no catch-all.
+    fn is_bitfield(&self) -> bool {
+        false
+    }
 }
 //==========================================LOOKUP_FIELDTYPE_ENUM
 #[derive(Debug, Deserialize, Clone)]
@@ -149,6 +154,9 @@ impl LookupGenerator for LookupBitEnum {
     }
     fn metadata_code(&self) -> u8 {
         0
+    }
+    fn is_bitfield(&self) -> bool {
+        true
     }
 }
 // ==========================================LOOKUP_INDIRECT_ENUM

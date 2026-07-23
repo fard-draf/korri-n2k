@@ -190,15 +190,14 @@ impl From<IsoName> for Pgn60928 {
     fn from(name: IsoName) -> Self {
         let mut pgn = Pgn60928::new();
         pgn.unique_number = name.unique_number();
-        pgn.manufacturer_code =
-            ManufacturerCode::try_from(name.manufacturer_code()).unwrap_or_default();
+        pgn.manufacturer_code = ManufacturerCode::from(name.manufacturer_code());
         pgn.device_instance_lower = name.device_instance_lower();
         pgn.device_instance_upper = name.device_instance_upper();
         pgn.device_function = name.device_function(); // device_function stays as u8 (INDIRECT_LOOKUP)
                                                       // Reserved field remains zero thanks to `new()`.
-        pgn.device_class = DeviceClass::try_from(name.device_class()).unwrap_or_default();
+        pgn.device_class = DeviceClass::from(name.device_class());
         pgn.system_instance = name.system_instance();
-        pgn.industry_group = IndustryCode::try_from(name.industry_group()).unwrap_or_default();
+        pgn.industry_group = IndustryCode::from(name.industry_group());
         pgn.arbitrary_address_capable = if name.is_arbitrary_address_capable() {
             YesNo::Yes
         } else {
