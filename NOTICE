@@ -1,0 +1,29 @@
+korri-n2k
+Copyright (c) 2025 Korrilink
+
+Licensed under either of
+
+  * Apache License, Version 2.0 (LICENSE-APACHE)
+  * MIT license (LICENSE-MIT)
+
+at your option.
+
+--------------------------------------------------------------------------------
+
+This product bundles the CANboat NMEA 2000 message database, used at build time
+to generate the PGN types:
+
+    build_core/var/canboat.json
+
+    CANboat
+    Copyright (c) 2009-2026 Kees Verruijt, Harlingen, The Netherlands
+    https://github.com/canboat/canboat
+
+    Licensed under the Apache License, Version 2.0 (LICENSE-APACHE).
+
+That database, and the Rust code generated from it — PGN and field names,
+descriptions and lookup enumeration variants — remain subject to the Apache
+License, Version 2.0. The dual licensing above applies to korri-n2k's own
+source, not to the CANboat data it carries.
+
+Bundled as obtained from the CANboat project: schema 2.5.0, CANboat v7.1.0.

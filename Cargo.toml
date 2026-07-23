@@ -1,13 +1,16 @@
 [package]
 name = "korri-n2k"
 version = "0.4.0"
- edition = "2021"
+edition = "2021"
+rust-version = "1.96"
 description = "no_std-first NMEA 2000 protocol stack for embedded and Linux systems"
 repository = "https://github.com/fard-draf/korri-n2k"
 readme = "README.md"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 keywords = ["n2k", "nmea2000", "can", "embedded", "no-std"]
 categories = ["embedded", "no-std", "network-programming"]
+# canboat.json is required at build time and must ship; the rest is not.
+exclude = ["tests/", ".github/", "archives/"]
 
 [features]
 default = ["embassy"]
@@ -21,8 +24,7 @@ full-pgns = []
 [dependencies]
 embassy-time = { version = "0.4", optional = true }
 embassy-sync = { version = "0.6", optional = true }
-tokio = { version = "1.47.1", optional = true, default-features = false, features = ["sync", "time", "macros"] }
-embedded-can = "0.4"
+tokio = { version = "1.47.1", optional = true, default-features = false, features = ["sync", "time"] }
 thiserror-no-std = "2.0"
 futures-util = { version = "0.3", default-features = false }
 
@@ -32,7 +34,6 @@ defmt = { version = "0.3", optional = true }
 critical-section = { version = "1.1", features = ["std"] }
 static_cell = "2.1.1"
 tokio = { version = "1.47.1", features = ["full"] }
-embassy-executor = { version = "0.7.0", features = ["executor-thread"] }
 
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }
