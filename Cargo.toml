@@ -1,6 +1,6 @@
 [package]
 name = "korri-n2k"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.96"
 description = "no_std-first NMEA 2000 protocol stack for embedded and Linux systems"
@@ -9,7 +9,6 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["n2k", "nmea2000", "can", "embedded", "no-std"]
 categories = ["embedded", "no-std", "network-programming"]
-# canboat.json is required at build time and must ship; the rest is not.
 exclude = ["tests/", ".github/", "archives/"]
 
 [features]
