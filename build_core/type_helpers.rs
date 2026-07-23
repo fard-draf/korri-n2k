@@ -183,6 +183,9 @@ pub(crate) fn map_type(
             // the u16 enumeration. Helper accessors are generated to work with the full enum.
             Ok("u8".to_string())
         }
+        // FLOAT is a raw IEEE-754 number, not a scaled integer: its resolution of 1
+        // would otherwise land it on the signed-integer path below.
+        FieldKind::Float => Ok("f32".to_string()),
         FieldKind::StringLz | FieldKind::StringLau => Ok("PgnBytes".to_string()),
         _ => {
             // Fields with a resolution become floating-point values.

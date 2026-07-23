@@ -278,6 +278,14 @@ fn read_field_value(
             Ok(Some(value))
         }
 
+        // IEEE-754 single precision, carried as raw bits. No resolution applies.
+        FieldKind::Float => {
+            let raw_val = reader
+                .read_u64(32)
+                .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+            Ok(Some(PgnValue::F32(f32::from_bits(raw_val as u32))))
+        }
+
         FieldKind::Reserved | FieldKind::Spare => {
             if let Some(val) = field_desc.bits_length {
                 reader
@@ -597,6 +605,15 @@ fn write_field(
                     .write_u64(0, bit_len as u8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
             }
+        }
+
+        // Mirror of the read path: raw IEEE-754 bits, no resolution.
+        FieldKind::Float => {
+            let val = pgn_value_to_f64(value)
+                .map_err(|e| SerializationError::CodecError { source: e })?;
+            writer
+                .write_u64((val as f32).to_bits() as u64, 32)
+                .map_err(|e| SerializationError::BitWriteError { err: e })?;
         }
 
         FieldKind::Reserved => {
