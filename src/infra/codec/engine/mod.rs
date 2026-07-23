@@ -451,7 +451,7 @@ fn read_field_value(
 
         // Other kinds are not supported yet
         _ => Err(DeserializationError::UnsupportedFieldKind {
-            field_kind: field_desc.kind.clone(),
+            field_kind: field_desc.kind,
         }),
     }
 }
@@ -606,7 +606,7 @@ fn write_field(
             } else {
                 return Err(SerializationError::CodecError {
                     source: CodecError::DataTypeMismatch {
-                        value: value.clone(),
+                        value_kind: value.kind(),
                         func: "write_field // StringFix",
                     },
                 });
@@ -628,7 +628,7 @@ fn write_field(
             } else {
                 return Err(SerializationError::CodecError {
                     source: CodecError::DataTypeMismatch {
-                        value: value.clone(),
+                        value_kind: value.kind(),
                         func: "write_field // StringLz",
                     },
                 });
@@ -655,7 +655,7 @@ fn write_field(
             } else {
                 return Err(SerializationError::CodecError {
                     source: CodecError::DataTypeMismatch {
-                        value: value.clone(),
+                        value_kind: value.kind(),
                         func: "write_field // StringLau",
                     },
                 });
@@ -684,7 +684,7 @@ fn write_field(
             } else {
                 return Err(SerializationError::CodecError {
                     source: CodecError::DataTypeMismatch {
-                        value: value.clone(),
+                        value_kind: value.kind(),
                         func: "write_field // Binary",
                     },
                 });
@@ -706,7 +706,7 @@ fn pgn_value_to_f64(value: &PgnValue) -> Result<f64, CodecError> {
         PgnValue::I16(v) => Ok(*v as f64),
         PgnValue::I8(v) => Ok(*v as f64),
         _ => Err(CodecError::DataTypeMismatch {
-            value: value.clone(),
+            value_kind: value.kind(),
             func: "pgn_value_to_f64",
         }),
     }
@@ -721,7 +721,7 @@ fn pgn_value_to_i64(value: &PgnValue) -> Result<i64, CodecError> {
         PgnValue::I16(v) => Ok(*v as i64),
         PgnValue::I8(v) => Ok(*v as i64),
         _ => Err(CodecError::DataTypeMismatch {
-            value: value.clone(),
+            value_kind: value.kind(),
             func: "pgn_value_to_i64",
         }),
     }
@@ -736,7 +736,7 @@ fn pgn_value_to_u64(value: &PgnValue) -> Result<u64, CodecError> {
         PgnValue::U16(v) => Ok(*v as u64),
         PgnValue::U8(v) => Ok(*v as u64),
         _ => Err(CodecError::DataTypeMismatch {
-            value: value.clone(),
+            value_kind: value.kind(),
             func: "pgn_value_to_u64",
         }),
     }

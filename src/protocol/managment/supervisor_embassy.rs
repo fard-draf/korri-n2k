@@ -235,6 +235,8 @@ impl<'a, const FRAME_CAP: usize> AddressFrames<'a, FRAME_CAP> {
 }
 
 /// Commands queued by producer tasks.
+// No alloc, no box!
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum SupervisorCommand {
     SendFrame(CanFrame),

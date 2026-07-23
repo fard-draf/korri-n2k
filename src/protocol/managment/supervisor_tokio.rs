@@ -240,6 +240,8 @@ impl AddressFrames {
 }
 
 /// Commands queued by producer tasks.
+// No alloc, no box!
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum SupervisorCommand {
     SendFrame(CanFrame),

@@ -11,6 +11,10 @@ const MAX_CONCURRENT_SESSIONS: usize = 4;
 const SESSION_TIMEOUT_MS: u32 = 500;
 
 //==================================================================================Enums and Structs
+// TODO: pass the completed message as an out-parameter of `process_frame` instead of
+// returning it here. The caller would then own the buffer once, outside the receive
+// loop, and this enum would drop from 240 bytes to 1.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum ProcessResult {
     /// Frame not recognized as Fast Packet or discarded (invalid sequence,

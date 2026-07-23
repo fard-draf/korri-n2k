@@ -12,7 +12,7 @@ pub const MAX_PGN_BYTES: usize = 230;
 
 /// Semantic type of a field within a PGN.
 /// Mirrors the `FieldType` entries found in `canboat.json`.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum FieldKind {
     /// Signed or unsigned integer; `is_signed` carries the distinction.
     Number,
@@ -237,6 +237,8 @@ impl PgnBytes {
     }
 }
 
+// The lint suggests Box, but this crate has no alloc. The inline buffer is intended.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PgnValue {
     U64(u64),
@@ -251,4 +253,24 @@ pub enum PgnValue {
     F32(f32),
     Bytes(PgnBytes),
     Ignored,
+}
+
+impl PgnValue {
+    /// Name of the variant, for diagnostics without copying the value.
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::U64(_) => "U64",
+            Self::U32(_) => "U32",
+            Self::U16(_) => "U16",
+            Self::U8(_) => "U8",
+            Self::I64(_) => "I64",
+            Self::I32(_) => "I32",
+            Self::I16(_) => "I16",
+            Self::I8(_) => "I8",
+            Self::F64(_) => "F64",
+            Self::F32(_) => "F32",
+            Self::Bytes(_) => "Bytes",
+            Self::Ignored => "Ignored",
+        }
+    }
 }

@@ -1,7 +1,7 @@
 //! Error definitions shared across library modules.
 //! Each type models a specific failure scenario (CAN ID construction,
 //! address management, serialization/deserialization, etc.).
-use crate::core::{FieldKind, PgnValue};
+use crate::core::FieldKind;
 use thiserror_no_std::Error;
 
 #[derive(Error, Debug)]
@@ -156,8 +156,11 @@ pub enum DeserializationError {
 /// Shared error abstraction for conversion helpers.
 pub enum CodecError {
     /// Value type is incompatible with the algorithm.
-    #[error("Data type mismatch for value {value:?}, function: {func}")]
-    DataTypeMismatch { value: PgnValue, func: &'static str },
+    #[error("Data type mismatch for {value_kind}, function: {func}")]
+    DataTypeMismatch {
+        value_kind: &'static str,
+        func: &'static str,
+    },
 }
 
 //==================================================================================SEND_ERROR
@@ -203,3 +206,9 @@ pub enum BitWriterError {
     #[error("Non aligned bit. Cursor: {cursor}")]
     NonAlignedBit { cursor: usize },
 }
+
+// These errors cross every `?` in the codec, on targets with 20 KB of RAM.
+// A failure here means a variant carries data by value again.
+// The limit fits both widths: 40 bytes on a 64-bit host, about 20 on a 32-bit target.
+const _: () = assert!(core::mem::size_of::<DeserializationError>() <= 48);
+const _: () = assert!(core::mem::size_of::<SerializationError>() <= 48);
