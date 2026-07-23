@@ -37,10 +37,12 @@ fn generated_artifacts_memory_footprint_is_stable() {
             size_of::<Pgn60928>(),
             20usize,
         ),
+        // 8 B before latitude and longitude widened to f64: a 32-bit field scaled by
+        // 1e-7 needs more mantissa than f32 has, and drifted by up to 0.75 m.
         (
             "PGN 129025 (Position Rapid Update)",
             size_of::<Pgn129025>(),
-            8usize,
+            16usize,
         ),
     ];
 

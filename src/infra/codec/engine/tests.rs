@@ -23,28 +23,28 @@ use crate::{
 fn test_round_trip_multiple_way_pgn() {
     #[derive(Debug, Default, PartialEq)]
     struct PgnFloatTest {
-        value_f32: f32,
+        value_scaled: f64,
         value_f64: f64,
         value_i16: i16,
-        value_u32_scaled: f32,
+        value_u32_scaled: f64,
     }
 
     impl FieldAccess for PgnFloatTest {
         fn field(&self, id: &'static str) -> Option<PgnValue> {
             match id {
-                "value_f32" => Some(PgnValue::F32(self.value_f32)),
+                "value_scaled" => Some(PgnValue::F64(self.value_scaled)),
                 "value_f64" => Some(PgnValue::F64(self.value_f64)),
                 "value_i16" => Some(PgnValue::I16(self.value_i16)),
-                "value_u32_scaled" => Some(PgnValue::F32(self.value_u32_scaled)),
+                "value_u32_scaled" => Some(PgnValue::F64(self.value_u32_scaled)),
                 _ => None,
             }
         }
 
         fn field_mut(&mut self, id: &'static str, value: PgnValue) -> Option<()> {
             match id {
-                "value_f32" => {
-                    if let PgnValue::F32(val) = value {
-                        self.value_f32 = val;
+                "value_scaled" => {
+                    if let PgnValue::F64(val) = value {
+                        self.value_scaled = val;
                         Some(())
                     } else {
                         None
@@ -67,7 +67,7 @@ fn test_round_trip_multiple_way_pgn() {
                     }
                 }
                 "value_u32_scaled" => {
-                    if let PgnValue::F32(val) = value {
+                    if let PgnValue::F64(val) = value {
                         self.value_u32_scaled = val;
                         Some(())
                     } else {
@@ -91,8 +91,8 @@ fn test_round_trip_multiple_way_pgn() {
             trans_irregular: None,
             fields: &[
                 FieldDescriptor {
-                    id: "value_f32",
-                    name: "ValueF32",
+                    id: "value_scaled",
+                    name: "ValueScaled",
                     kind: FieldKind::Number,
                     bits_length: Some(32),
                     bits_length_var: None,
@@ -155,7 +155,7 @@ fn test_round_trip_multiple_way_pgn() {
         };
     }
     let mocked_pgn = PgnFloatTest {
-        value_f32: 9.12345678,
+        value_scaled: 9.12345678,
         value_f64: 1.23456789123456789,
         value_i16: -2542,
         value_u32_scaled: 429_496.4,
@@ -176,7 +176,7 @@ fn test_round_trip_multiple_way_pgn() {
     )
     .unwrap();
 
-    assert!((mocked_pgn.value_f32 - pgn_rounded.value_f32).abs() < 1e-2);
+    assert!((mocked_pgn.value_scaled - pgn_rounded.value_scaled).abs() < 1e-2);
     assert!((mocked_pgn.value_f64 - pgn_rounded.value_f64).abs() < 1e-9);
     assert!((mocked_pgn.value_i16 - pgn_rounded.value_i16).abs() == 0);
     assert!((mocked_pgn.value_u32_scaled - pgn_rounded.value_u32_scaled).abs() < 1e-1);
@@ -511,7 +511,14 @@ fn test_round_trip_stringfixe_pgn_129044() {
         &Pgn129044::PGN_129044_DESCRIPTOR
     )
     .is_ok());
-    assert_eq!(pgn, pgn_rounded);
+    // The deltas carry a 1e-7 resolution, so an arbitrary f64 does not sit exactly
+    // on the wire grid: the round trip is exact to within half a step, not to the bit.
+    const HALF_STEP: f64 = 0.5e-7;
+    assert!((pgn.delta_latitude - pgn_rounded.delta_latitude).abs() <= HALF_STEP);
+    assert!((pgn.delta_longitude - pgn_rounded.delta_longitude).abs() <= HALF_STEP);
+    assert!((pgn.delta_altitude - pgn_rounded.delta_altitude).abs() <= 0.5e-2);
+    assert_eq!(pgn.local_datum, pgn_rounded.local_datum);
+    assert_eq!(pgn.reference_datum, pgn_rounded.reference_datum);
     assert_ne!(pgn_rounded.delta_latitude, 47.99604);
 }
 
@@ -691,7 +698,7 @@ fn test_round_trip_pgn_129540_repetitive_fields() {
         pgn.prns[idx].elevation = sample.1;
         pgn.prns[idx].azimuth = sample.2;
         pgn.prns[idx].snr = sample.3;
-        pgn.prns[idx].range_residuals = sample.4;
+        pgn.prns[idx].range_residuals = sample.4 as f64;
         pgn.prns[idx].status = SatelliteStatus::NotTracked;
 
         pgn.prns[idx].reserved11 = sample.6;

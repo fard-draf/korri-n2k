@@ -27,6 +27,9 @@ use std::str::FromStr;
 fn main() -> Result<(), BuildError> {
     // Tell Cargo to rerun this script whenever one of these files changes.
     println!("cargo:rerun-if-changed=build.rs");
+    // The generator itself, not just its inputs: editing build_core/ otherwise left
+    // stale generated code behind and produced errors that matched no source.
+    println!("cargo:rerun-if-changed=build_core");
     println!("cargo:rerun-if-changed=build_core/var/pgn_manifest.json");
     println!("cargo:rerun-if-changed=build_core/var/canboat.json");
 

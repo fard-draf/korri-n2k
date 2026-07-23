@@ -247,7 +247,7 @@ fn read_field_value(
                         .bits_length
                         .ok_or(DeserializationError::InvalidDataLength)?
                     {
-                        1..=32 => PgnValue::F32(signed_val as f32 * res),
+                        1..=24 => PgnValue::F32(signed_val as f32 * res),
                         _ => PgnValue::F64(signed_val as f64 * res as f64),
                     }
                 } else {
@@ -263,7 +263,7 @@ fn read_field_value(
                     .bits_length
                     .ok_or(DeserializationError::InvalidDataLength)?
                 {
-                    1..=32 => PgnValue::F32(raw_val as f32 * res),
+                    1..=24 => PgnValue::F32(raw_val as f32 * res),
                     _ => PgnValue::F64(raw_val as f64 * res as f64),
                 }
             } else {
@@ -402,7 +402,7 @@ fn read_field_value(
             let value = if let Some(res) = field_desc.resolution {
                 let scaled = raw_val as f64 * res as f64;
                 match field_desc.bits_length.unwrap() {
-                    1..=32 => PgnValue::F32(scaled as f32),
+                    1..=24 => PgnValue::F32(scaled as f32),
                     _ => PgnValue::F64(scaled),
                 }
             } else {
@@ -433,7 +433,7 @@ fn read_field_value(
             let value = if let Some(res) = field_desc.resolution {
                 let scaled = raw_val as f64 * res as f64;
                 match field_desc.bits_length.unwrap() {
-                    1..=32 => PgnValue::F32(scaled as f32),
+                    1..=24 => PgnValue::F32(scaled as f32),
                     _ => PgnValue::F64(scaled),
                 }
             } else {
@@ -488,7 +488,7 @@ fn write_field(
                     // Common path: floating-point value that must be scaled back to an integer
                     let float_val = pgn_value_to_f64(value)
                         .map_err(|e| SerializationError::CodecError { source: e })?;
-                    (float_val / res as f64) as i64
+                    scale_to_i64(float_val, res)
                 } else {
                     pgn_value_to_i64(value)
                         .map_err(|e| SerializationError::CodecError { source: e })?
@@ -498,7 +498,7 @@ fn write_field(
             } else if let Some(res) = field_desc.resolution {
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                i64_to_u64_bitwise((float_val / res as f64) as i64)
+                i64_to_u64_bitwise(scale_to_i64(float_val, res))
             } else {
                 pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
             };
@@ -524,7 +524,7 @@ fn write_field(
                 // With resolution: value stored as F32/F64
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                (float_val / field_desc.resolution.unwrap() as f64) as u64 // Direct cast; two's-complement helper not required
+                scale_to_i64(float_val, field_desc.resolution.unwrap()) as u64 // Direct cast; two's-complement helper not required
             } else {
                 // Without resolution: value stored as U16/U32
                 pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
@@ -548,7 +548,7 @@ fn write_field(
                 // Apply the inverse resolution
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                (float_val / res as f64) as u64
+                scale_to_i64(float_val, res) as u64
             } else {
                 // No resolution involved
                 pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
@@ -724,6 +724,19 @@ fn write_field(
         _ => return Err(SerializationError::UnsupportedFieldKind),
     }
     Ok(())
+}
+
+/// Undoes a field's resolution, rounding half away from zero.
+/// Truncating instead would shift every scaled value one LSB towards zero:
+/// 23.767 at a resolution of 0.001 divides to 23766.999… and came back as 23.766.
+/// `f64::round` lives in `std`, which this crate does not have.
+fn scale_to_i64(value: f64, resolution: f32) -> i64 {
+    let scaled = value / resolution as f64;
+    if scaled >= 0.0 {
+        (scaled + 0.5) as i64
+    } else {
+        (scaled - 0.5) as i64
+    }
 }
 
 /// Converts a `PgnValue` into `f64`.

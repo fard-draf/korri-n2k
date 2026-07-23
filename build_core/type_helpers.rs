@@ -206,7 +206,9 @@ pub(crate) fn map_type(
                     path: field.id.clone(),
                     comment: "build.rs / map_type",
                 })? {
-                    1..=32 => return Ok("f32".to_string()),
+                    // f32 holds every integer only up to 2^24. A wider scaled field
+                    // would lose its low bits: latitude at 1e-7 drifted by 0.75 m.
+                    1..=24 => return Ok("f32".to_string()),
                     _ => return Ok("f64".to_string()),
                 }
                 // return Ok("f64".to_string());

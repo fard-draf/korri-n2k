@@ -39,13 +39,14 @@ impl<'a> BitReader<'a> {
         }
 
         let buffer_len_bits = self.buffer.len() * 8;
-        let read_end_bit = self.bit_cursor + num_bits as usize;
+        let read_end_bit = self.bit_cursor.saturating_add(num_bits as usize);
 
         // Prevent reading beyond the buffer.
         if read_end_bit > buffer_len_bits {
             return Err(BitReaderError::OutOfBounds {
                 asked: num_bits as usize,
-                available: buffer_len_bits - self.bit_cursor,
+                // `seek` accepts any position, so the cursor may sit past the end.
+                available: buffer_len_bits.saturating_sub(self.bit_cursor),
             });
         }
         // Assemble the requested bits.
@@ -124,12 +125,12 @@ impl<'a> BitReader<'a> {
         }
 
         let buffer_len_bits = self.buffer.len() * 8;
-        let new_cursor_pos = self.bit_cursor + length as usize;
+        let new_cursor_pos = self.bit_cursor.saturating_add(length as usize);
 
         if new_cursor_pos > buffer_len_bits {
             return Err(BitReaderError::OutOfBounds {
                 asked: length as usize,
-                available: buffer_len_bits - self.bit_cursor,
+                available: buffer_len_bits.saturating_sub(self.bit_cursor),
             });
         }
         self.bit_cursor = new_cursor_pos;
@@ -148,7 +149,7 @@ impl<'a> BitReader<'a> {
         }
 
         let byte_start = self.bit_cursor / 8;
-        let byte_end = byte_start + len;
+        let byte_end = byte_start.saturating_add(len);
         if byte_end > self.buffer.len() {
             return Err(BitReaderError::OutOfBounds {
                 asked: byte_end,

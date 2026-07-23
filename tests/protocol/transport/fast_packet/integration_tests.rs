@@ -398,7 +398,7 @@ fn test_stress_100_pgns() {
         // Create an AIS message with varying data
         let mut ais = Pgn129040::new();
         ais.user_id = 1_000_000 + i;
-        ais.latitude = 45.0 + (i as f32 * 0.01);
+        ais.latitude = 45.0 + (i as f64 * 0.01);
 
         let mut buffer = [0u8; 64];
         let len = ais
