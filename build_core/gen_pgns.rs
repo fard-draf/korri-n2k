@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::build_core::gen_lookups::generate_indirect_lookup_helpers;
 use crate::build_core::gen_lookups::{
-    set_lookup_bit_map, set_lookup_enum_map, set_lookup_indir_map, set_poly_lookup_map,
+    set_lookup_bit_map, set_lookup_enum_map, set_lookup_indir_map,
 };
 
 use super::domain::*;
@@ -27,7 +27,6 @@ pub(crate) fn run_pgns_gen(
     let lookup_enum_map = set_lookup_enum_map(canboat_value)?;
     let lookup_indir_map = set_lookup_indir_map(canboat_value)?;
     let lookup_bit_map = set_lookup_bit_map(canboat_value)?;
-    let poly_lookup_map = set_poly_lookup_map(canboat_value)?;
     let pgns_set = set_pgns_set(canboat_value)?;
     let mut poly_pgns_map = set_poly_pgns_map(canboat_value, pgns_set)?;
 
@@ -51,7 +50,6 @@ pub(crate) fn run_pgns_gen(
 
                     match generate_pgn_code(
                         &pgn_def,
-                        &poly_lookup_map,
                         &lookup_enum_map,
                         &lookup_indir_map,
                         &lookup_bit_map,
@@ -85,7 +83,6 @@ pub(crate) fn run_pgns_gen(
 /// Assemble code (struct/impl/enum) for a specific PGN.
 fn generate_pgn_code(
     pgn: &PgnInstructions,
-    poly_lookup_map: &HashMap<String, LookupEnum>,
     lookup_enum_map: &HashMap<String, LookupEnum>,
     lookup_indir_map: &HashMap<String, LookupIndirEnum>,
     lookup_bit_map: &HashMap<String, LookupBitEnum>,
@@ -116,11 +113,7 @@ fn generate_pgn_code(
     // Generate the polymorphic enumeration when applicable
     if poly_pgns_map.contains_key(&pgn.pgn_id) {
         buffer.push_str(&generate_enum_definition(pgn, poly_pgns_map)?);
-        buffer.push_str(&generate_enum_trait_impl(
-            pgn,
-            poly_lookup_map,
-            poly_pgns_map,
-        )?);
+        buffer.push_str(&generate_enum_trait_impl(pgn, poly_pgns_map)?);
         poly_pgns_map.remove(&pgn.pgn_id);
         poly_pgns_id_vec.push(pgn.pgn_id);
     }
@@ -272,7 +265,6 @@ fn generate_struct_definition(
 /// Generate trait implementations (`PgnData`, `FieldAccess`) for polymorphic PGNs.
 fn generate_enum_trait_impl(
     pgn: &PgnInstructions,
-    poly_lookup_map: &HashMap<String, LookupEnum>,
     poly_pgns_map: &mut HashMap<u32, Vec<PolyPgn>>,
 ) -> Result<String, BuildError> {
     let mut buffer = String::new();
@@ -284,68 +276,71 @@ fn generate_enum_trait_impl(
         buffer,
         "\tfn from_payload(payload: &[u8]) -> Result<Self, DeserializationError> {{"
     )?;
-    writeln!(
-        buffer,
-        "\t\tlet first_field = &Pgn{}{}::PGN_{}_{}_DESCRIPTOR.fields[0];",
-        pgn.pgn_id,
-        to_pascal_case(&pgn.pgn_name, PascalCaseMode::Soft),
-        pgn.pgn_id,
-        to_snake_case(&pgn.pgn_name, "POLY").to_uppercase()
-    )?;
+    // Read every discriminator position this PGN uses, once. A field the payload
+    // is too short to hold stays `None` and simply matches no variant.
+    let mut probes: Vec<(u32, u8)> = poly_pgns_map
+        .get(&pgn.pgn_id)
+        .into_iter()
+        .flatten()
+        .flat_map(|v| v.discriminators.iter())
+        .map(|d| (d.bits_offset, d.bits_length))
+        .collect();
+    probes.sort_unstable();
+    probes.dedup();
+
     writeln!(
         buffer,
         "\t\tlet mut reader = crate::infra::codec::bits::BitReader::new(payload);"
     )?;
-    writeln!(
-        buffer,
-        "\t\tlet function_bits: u8 = first_field.bits_length.unwrap_or(8) as u8;"
-    )?;
-    writeln!(buffer, "\t\tlet function_code = reader.read_u64(function_bits).map_err(|_| DeserializationError::InvalidDataLength)? as u32;")?;
+    for (offset, bits) in &probes {
+        writeln!(buffer, "\t\treader.seek({});", offset)?;
+        writeln!(
+            buffer,
+            "\t\tlet d_{}_{}: Option<u32> = reader.read_u64({}).ok().map(|v| v as u32);",
+            offset, bits, bits
+        )?;
+    }
     writeln!(buffer)?;
 
-    writeln!(buffer, "\t\tmatch function_code {{")?;
-    generate_enum_impl_helper(
-        &mut buffer,
-        pgn,
-        poly_pgns_map,
-        poly_lookup_map,
-        |writer, lookup, poly_pgn| {
-            writeln!(writer, "\t\t\t{} => {{", lookup.value)?;
-            writeln!(
-                writer,
-                "\t\t\t\tlet mut inner_struct = Pgn{}{}::new();",
-                pgn.pgn_id, poly_pgn.name
-            )?;
-            writeln!(
-                writer,
-                "\t\t\t\tcrate::infra::codec::engine::deserialize_into("
-            )?;
-            writeln!(writer, "\t\t\t\t\t&mut inner_struct,")?;
-            writeln!(writer, "\t\t\t\t\tpayload,")?;
-            writeln!(
-                writer,
-                "\t\t\t\t\t&Pgn{}{}::PGN_{}_{}_DESCRIPTOR,",
-                pgn.pgn_id,
-                poly_pgn.name,
-                pgn.pgn_id,
-                to_snake_case(&poly_pgn.name, "POLY").to_uppercase()
-            )?;
-            writeln!(writer, "\t\t\t\t)?;")?;
-            writeln!(
-                writer,
-                "\t\t\t\tOk(Pgn{}::{}(inner_struct))",
-                pgn.pgn_id, poly_pgn.name
-            )?;
-            writeln!(writer, "\t\t\t}}")?;
-            writeln!(writer)
-        },
-    )?;
-    writeln!(
-        buffer,
-        "\t\t\t_ => return Err(DeserializationError::MalformedData),"
-    )?;
+    generate_enum_impl_helper(&mut buffer, pgn, poly_pgns_map, |writer, poly_pgn| {
+        let condition = poly_pgn
+            .discriminators
+            .iter()
+            .map(|d| format!("d_{}_{} == Some({})", d.bits_offset, d.bits_length, d.value))
+            .collect::<Vec<_>>()
+            .join(" && ");
 
-    writeln!(buffer, "\t\t}}")?; // End of match function_code
+        writeln!(writer, "\t\tif {} {{", condition)?;
+        writeln!(
+            writer,
+            "\t\t\tlet mut inner_struct = Pgn{}{}::new();",
+            pgn.pgn_id, poly_pgn.name
+        )?;
+        writeln!(
+            writer,
+            "\t\t\tcrate::infra::codec::engine::deserialize_into("
+        )?;
+        writeln!(writer, "\t\t\t\t&mut inner_struct,")?;
+        writeln!(writer, "\t\t\t\tpayload,")?;
+        writeln!(
+            writer,
+            "\t\t\t\t&Pgn{}{}::PGN_{}_{}_DESCRIPTOR,",
+            pgn.pgn_id,
+            poly_pgn.name,
+            pgn.pgn_id,
+            to_snake_case(&poly_pgn.name, "POLY").to_uppercase()
+        )?;
+        writeln!(writer, "\t\t\t)?;")?;
+        writeln!(
+            writer,
+            "\t\t\treturn Ok(Pgn{}::{}(inner_struct));",
+            pgn.pgn_id, poly_pgn.name
+        )?;
+        writeln!(writer, "\t\t}}")?;
+        writeln!(writer)
+    })?;
+
+    writeln!(buffer, "\t\tErr(DeserializationError::MalformedData)")?;
     writeln!(buffer, "\t}}")?; // End of from_payload
     writeln!(buffer)?;
 
@@ -353,31 +348,25 @@ fn generate_enum_trait_impl(
     writeln!(buffer, "\tfn to_payload(&self, buffer: &mut [u8]) -> Result<usize, crate::error::SerializationError> {{")?;
     writeln!(buffer, "\t\tmatch self {{")?;
 
-    generate_enum_impl_helper(
-        &mut buffer,
-        pgn,
-        poly_pgns_map,
-        poly_lookup_map,
-        |writer, _lookup, poly_pgn| {
-            writeln!(
-                writer,
-                "\t\t\tPgn{}::{}(inner) => crate::infra::codec::engine::serialize(",
-                pgn.pgn_id, poly_pgn.name
-            )?;
-            writeln!(writer, "\t\t\t\tinner,")?;
-            writeln!(writer, "\t\t\t\tbuffer,")?;
-            writeln!(
-                writer,
-                "\t\t\t\t&Pgn{}{}::PGN_{}_{}_DESCRIPTOR,",
-                pgn.pgn_id,
-                poly_pgn.name,
-                pgn.pgn_id,
-                to_snake_case(&poly_pgn.name, "POLY").to_uppercase()
-            )?;
-            writeln!(writer, "\t\t\t),")?;
-            writeln!(writer)
-        },
-    )?;
+    generate_enum_impl_helper(&mut buffer, pgn, poly_pgns_map, |writer, poly_pgn| {
+        writeln!(
+            writer,
+            "\t\t\tPgn{}::{}(inner) => crate::infra::codec::engine::serialize(",
+            pgn.pgn_id, poly_pgn.name
+        )?;
+        writeln!(writer, "\t\t\t\tinner,")?;
+        writeln!(writer, "\t\t\t\tbuffer,")?;
+        writeln!(
+            writer,
+            "\t\t\t\t&Pgn{}{}::PGN_{}_{}_DESCRIPTOR,",
+            pgn.pgn_id,
+            poly_pgn.name,
+            pgn.pgn_id,
+            to_snake_case(&poly_pgn.name, "POLY").to_uppercase()
+        )?;
+        writeln!(writer, "\t\t\t),")?;
+        writeln!(writer)
+    })?;
     writeln!(buffer, "\t\t}}")?; // end match_self
     writeln!(buffer, "\t}}")?; // end to_payload
     writeln!(buffer, "}}")?; // end impl PgnData
@@ -391,19 +380,13 @@ fn generate_enum_trait_impl(
         "\tfn field(&self, id: &'static str) -> Option<PgnValue> {{"
     )?;
     writeln!(buffer, "\t\tmatch self {{")?;
-    generate_enum_impl_helper(
-        &mut buffer,
-        pgn,
-        poly_pgns_map,
-        poly_lookup_map,
-        |writer, _lookup, poly_pgn| {
-            writeln!(
-                writer,
-                "\t\t\tPgn{}::{}(inner) => inner.field(id),",
-                pgn.pgn_id, poly_pgn.name
-            )
-        },
-    )?;
+    generate_enum_impl_helper(&mut buffer, pgn, poly_pgns_map, |writer, poly_pgn| {
+        writeln!(
+            writer,
+            "\t\t\tPgn{}::{}(inner) => inner.field(id),",
+            pgn.pgn_id, poly_pgn.name
+        )
+    })?;
     writeln!(buffer, "\t\t}}")?; // end match_self
     writeln!(buffer, "\t}}")?; // end field
     writeln!(buffer)?;
@@ -413,19 +396,13 @@ fn generate_enum_trait_impl(
         "\tfn field_mut(&mut self, id: &'static str, value: PgnValue) -> Option<()> {{"
     )?;
     writeln!(buffer, "\t\tmatch self {{")?;
-    generate_enum_impl_helper(
-        &mut buffer,
-        pgn,
-        poly_pgns_map,
-        poly_lookup_map,
-        |writer, _lookup, poly_pgn| {
-            writeln!(
-                writer,
-                "\t\t\tPgn{}::{}(inner) => inner.field_mut(id, value),",
-                pgn.pgn_id, poly_pgn.name
-            )
-        },
-    )?;
+    generate_enum_impl_helper(&mut buffer, pgn, poly_pgns_map, |writer, poly_pgn| {
+        writeln!(
+            writer,
+            "\t\t\tPgn{}::{}(inner) => inner.field_mut(id, value),",
+            pgn.pgn_id, poly_pgn.name
+        )
+    })?;
     writeln!(buffer, "\t\t}}")?; // end match_self
     writeln!(buffer, "\t}}")?; // end field_mut
     writeln!(buffer, "}}")?; // end impl FieldAccess
@@ -438,22 +415,15 @@ fn generate_enum_impl_helper<W, F>(
     writer: &mut W,
     pgn: &PgnInstructions,
     poly_pgns_map: &HashMap<u32, Vec<PolyPgn>>,
-    poly_lookup_map: &HashMap<String, LookupEnum>,
     mut action: F,
 ) -> Result<(), BuildError>
 where
     W: Write,
-    F: FnMut(&mut W, &EnumValues, &PolyPgn) -> Result<(), std::fmt::Error>,
+    F: FnMut(&mut W, &PolyPgn) -> Result<(), std::fmt::Error>,
 {
     if let Some(poly_pgn_vec) = poly_pgns_map.get(&pgn.pgn_id) {
         for poly_pgn in poly_pgn_vec {
-            if let Some(poly_lookup) = poly_lookup_map.get(&poly_pgn.lookup_id) {
-                for lookup in &poly_lookup.enum_values {
-                    if poly_pgn.desc == lookup.name {
-                        action(writer, lookup, poly_pgn)?;
-                    }
-                }
-            }
+            action(writer, poly_pgn)?;
         }
     }
     Ok(())
@@ -1258,30 +1228,47 @@ fn set_poly_pgns_map(
                         let poly_pgn_formated_name =
                             to_pascal_case(&pgn_main_def.pgn_name, PascalCaseMode::Soft);
 
-                        pgn_main_def
-                            .fields
-                            .iter()
-                            .filter(|e| e.order == 1)
-                            .for_each(|e| {
-                                if let Some(desc) = &e.description {
-                                    if let Some(enum_direct_name) = &e.enum_direct_name {
-                                        let poly_pgn = PolyPgn {
-                                            lookup_id: enum_direct_name.clone(),
-                                            name: poly_pgn_formated_name.clone(),
-                                            desc: desc.clone(),
-                                        };
-                                        poly_pgns_map
-                                            .entry(pgn_main_def.pgn_id)
-                                            .or_default()
-                                            .push(poly_pgn);
-                                    }
-                                }
-                            });
+                        // A variant is registered on the same criterion as before:
+                        // field #1 names a lookup and a description. What selects it
+                        // at runtime is now every `Match` field, not just that one.
+                        let is_variant = pgn_main_def.fields.iter().any(|e| {
+                            e.order == 1 && e.description.is_some() && e.enum_direct_name.is_some()
+                        });
+
+                        if is_variant {
+                            let discriminators = pgn_main_def
+                                .fields
+                                .iter()
+                                .filter_map(|e| {
+                                    Some(Discriminator {
+                                        bits_offset: e.bits_offset?,
+                                        bits_length: e.bits_length?.try_into().ok()?,
+                                        value: e.match_value?,
+                                    })
+                                })
+                                .collect();
+
+                            poly_pgns_map
+                                .entry(pgn_main_def.pgn_id)
+                                .or_default()
+                                .push(PolyPgn {
+                                    name: poly_pgn_formated_name.clone(),
+                                    discriminators,
+                                });
+                        }
                     }
                 }
                 Err(e) => return Err(BuildError::ParseJson(e)),
             }
         }
     }
+
+    // Most constrained variant first: `simnetCommandApStandby` (Command Type +
+    // Event) must be tried before `simnetApCommand` (Command Type only), which
+    // would otherwise swallow it. CANboat does not list them in that order.
+    for variants in poly_pgns_map.values_mut() {
+        variants.sort_by_key(|v| core::cmp::Reverse(v.discriminators.len()));
+    }
+
     Ok(poly_pgns_map)
 }

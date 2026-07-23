@@ -364,12 +364,26 @@ pub(crate) struct Fields {
     /// 15. Bitfield enumeration name for BITLOOKUP fields.
     #[serde(rename = "LookupBitEnumeration")]
     pub enum_bit_name: Option<String>,
+    /// 16. Constant this field must hold for the variant to apply.
+    /// CANboat identifies a polymorphic variant by the conjunction of every
+    /// field carrying a `Match`, not by the first one alone.
+    #[serde(rename = "Match")]
+    pub match_value: Option<u32>,
+}
+
+#[derive(Debug, Hash)]
+/// One `Match` constraint: the payload must hold `value` at this bit position
+/// for the owning variant to be selected.
+pub(crate) struct Discriminator {
+    pub bits_offset: u32,
+    pub bits_length: u8,
+    pub value: u32,
 }
 
 #[derive(Debug, Default, Hash)]
 /// Utility structure to group polymorphic PGNs during code generation.
 pub(crate) struct PolyPgn {
-    pub lookup_id: String,
     pub name: String,
-    pub desc: String,
+    /// Every `Match` constraint of the variant, in field order. All must hold.
+    pub discriminators: Vec<Discriminator>,
 }

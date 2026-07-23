@@ -21,6 +21,12 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// Move the cursor to an absolute bit position. Bounds are checked by the
+    /// next read, so seeking past the end is harmless on its own.
+    pub fn seek(&mut self, bit_offset: usize) {
+        self.bit_cursor = bit_offset;
+    }
+
     /// Read `num_bits` bits starting at the current cursor and return a `u64`.
     /// `num_bits` must stay in the [1, 64] range.
     pub fn read_u64(&mut self, num_bits: u8) -> Result<u64, BitReaderError> {

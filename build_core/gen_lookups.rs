@@ -340,34 +340,6 @@ pub(super) fn generate_indirect_lookup_helpers(
     Ok(buffer)
 }
 
-//==================================================================================SET_POLY_LOOKUP_MAP
-/// Build the mapping of polymorphic PGNs based on CANboat lookups.
-pub(super) fn set_poly_lookup_map(
-    canboat_value: &Value,
-) -> Result<HashMap<String, LookupEnum>, BuildError> {
-    let mut poly_lookup_map = HashMap::new();
-    if let Some(lookup_def) = canboat_value["LookupEnumerations"].as_array() {
-        for lookup in lookup_def {
-            match serde_json::from_value::<LookupEnum>(lookup.clone()) {
-                Ok(lookup_def) => {
-                    let instance = LookupEnum {
-                        name: lookup_def.name.clone(),
-                        max_value: lookup_def.max_value,
-                        enum_values: lookup_def.enum_values,
-                    };
-                    poly_lookup_map
-                        .entry(lookup_def.name.clone())
-                        .or_insert(instance);
-                }
-                Err(e) => {
-                    println!("cargo:warning=[LOOKUP_ENUM {}] Skipped..", e)
-                }
-            }
-        }
-    }
-    Ok(poly_lookup_map)
-}
-
 /// Builds a map of direct lookups accessible by raw or PascalCase name.
 pub(super) fn set_lookup_enum_map(
     canboat_value: &Value,
