@@ -2,15 +2,15 @@
 //! Replay of a real NMEA 2000 backbone capture through the whole stack:
 //! CAN identifier, Fast Packet reassembly, then decoding of every PGN.
 //!
-//! Skipped when the capture is absent, so CI is unaffected. Point it at another
-//! recording with KORRI_N2K_CAPTURE=/path/to/capture.bin.
+//! Runs on the anonymised sample committed under tests/fixtures; see the README
+//! there. KORRI_N2K_CAPTURE=/path/to/capture.bin points it at a full recording.
 use korri_n2k::infra::codec::traits::PgnData;
 use korri_n2k::protocol::messages::*;
 use korri_n2k::protocol::transport::can_id::CanId;
 use korri_n2k::protocol::transport::fast_packet::assembler::{FastPacketAssembler, ProcessResult};
 use std::collections::BTreeMap;
 
-const CAPTURE: &str = "../korri-n2k-examples/xtensa/esp32-s3/capture_long.bin";
+const CAPTURE: &str = "tests/fixtures/backbone_sample.bin";
 const MAGIC: &[u8] = b"KN2KCAP\x01";
 
 fn is_fast_packet(pgn: u32) -> bool {
@@ -1213,12 +1213,19 @@ fn replay_real_backbone_capture() {
         println!("  {pgn:>6}  {n:>7}");
     }
 
-    assert!(total_ok > 250_000, "only {total_ok} messages decoded");
-    // Residual: 4 Simnet 130850 frames whose variant declares 14 bytes while the
-    // autopilot sends 12. Absent trailing numbers are missing data, not padding,
-    // so they stay an error rather than being defaulted silently.
+    // Most of what a real bus carries must decode; the sample holds 489 messages.
     assert!(
-        total_err * 1000 < total_ok,
-        "{total_err} failures for {total_ok} successes"
+        total_ok > frames / 5,
+        "only {total_ok} decoded out of {frames} frames"
     );
+
+    // The only accepted residual is Simnet 130850, whose variant declares 14 bytes
+    // while the autopilot sends 12. Absent trailing numbers are missing data, not
+    // padding, so they stay an error rather than being defaulted silently.
+    let unexpected: u64 = errs
+        .iter()
+        .filter(|(pgn, _)| **pgn != 130850)
+        .flat_map(|(_, kinds)| kinds.values())
+        .sum();
+    assert_eq!(unexpected, 0, "unexpected decode failures: {errs:#?}");
 }
