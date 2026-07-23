@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- The cross-compilation CI jobs. `rust-toolchain.toml` pinned `stable`, and a
+  rustup directory override wins over the `rustup default` the workflow sets: the
+  targets were installed for 1.96.0 while cargo built on stable, which had none.
+  The file is now the single source of truth and declares the targets itself.
+
+### Docs
+- Corrected the README's figures for the generated code, and dropped the build
+  cost of `full-pgns` as a decision criterion.
 
 ## [0.5.0] - 2026-07-23
 ### Added
@@ -24,8 +33,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   preserved. `KORRI_N2K_CAPTURE` points it at a full recording instead.
 - `BitReader::bit_cursor()` and `bits_remaining()`, so the engine can size a field
   against what the frame actually holds.
-- `build.rs` now watches `build_core/`. Editing the generator left stale code in
-  `OUT_DIR` and produced compiler errors that matched no source.
 
 ### Changed
 - **BREAKING** — generated lookup enums carry an `Unrecognized(repr)` variant and
@@ -49,17 +56,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   found, so the diagnostic value is unchanged.
 - `FieldKind` now derives `Copy`. It is a field-less enum, and the missing
   derive was forcing a pointless clone on the deserialization error path.
-- `CI`: the toolchain is now pined to 1.96.0. 
-  
-- Dual licensing: `MIT OR Apache-2.0`, the Rust ecosystem convention. MIT alone
-  kept GPLv2 compatibility but offered no patent grant; Apache-2.0 alone would
-  have lost that compatibility. Offering both costs nothing and covers both.
-  `LICENSE` becomes `LICENSE-MIT`, joined by `LICENSE-APACHE` and a `NOTICE`.
 
-  The `NOTICE` also settles a compliance gap: `canboat.json` is Apache-2.0 and
-  ships inside the crate, but no copy of that licence did. It and the code
-  generated from it — PGN names, descriptions, lookup variants — stay under
-  Apache-2.0, © Kees Verruijt.
+### Licensing
+- Now dual `MIT OR Apache-2.0`, at your option — the Rust ecosystem convention.
+  MIT alone kept GPLv2 compatibility but offered no patent grant; Apache-2.0
+  alone would have lost that compatibility. `LICENSE` becomes `LICENSE-MIT`,
+  joined by `LICENSE-APACHE` and a `NOTICE`.
+- The `NOTICE` settles a compliance gap: `canboat.json` is Apache-2.0 and ships
+  inside the crate, but no copy of that licence did. It and the code generated
+  from it — PGN names, descriptions, lookup variants — stay under Apache-2.0,
+  © Kees Verruijt.
 
 ### Removed
 - `embedded-can`, unused anywhere in the crate.
@@ -156,6 +162,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   `SupervisorCommand` and `ProcessResult` — now carry a local `allow` explaining
   why: the lint suggests `Box`, which needs `alloc`, and this crate has none.
 
+### Internal
+- `cargo clippy` now fails the CI on any warning, and the toolchain is pinned to
+  1.96.0. Clippy ran without teeth before: warnings printed, the job stayed
+  green, and the lint that reported the oversized errors above went unheeded for
+  releases.
+- `build.rs` watches `build_core/`. Editing the generator otherwise left stale
+  code in `OUT_DIR` and produced compiler errors matching no source.
+
 ## [0.4.0] - 2026-07-22
 ### Added
 - `AddressClaimStrategy` enum with `Fixed`, `SelfConfigurable` and
@@ -224,7 +238,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - **codec engine**: `FieldKind::IsoName` (the 64-bit device-identity field, e.g. `DataSourceNetworkIdName` in PGN 126985 "Alert Text") had no match arm in `write_field`/`read_field_value`, falling through to `UnsupportedFieldKind`. Any PGN carrying an `IsoName` field failed `to_payload()`/`from_payload()` unconditionally. Now handled like `Number`/`Pgn` (plain unsigned integer, no sign/resolution).
 
 ### Changed
-- **README**: clarified upfront that the library is bidirectional (send *and* receive). Split the "receive" example per runtime — `AddressFrames::recv()` returns `Option<CanFrame>` under `tokio` but `CanFrame` directly under `embassy` (the channel never closes), so the previous shared snippet didn't compile under the default `embassy` feature.   
+- **README**: clarified upfront that the library is bidirectional (send *and* receive). Split the "receive" example per runtime — `AddressFrames::recv()` returns `Option<CanFrame>` under `tokio` but `CanFrame` directly under `embassy` (the channel never closes), so the previous shared snippet didn't compile under the default `embassy` feature.
 
 ## [0.3.0] - 2026-06-20
 ### Added

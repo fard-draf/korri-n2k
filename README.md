@@ -76,17 +76,6 @@ Matching is on `id`; names are documentation. Precedence:
 common PGNs — position, heading, AIS, depth, wind; `full-pgns` covers the 313 the
 generator supports, out of CANboat's 348.
 
-What the manifest buys you is build cost, not flash: a PGN you never reference is
-dropped by the linker either way.
-
-| Manifest | PGNs | Generated code | Clean build |
-|---|---|---|---|
-| default | 42 | 14 000 lines, 353 KB | 3 s |
-| `full-pgns` | 313 | 126 000 lines, 3.1 MB | 15 s |
-
-Flash cost depends on which types you actually call; measure your own binary
-with `cargo size`.
-
 ## Sending and receiving
 
 Any task holding an `AddressHandle` can send. Fragmentation into Fast Packet
