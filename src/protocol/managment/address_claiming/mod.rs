@@ -10,6 +10,7 @@ use crate::{
 };
 use futures_util::future::{select, Either};
 use futures_util::pin_mut;
+mod machine;
 
 /// Execute a full address-claim cycle and return the acquired address.
 ///
