@@ -13,7 +13,7 @@ exclude = ["tests/", ".github/", "archives/"]
 
 [features]
 default = ["embassy"]
-embassy = ["dep:embassy-time", "dep:embassy-sync"]
+embassy = ["dep:embassy-sync"]
 tokio = ["std", "dep:tokio"]
 std = []
 defmt = ["dep:defmt"]
@@ -21,7 +21,6 @@ build-download = ["dep:ureq"]
 full-pgns = []
 
 [dependencies]
-embassy-time = { version = "0.4", optional = true }
 embassy-sync = { version = "0.6", optional = true }
 tokio = { version = "1.47.1", optional = true, default-features = false, features = ["sync", "time"] }
 thiserror-no-std = "2.0"

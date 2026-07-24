@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 ### Docs
 - Corrected the README's figures for the generated code, and dropped the build
   cost of `full-pgns` as a decision criterion.
+  
+### Removed
+- `embassy-time`: removed unused dep. 
 
 ## [0.5.0] - 2026-07-23
 ### Added
