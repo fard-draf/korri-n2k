@@ -5,7 +5,7 @@ mod helpers {
 
 use helpers::{MockCanBus, MockTimer};
 use korri_n2k::{
-    error::ClaimError,
+    error::{ClaimError, ClaimFault},
     protocol::{
         managment::{address_claiming::AddressClaimStrategy, address_manager::AddressManager},
         transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus},
@@ -82,7 +82,7 @@ async fn test_address_manager_defend_on_conflict_loose_fixed() {
     tokio::select! {
         _ = async {
             let manager = AddressManager::new(dut_bus, timer, my_name, strategy).await;
-            assert!(matches!(manager, Err(ClaimError::NoAddressAvailable)));
+            assert!(matches!(manager, Err(ClaimError::Fault(ClaimFault::NoAddressAvailable))));
         } => {
             // panic!("Manager task should not complete");
         }

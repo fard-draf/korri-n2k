@@ -1,6 +1,6 @@
 //! Network discovery service: send an ISO Request (PGN 59904) and collect
 //! Address Claim responses (PGN 60928) to identify neighbouring nodes.
-use crate::error::ClaimError;
+use crate::error::{ClaimError, ClaimFault};
 use crate::protocol::managment::address_claiming::extract_name_from_claim;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
@@ -33,7 +33,7 @@ where
             .to_destination(255)
             .with_priority(6) // Standard priority for network requests.
             .build()
-            .map_err(|_| ClaimError::RequestAddressClaimErr)?,
+            .map_err(|_| ClaimError::Fault(ClaimFault::RequestAddressClaimErr))?,
         data,
         len: 3, // Only the first three bytes are meaningful.
     };

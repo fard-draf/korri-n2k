@@ -50,7 +50,9 @@ where
         // Perform the initial claim
 
         if !is_addr_capable_and_isoname_match(my_name, strategy) {
-            return Err(ClaimError::InconsistentStrategy);
+            return Err(ClaimError::Fault(
+                crate::error::ClaimFault::InconsistentStrategy,
+            ));
         };
 
         let current_address = claim_address(&mut can_bus, &mut timer, my_name, strategy).await?;

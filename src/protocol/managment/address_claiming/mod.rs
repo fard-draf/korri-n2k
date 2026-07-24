@@ -1,6 +1,6 @@
 //! SAE J1939 / NMEA 2000 address-claim algorithm:
 //! emit PGN 60928, listen for conflicts, and fall back to alternative addresses when needed.
-use crate::error::{CanIdBuildError, ExtractionError};
+use crate::error::{CanIdBuildError, ClaimFault, ExtractionError};
 use crate::protocol::constants::address;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
@@ -31,7 +31,7 @@ where
 {
     // Determine consistency between IsoName and Addr Claim Strategy.
     if !is_addr_capable_and_isoname_match(my_name, strategy) {
-        return Err(ClaimError::InconsistentStrategy);
+        return Err(ClaimError::Fault(ClaimFault::InconsistentStrategy));
     };
 
     // Iterate over allowed addresses (preferred, then 128-207).
@@ -41,7 +41,8 @@ where
         #[cfg(feature = "defmt")]
         defmt::info!("Trying to claim address: {}", address_to_claim);
 
-        let claim_frame = build_address_claim_frame(my_name, address_to_claim)?;
+        let claim_frame =
+            build_address_claim_frame(my_name, address_to_claim).map_err(ClaimFault::BuildErr)?;
         can_bus
             .send(&claim_frame)
             .await
@@ -87,7 +88,8 @@ where
                                     incoming_frame.id.source_address()
                                 );
 
-                                let their_name = extract_name_from_claim(&incoming_frame)?;
+                                let their_name = extract_name_from_claim(&incoming_frame)
+                                    .map_err(ClaimFault::Extraction)?;
 
                                 #[cfg(feature = "defmt")]
                                 defmt::debug!(
@@ -113,7 +115,9 @@ where
                                         );
                                         match strategy {
                                             AddressClaimStrategy::Fixed { preferred: _ } => {
-                                                return Err(ClaimError::NoAddressAvailable);
+                                                return Err(ClaimError::Fault(
+                                                    ClaimFault::NoAddressAvailable,
+                                                ));
                                             }
                                             AddressClaimStrategy::SelfConfigurable {
                                                 addresses: _,
@@ -146,7 +150,8 @@ where
 
             // Optional defensive transmission (outside the `recv` borrow scope).
             if need_defense {
-                let defense_frame = build_address_claim_frame(my_name, address_to_claim)?;
+                let defense_frame = build_address_claim_frame(my_name, address_to_claim)
+                    .map_err(ClaimFault::BuildErr)?;
                 can_bus
                     .send(&defense_frame)
                     .await
@@ -156,7 +161,7 @@ where
     }
 
     // Iterator exhausted: no address available.
-    Err(ClaimError::NoAddressAvailable)
+    Err(ClaimError::Fault(ClaimFault::NoAddressAvailable))
 }
 
 //==================================================================================ADDRESS_CLAIM_STRATEGY
