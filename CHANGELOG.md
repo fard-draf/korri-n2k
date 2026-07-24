@@ -37,8 +37,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   call. `ProcessResult::Ignored` cannot distinguish a single-frame message from a
   lost fragment, and never could.
 
+<<<<<<< HEAD
   Released as 0.6.0 rather than a patch: no signature breaks, but frames 0.5
   accepted are now dropped.
+=======
+  This prepares the runtime-agnostic claim machine, whose error type must not be
+  able to name the bus.
+- `address_claiming` move the tests into their respective file (address_claiming/tests.rs).
+>>>>>>> b0696a2 (refactor(test): move tests out of the address_claiming mod file)
 
 ### Fixed
 - `FastPacketAssembler` refused Fast Packet messages shorter than eight bytes.
