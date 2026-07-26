@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.6.0] - 2026-07-26
 ### Added
 - `FAST_PACKET_PGNS` and `FAST_PACKET_PGNS_ALL`, generated from canboat by the
   build script and re-exported from `protocol::transport::fast_packet`. The first
