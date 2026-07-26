@@ -119,20 +119,17 @@ impl Default for FastPacketAssembler {
 }
 
 impl FastPacketAssembler {
-    /// Instantiate the assembler with an inactive session pool, reassembling the
-    /// Fast Packet PGNs of the active manifest.
+    /// Constructor for a node: the Fast Packet PGNs of its manifest, nothing more.
     ///
-    /// A gateway wants `with_pgns(FAST_PACKET_PGNS_ALL)` instead. Even the
-    /// `full-pgns` manifest is a subset of what canboat declares Fast Packet, so
-    /// `new()` silently drops the difference.
+    /// A gateway wants `with_pgns`.
     pub const fn new() -> Self {
         Self::with_pgns(FAST_PACKET_PGNS)
     }
 
-    /// Instantiate the assembler over a caller-supplied table of Fast Packet PGNs.
+    /// Constructor for a gateway: an ascending table of your choosing.
     ///
-    /// The table must be sorted ascending. Pass `FAST_PACKET_PGNS_ALL` to reassemble
-    /// every Fast Packet canboat knows, or your own list for proprietary PGNs.
+    /// `FAST_PACKET_PGNS_ALL` holds every Fast Packet canboat declares, 182 against
+    /// the 152 of `full-pgns`. Extend it for proprietary PGNs.
     pub const fn with_pgns(pgns: &'static [u32]) -> Self {
         Self {
             sessions: [FastPacketSession::new(); MAX_CONCURRENT_SESSIONS],
@@ -147,8 +144,7 @@ impl FastPacketAssembler {
 
     /// Returns true when this assembler's table lists the PGN as Fast Packet.
     ///
-    /// Callers that also decode single-frame PGNs must branch on this rather than
-    /// on `ProcessResult::Ignored`, which cannot tell a single-frame message from a
+    /// Branch on this, not on `Ignored`, which cannot tell a single frame from a
     /// lost fragment.
     pub fn handles(&self, pgn: u32) -> bool {
         self.fast_packet_pgns.binary_search(&pgn).is_ok()
@@ -198,9 +194,7 @@ impl FastPacketAssembler {
     /// * `data` – raw 8-byte payload of the received CAN frame
     ///
     /// Returns a `ProcessResult` indicating whether the frame was ignored,
-    /// consumed, or completed the message. A PGN outside this assembler's table is
-    /// ignored: an ordinary single-frame message can carry `data[0] & 0x1F == 0`
-    /// and would otherwise open a bogus session.
+    /// consumed, or completed the message. A PGN outside the table is ignored.
     pub fn process_frame(
         &mut self,
         now_ms: u32,
