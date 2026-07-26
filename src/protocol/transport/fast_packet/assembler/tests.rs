@@ -426,8 +426,8 @@ fn test_pool_exhaustion_counter_tracks_every_refusal() {
 //==================================================================================Diagnostic counters
 
 #[test]
-/// A first frame announcing a size outside the Fast Packet range is not a loss:
-/// it is traffic the assembler does not handle. It must never be mixed with the
+/// A first frame announcing a size no Fast Packet can carry is not a loss: it is
+/// traffic the assembler does not handle. It must never be mixed with the
 /// counters that report dropped data.
 fn test_rejected_frames_is_not_a_loss() {
     // Explicit table: this test is about the announced size, not about the manifest.
@@ -435,12 +435,12 @@ fn test_rejected_frames_is_not_a_loss() {
     let mut assembler = FastPacketAssembler::with_pgns(&[130824]);
     let source = 12;
 
-    // Announced size below the Fast Packet minimum, as seen on a real bus.
-    let too_short: [u8; 8] = [0b000_00000, 2, 1, 2, 3, 4, 5, 6];
+    // A message of no bytes at all.
+    let empty: [u8; 8] = [0b000_00000, 0, 1, 2, 3, 4, 5, 6];
     // Announced size above the payload buffer.
     let too_long: [u8; 8] = [0b000_00000, 255, 1, 2, 3, 4, 5, 6];
 
-    for frame in [&too_short, &too_long] {
+    for frame in [&empty, &too_long] {
         assert_eq!(
             assembler.process_frame(100, pgn, source, frame),
             ProcessResult::Ignored
@@ -581,4 +581,82 @@ fn test_empty_table_ignores_everything() {
         );
     }
     assert_eq!(assembler.unknown_pgn(), 3);
+}
+
+//==================================================================================Short payloads
+
+#[test]
+/// A payload of six bytes or less is complete on its first frame: there is no
+/// continuation to wait for. 130824 announces two bytes and sends nothing else.
+fn test_payload_fitting_in_the_first_frame_completes_at_once() {
+    let mut assembler = FastPacketAssembler::with_pgns(&[130824]);
+
+    for size in 1..=FIRST_FRAME_PAYLOAD {
+        let mut frame = [0u8; 8];
+        frame[1] = size as u8;
+        frame[2..].copy_from_slice(&[11, 22, 33, 44, 55, 66]);
+
+        let mut expected = [0; MAX_FAST_PACKET_PAYLOAD];
+        expected[..size].copy_from_slice(&[11, 22, 33, 44, 55, 66][..size]);
+
+        assert_eq!(
+            assembler.process_frame(100, 130824, 9, &frame),
+            ProcessResult::MessageComplete(CompletedMessage {
+                payload: expected,
+                len: size,
+            }),
+            "a {size}-byte payload must be delivered on its first frame"
+        );
+    }
+
+    // No session was ever opened, so the pool stayed untouched.
+    assert!(assembler
+        .sessions
+        .iter()
+        .all(|s| s.state == SessionState::Inactive));
+    assert_eq!(assembler.rejected_frames(), 0);
+    assert_eq!(assembler.lost_fragments(), 0);
+}
+
+#[test]
+/// A seven-byte payload needs a second frame: one byte does not fit in the first.
+/// canboat declares 130817 as Fast Packet with a length of seven.
+fn test_seven_byte_payload_completes_on_the_second_frame() {
+    let mut assembler = FastPacketAssembler::with_pgns(&[130817]);
+
+    let frame0: [u8; 8] = [0b000_00000, 7, 1, 2, 3, 4, 5, 6];
+    assert_eq!(
+        assembler.process_frame(100, 130817, 9, &frame0),
+        ProcessResult::FragmentConsumed
+    );
+
+    let frame1: [u8; 8] = [0b000_00001, 7, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+    let mut expected = [0; MAX_FAST_PACKET_PAYLOAD];
+    expected[..7].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(
+        assembler.process_frame(100, 130817, 9, &frame1),
+        ProcessResult::MessageComplete(CompletedMessage {
+            payload: expected,
+            len: 7,
+        })
+    );
+    assert_eq!(assembler.rejected_frames(), 0);
+}
+
+#[test]
+/// Only a size no Fast Packet can carry is rejected: zero, or past the buffer.
+fn test_only_impossible_sizes_are_rejected() {
+    let mut assembler = FastPacketAssembler::with_pgns(&[130824]);
+
+    for size in [0u8, (MAX_FAST_PACKET_PAYLOAD + 1) as u8, 255] {
+        let mut frame = [0u8; 8];
+        frame[1] = size;
+        assert_eq!(
+            assembler.process_frame(100, 130824, 9, &frame),
+            ProcessResult::Ignored,
+            "size {size} must be rejected"
+        );
+    }
+    assert_eq!(assembler.rejected_frames(), 3);
+    assert_eq!(assembler.lost_fragments(), 0);
 }

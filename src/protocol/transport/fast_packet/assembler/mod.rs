@@ -10,6 +10,12 @@ const MAX_CONCURRENT_SESSIONS: usize = 4;
 /// Maximum time without addressed message for a fast packet session.
 const SESSION_TIMEOUT_MS: u32 = 500;
 
+/// Useful bytes a first frame carries, after the sequence and size header.
+const FIRST_FRAME_PAYLOAD: usize = 6;
+
+/// Useful bytes a continuation frame carries, after the sequence header.
+const CONTINUATION_PAYLOAD: usize = 7;
+
 //==================================================================================Enums and Structs
 // TODO: pass the completed message as an out-parameter of `process_frame` instead of
 // returning it here. The caller would then own the buffer once, outside the receive
@@ -165,9 +171,9 @@ impl FastPacketAssembler {
         self.pool_exhausted
     }
 
-    /// First frames announcing a size outside the Fast Packet range. Not a
-    /// loss: the frame simply is not a Fast Packet message this assembler
-    /// handles.
+    /// First frames announcing a size of zero, or one above
+    /// `MAX_FAST_PACKET_PAYLOAD`. Not a loss: no Fast Packet can carry that, so
+    /// the frame is not one this assembler handles.
     pub fn rejected_frames(&self) -> u32 {
         self.rejected_frames
     }
@@ -214,9 +220,22 @@ impl FastPacketAssembler {
             // First frame: carries the total expected size.
             let expected_size = data[1] as usize;
 
-            if !(8..=MAX_FAST_PACKET_PAYLOAD).contains(&expected_size) {
+            if !(1..=MAX_FAST_PACKET_PAYLOAD).contains(&expected_size) {
                 self.rejected_frames += 1;
                 return ProcessResult::Ignored;
+            }
+
+            // A payload of six bytes or less rides entirely in this frame, so there
+            // is no continuation to wait for. Deliver it without touching the
+            // session pool: canboat declares such Fast Packets (130824 announces two
+            // bytes) and a live bus sends them at rate.
+            if expected_size <= FIRST_FRAME_PAYLOAD {
+                let mut payload = [0; MAX_FAST_PACKET_PAYLOAD];
+                payload[..expected_size].copy_from_slice(&data[2..2 + expected_size]);
+                return ProcessResult::MessageComplete(CompletedMessage {
+                    payload,
+                    len: expected_size,
+                });
             }
 
             let session_index = self
@@ -240,10 +259,8 @@ impl FastPacketAssembler {
                 session.pgn = pgn;
                 session.last_seen_ms = now_ms;
 
-                // First frame transports six useful bytes after the header.
-                let data_len = 6;
-                session.buffer[0..data_len].copy_from_slice(&data[2..]);
-                session.current_size = data_len;
+                session.buffer[0..FIRST_FRAME_PAYLOAD].copy_from_slice(&data[2..]);
+                session.current_size = FIRST_FRAME_PAYLOAD;
 
                 return ProcessResult::FragmentConsumed;
             } else {
@@ -269,9 +286,7 @@ impl FastPacketAssembler {
                 session.last_seen_ms = now_ms;
 
                 let bytes_needed = session.expected_size - session.current_size;
-                // Subsequent frames provide up to seven bytes of payload.
-                let bytes_in_frame = 7;
-                let copy_len = bytes_needed.min(bytes_in_frame);
+                let copy_len = bytes_needed.min(CONTINUATION_PAYLOAD);
 
                 let data_slice = &data[1..(1 + copy_len)];
                 let buffer_slice =

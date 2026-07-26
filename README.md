@@ -111,11 +111,14 @@ use korri_n2k::protocol::transport::fast_packet::assembler::{
     FastPacketAssembler, ProcessResult,
 };
 
+// new() reassembles the Fast Packet PGNs of your manifest.
 let mut assembler = FastPacketAssembler::new();
 
 // for each incoming frame, with a millisecond clock:
 let pgn = frame.id.pgn();
-if let ProcessResult::MessageComplete(msg) =
+if !assembler.handles(pgn) {
+    // Single frame: decode the 8 bytes directly, as in the example above.
+} else if let ProcessResult::MessageComplete(msg) =
     assembler.process_frame(now_ms, pgn, frame.id.source_address(), &frame.data)
 {
     if pgn == 129029 {
@@ -125,12 +128,28 @@ if let ProcessResult::MessageComplete(msg) =
 }
 ```
 
+`new()` carries `FAST_PACKET_PGNS`, the Fast Packet PGNs of your manifest. A
+gateway that forwards payloads it cannot decode wants every one CANboat knows:
+
+```rust
+use korri_n2k::protocol::transport::fast_packet::FAST_PACKET_PGNS_ALL;
+
+let mut assembler = FastPacketAssembler::with_pgns(FAST_PACKET_PGNS_ALL);
+```
+
+`full-pgns` is not a substitute: its manifest lists 152 of the 182 Fast Packet
+PGNs CANboat declares. Pass your own sorted table for proprietary PGNs CANboat
+does not list at all.
+
 ## Limits
 
 - **Fast Packet reassembly is not wired into the receive path.** Transmission
   fragments automatically, reception hands you raw frames; run
   `FastPacketAssembler` yourself as shown above. Decoding the first 8 bytes of a
   multi-frame message otherwise succeeds and returns wrong values.
+- **The assembler only reassembles the PGNs in its table.** A proprietary PGN
+  CANboat does not list is ignored until you hand it to `with_pgns`. Ask
+  `handles()` what a given assembler covers.
 - **No ISO Transport Protocol.** PGNs 60160 and 60416 decode as messages, but
   the multi-packet TP transport itself is not implemented.
 - **35 of CANboat's 348 PGNs are not generated**, listed with their reason in
