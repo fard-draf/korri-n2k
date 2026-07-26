@@ -4,13 +4,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `FAST_PACKET_PGNS` and `FAST_PACKET_PGNS_ALL`, generated from canboat by the
+  build script and re-exported from `protocol::transport::fast_packet`. The first
+  holds the Fast Packet PGNs of the active manifest, the second every one canboat
+  declares (182), regardless of the manifest. Both are `const`, so the linker drops
+  the one a binary does not reference.
+- `FastPacketAssembler::with_pgns`, building an assembler over a caller-supplied
+  table, and `handles`, asking whether it treats a PGN as Fast Packet.
+- `FastPacketAssembler::unknown_pgn`, counting frames whose PGN is absent from the
+  assembler's table. Kept apart from `rejected_frames`, which stays reserved for a
+  first frame announcing a size no Fast Packet can carry.
+
+### Changed
+- **Behaviour change.** `FastPacketAssembler::process_frame` now ignores any PGN
+  outside its table instead of opening a session for it. On a live bus, ordinary
+  single-frame PGNs such as 127250 at 10 Hz match the first-fragment pattern and
+  used to starve the four-slot session pool.
+
+  A proprietary PGN absent from canboat, or a Fast Packet PGN absent from the
+  manifest, is therefore no longer reassembled by `new()`. Migrate with
+  `FastPacketAssembler::with_pgns(FAST_PACKET_PGNS_ALL)`, or your own sorted table
+  for proprietary PGNs. Note that `full-pgns` is not a substitute: its manifest
+  lists 152 of the 182 Fast Packet PGNs canboat knows, so a gateway needs
+  `with_pgns` whatever its features. On a 420k-frame backbone capture the full
+  table reassembles 24738 messages against 20631 for the manifest one, the
+  difference being 126208, 130822, 130824, 130845 and 130846.
+
+  Callers that also decode single-frame PGNs must branch on `handles` before the
+  call. `ProcessResult::Ignored` cannot distinguish a single-frame message from a
+  lost fragment, and never could.
+
+  Released as 0.6.0 rather than a patch: no signature breaks, but frames 0.5
+  accepted are now dropped.
+
 ### Fixed
+- `FastPacketAssembler` refused Fast Packet messages shorter than eight bytes.
+  The lower bound was ours: neither `ttlappalainen/NMEA2000` nor
+  `akeamc/nmea2000` sets one, and canboat declares such messages (130817 is seven
+  bytes, 130824 announces two). Two changes:
+  - the accepted range is now `1..=MAX_FAST_PACKET_PAYLOAD` instead of `8..=`;
+  - a payload of six bytes or less rides entirely in the first frame, so
+    `process_frame` now returns `MessageComplete` on that frame instead of waiting
+    for a continuation that never comes. It takes no session slot.
+
+  `rejected_frames` therefore only counts a size of zero or one above the buffer.
+  On the same 420k-frame capture, Fast Packet reassembly goes from 23090 messages
+  out of 24738 announced to 24738 out of 24738, with every diagnostic counter at
+  zero.
 - The cross-compilation CI jobs. `rust-toolchain.toml` pinned `stable`, and a
   rustup directory override wins over the `rustup default` the workflow sets: the
   targets were installed for 1.96.0 while cargo built on stable, which had none.
   The file is now the single source of truth and declares the targets itself.
 
 ### Docs
+- The README's Fast Packet section now branches on `handles` before calling
+  `process_frame`, so the single-frame path is visible, and it shows the gateway
+  setup with `with_pgns(FAST_PACKET_PGNS_ALL)`. A new entry under Limits states
+  that the assembler only covers the PGNs in its table.
 - Corrected the README's figures for the generated code, and dropped the build
   cost of `full-pgns` as a decision criterion.
   

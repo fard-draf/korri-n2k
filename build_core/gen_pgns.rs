@@ -39,14 +39,22 @@ pub(crate) fn run_pgns_gen(
         "use crate::core::{{PgnDescriptor, PgnValue, PgnBytes, RepeatingFieldSet}};\n\n"
     )?;
 
+    // Fast Packet flags, collected before codegen: a PGN whose struct fails to
+    // generate must still be reassembled, so the tables cannot depend on it.
+    let mut all_flags: Vec<(u32, bool)> = Vec::new();
+    let mut manifest_flags: Vec<(u32, bool)> = Vec::new();
+
     if let Some(pgn_array) = canboat_value["PGNs"].as_array() {
         let mut poly_pgns_id_vec = Vec::new();
         for pgn_value in pgn_array {
             match serde_json::from_value::<PgnInstructions>(pgn_value.clone()) {
                 Ok(pgn_def) => {
+                    all_flags.push((pgn_def.pgn_id, is_fastpacket(&pgn_def)));
+
                     if !pgns_to_generate.contains(&pgn_def.pgn_id) {
                         continue;
                     }
+                    manifest_flags.push((pgn_def.pgn_id, is_fastpacket(&pgn_def)));
 
                     match generate_pgn_code(
                         &pgn_def,
@@ -77,7 +85,62 @@ pub(crate) fn run_pgns_gen(
             }
         }
     }
+
+    writeln!(
+        &mut buffer_pgn_code,
+        "/// Fast Packet PGNs from the active manifest, sorted ascending."
+    )?;
+    writeln!(
+        &mut buffer_pgn_code,
+        "pub const FAST_PACKET_PGNS: &[u32] = &{:?};",
+        fast_packet_table(manifest_flags)
+    )?;
+    writeln!(
+        &mut buffer_pgn_code,
+        "/// Every Fast Packet PGN canboat knows, sorted ascending, independent of the manifest."
+    )?;
+    writeln!(
+        &mut buffer_pgn_code,
+        "pub const FAST_PACKET_PGNS_ALL: &[u32] = &{:?};",
+        fast_packet_table(all_flags)
+    )?;
+
     Ok(buffer_pgn_code)
+}
+
+/// Returns true when canboat marks this PGN as Fast Packet.
+pub(crate) fn is_fastpacket(pgn: &PgnInstructions) -> bool {
+    pgn.fastpacket.eq_ignore_ascii_case("fast")
+}
+
+/// Collapse per-variant flags into the sorted, deduplicated list of Fast Packet ids.
+///
+/// Sortedness is the contract `FastPacketAssembler::handles` relies on for its
+/// binary search.
+fn fast_packet_table(mut flags: Vec<(u32, bool)>) -> Vec<u32> {
+    flags.sort_unstable();
+    flags.dedup();
+
+    let mut table = Vec::new();
+    let mut previous_false = None;
+    for (id, fast) in flags {
+        if !fast {
+            previous_false = Some(id);
+            continue;
+        }
+        // Sorting puts `(id, false)` right before `(id, true)`, so seeing both means
+        // the polymorphic variants of that id disagree. `true` wins: a wrongly
+        // reassembled message fails at decode and is visible, a wrongly dropped one
+        // is silent and unrecoverable.
+        if previous_false == Some(id) {
+            println!(
+                "cargo:warning=[PGN {}] conflicting Fast Packet flags across polymorphic variants, assuming Fast Packet",
+                id
+            );
+        }
+        table.push(id);
+    }
+    table
 }
 
 /// Assemble code (struct/impl/enum) for a specific PGN.
@@ -461,7 +524,7 @@ fn generate_impl_bloc_with_descriptor(
     } else {
         format!("PGN_{}_DESCRIPTOR", pgn_id)
     };
-    let is_fastpacket = pgn.fastpacket.eq_ignore_ascii_case("fast");
+    let is_fastpacket = is_fastpacket(pgn);
 
     writeln!(buffer, "impl {} {{", struct_name)?;
     writeln!(
