@@ -1,5 +1,6 @@
 //! Fast Packet reassembly tests covering sequencing, sessions, and concurrency.
 // ASSEMBLER
+use super::super::FAST_PACKET_PGNS_ALL;
 use super::*;
 
 // Helper to make test assertions easier to read
@@ -120,9 +121,10 @@ fn test_multiple_concurrent_sessions() {
 #[test]
 /// Two Fast Packet streams from the same source but different sequence IDs must not interfere.
 fn test_interleaved_sequences_same_source() {
-    let mut assembler = FastPacketAssembler::new();
-    let source = 7;
+    // Explicit table: this test is about sequencing, not about the manifest.
     let pgn = 129740;
+    let mut assembler = FastPacketAssembler::with_pgns(&[129740]);
+    let source = 7;
     let fake_timer_ms: u32 = 10;
 
     // Message A: sequence 1 (upper bits = 0b001)
@@ -428,8 +430,9 @@ fn test_pool_exhaustion_counter_tracks_every_refusal() {
 /// it is traffic the assembler does not handle. It must never be mixed with the
 /// counters that report dropped data.
 fn test_rejected_frames_is_not_a_loss() {
-    let mut assembler = FastPacketAssembler::new();
+    // Explicit table: this test is about the announced size, not about the manifest.
     let pgn = 130824;
+    let mut assembler = FastPacketAssembler::with_pgns(&[130824]);
     let source = 12;
 
     // Announced size below the Fast Packet minimum, as seen on a real bus.
@@ -452,6 +455,11 @@ fn test_rejected_frames_is_not_a_loss() {
     );
     assert_eq!(assembler.expired_sessions(), 0);
     assert_eq!(assembler.pool_exhausted(), 0);
+    assert_eq!(
+        assembler.unknown_pgn(),
+        0,
+        "the PGN is in the table, only its announced size is wrong"
+    );
 }
 
 #[test]
@@ -522,4 +530,55 @@ fn test_counters_stay_zero_on_healthy_traffic() {
     assert_eq!(assembler.pool_exhausted(), 0);
     assert_eq!(assembler.rejected_frames(), 0);
     assert_eq!(assembler.lost_fragments(), 0);
+}
+
+//==================================================================================PGN Table
+
+#[test]
+/// The generated table must be sorted and deduplicated: `handles` binary-searches it.
+fn test_generated_table_is_sorted_and_deduplicated() {
+    assert!(
+        FAST_PACKET_PGNS_ALL.windows(2).all(|w| w[0] < w[1]),
+        "the codegen must emit a strictly ascending table"
+    );
+    assert!(FAST_PACKET_PGNS_ALL.contains(&129029));
+    // Polymorphic PGN: four canboat variants, one entry.
+    assert!(FAST_PACKET_PGNS_ALL.contains(&130821));
+    // Single-frame PGN at 10 Hz, the traffic that used to starve the session pool.
+    assert!(!FAST_PACKET_PGNS_ALL.contains(&127250));
+}
+
+#[test]
+/// A single-frame PGN whose payload mimics a first fragment must not open a session.
+fn test_single_frame_pgn_mimicking_a_first_fragment_is_ignored() {
+    let mut assembler = FastPacketAssembler::new();
+
+    // 127250 heading: `data[0] & 0x1F == 0` and `data[1]` inside 8..=223, so every
+    // check but the PGN table reads this as the first frame of a Fast Packet.
+    let heading: [u8; 8] = [0x00, 0x2C, 0x01, 0x00, 0x00, 0x00, 0x00, 0xFC];
+
+    assert!(!assembler.handles(127250));
+    assert_eq!(
+        assembler.process_frame(100, 127250, 35, &heading),
+        ProcessResult::Ignored
+    );
+    assert_eq!(assembler.unknown_pgn(), 1);
+    assert_eq!(assembler.rejected_frames(), 0);
+    assert_eq!(assembler.lost_fragments(), 0);
+}
+
+#[test]
+/// An empty table ignores every frame, and `handles` says so before the call.
+fn test_empty_table_ignores_everything() {
+    let mut assembler = FastPacketAssembler::with_pgns(&[]);
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+
+    for pgn in [129540, 129029, 127250] {
+        assert!(!assembler.handles(pgn));
+        assert_eq!(
+            assembler.process_frame(100, pgn, 1, &frame0),
+            ProcessResult::Ignored
+        );
+    }
+    assert_eq!(assembler.unknown_pgn(), 3);
 }

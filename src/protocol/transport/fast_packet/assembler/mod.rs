@@ -1,6 +1,6 @@
 //! NMEA 2000 Fast Packet assembler: rebuilds application messages by
 //! aggregating the CAN frames of a multi-packet session.
-use super::MAX_FAST_PACKET_PAYLOAD;
+use super::{FAST_PACKET_PGNS, MAX_FAST_PACKET_PAYLOAD};
 
 //==================================================================================Constants
 
@@ -98,10 +98,12 @@ impl FastPacketSession {
 #[derive(Debug, Copy, Clone)]
 pub struct FastPacketAssembler {
     sessions: [FastPacketSession; MAX_CONCURRENT_SESSIONS],
+    fast_packet_pgns: &'static [u32],
     expired_sessions: u32,
     pool_exhausted: u32,
     rejected_frames: u32,
     lost_fragments: u32,
+    unknown_pgn: u32,
 }
 
 impl Default for FastPacketAssembler {
@@ -111,22 +113,46 @@ impl Default for FastPacketAssembler {
 }
 
 impl FastPacketAssembler {
-    /// Instantiate the assembler with an inactive session pool.
+    /// Instantiate the assembler with an inactive session pool, reassembling the
+    /// Fast Packet PGNs of the active manifest.
+    ///
+    /// A gateway wants `with_pgns(FAST_PACKET_PGNS_ALL)` instead. Even the
+    /// `full-pgns` manifest is a subset of what canboat declares Fast Packet, so
+    /// `new()` silently drops the difference.
     pub const fn new() -> Self {
+        Self::with_pgns(FAST_PACKET_PGNS)
+    }
+
+    /// Instantiate the assembler over a caller-supplied table of Fast Packet PGNs.
+    ///
+    /// The table must be sorted ascending. Pass `FAST_PACKET_PGNS_ALL` to reassemble
+    /// every Fast Packet canboat knows, or your own list for proprietary PGNs.
+    pub const fn with_pgns(pgns: &'static [u32]) -> Self {
         Self {
             sessions: [FastPacketSession::new(); MAX_CONCURRENT_SESSIONS],
+            fast_packet_pgns: pgns,
             expired_sessions: 0,
             pool_exhausted: 0,
             rejected_frames: 0,
             lost_fragments: 0,
+            unknown_pgn: 0,
         }
+    }
+
+    /// Returns true when this assembler's table lists the PGN as Fast Packet.
+    ///
+    /// Callers that also decode single-frame PGNs must branch on this rather than
+    /// on `ProcessResult::Ignored`, which cannot tell a single-frame message from a
+    /// lost fragment.
+    pub fn handles(&self, pgn: u32) -> bool {
+        self.fast_packet_pgns.binary_search(&pgn).is_ok()
     }
 
     //==================================================================================Diagnostics
     //
-    // All counters are cumulative and never reset. `rejected_frames` says the
-    // assembler was handed traffic it does not deal with; the other three say a
-    // message was lost and should stay at zero on a healthy bus.
+    // All counters are cumulative and never reset. `rejected_frames` and
+    // `unknown_pgn` say the assembler was handed traffic it does not deal with; the
+    // other three say a message was lost and should stay at zero on a healthy bus.
 
     /// Incomplete sessions reclaimed after going `SESSION_TIMEOUT_MS` without a
     /// new fragment. Each one is a message that will never be delivered.
@@ -152,6 +178,13 @@ impl FastPacketAssembler {
         self.lost_fragments
     }
 
+    /// Frames whose PGN is absent from this assembler's table. Stays at zero for a
+    /// caller that pre-filters with `handles`, so it counts an integration mistake
+    /// rather than a bus fault.
+    pub fn unknown_pgn(&self) -> u32 {
+        self.unknown_pgn
+    }
+
     //==================================================================================Process Functions
     /// Process a CAN frame that may belong to a Fast Packet session.
     ///
@@ -159,7 +192,9 @@ impl FastPacketAssembler {
     /// * `data` – raw 8-byte payload of the received CAN frame
     ///
     /// Returns a `ProcessResult` indicating whether the frame was ignored,
-    /// consumed, or completed the message.
+    /// consumed, or completed the message. A PGN outside this assembler's table is
+    /// ignored: an ordinary single-frame message can carry `data[0] & 0x1F == 0`
+    /// and would otherwise open a bogus session.
     pub fn process_frame(
         &mut self,
         now_ms: u32,
@@ -167,6 +202,11 @@ impl FastPacketAssembler {
         source_address: u8,
         data: &[u8; 8],
     ) -> ProcessResult {
+        if !self.handles(pgn) {
+            self.unknown_pgn += 1;
+            return ProcessResult::Ignored;
+        }
+
         let frame_index = data[0] & 0x1F;
         let sequence_id = (data[0] >> 5) & 0x07;
 
