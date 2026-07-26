@@ -35,7 +35,7 @@ where
         return Err(ClaimError::Fault(ClaimFault::InconsistentStrategy));
     };
 
-    // Iterate over allowed addresses (preferred, then 128-207).
+    // Iterate over allowed addresses (preferred, then 1..251).
     let addr_iterator = AddressClaimIterator::<'a>::new(strategy);
     for address_to_claim in addr_iterator {
         // Step 1: propose our claim.
