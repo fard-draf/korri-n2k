@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- **BREAKING**: `ClaimError<E>` splits in two. Its generic parameter was used by
+  two variants out of eleven; the nine others describe decisions taken from the
+  content of a frame alone, which no bus implementation can influence.
+
+  `ClaimFault` now carries those, without a generic parameter. `ClaimError<E>`
+  keeps `SendError` and `ReceiveError` and nests the rest through `#[from]`, so
+  `?` still converts in one hop from the layer that owns the failure.
+
+  Migration: `ClaimError::NoAddressAvailable` becomes
+  `ClaimError::Fault(ClaimFault::NoAddressAvailable)`, and likewise for
+  `InconsistentStrategy`, `RequestAddressClaimErr`, `Extraction` and `BuildErr`.
+  `Display` output is unchanged: the nested variants are `transparent`.
+
+  This prepares the runtime-agnostic claim machine, whose error type must not be
+  able to name the bus.
+- `address_claiming` move the tests into their respective file (address_claiming/tests.rs).
+
+### Removed
+- `ClaimError::NetworkConflict`, `CanBusError`, `InvalidIncomingFrame` and
+  `InvalidDataLen`. None of them was ever constructed. The last two duplicated
+  the variants of `ExtractionError` and lost to them every time, since `?` builds
+  the wrapped form through `From`.
 
 ## [0.6.0] - 2026-07-26
 ### Added
@@ -37,14 +60,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   call. `ProcessResult::Ignored` cannot distinguish a single-frame message from a
   lost fragment, and never could.
 
-<<<<<<< HEAD
   Released as 0.6.0 rather than a patch: no signature breaks, but frames 0.5
   accepted are now dropped.
-=======
-  This prepares the runtime-agnostic claim machine, whose error type must not be
-  able to name the bus.
-- `address_claiming` move the tests into their respective file (address_claiming/tests.rs).
->>>>>>> b0696a2 (refactor(test): move tests out of the address_claiming mod file)
 
 ### Fixed
 - `FastPacketAssembler` refused Fast Packet messages shorter than eight bytes.
