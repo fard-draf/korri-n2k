@@ -21,7 +21,7 @@ async fn supervisor_queues_and_sends_pgn() {
     let command_channel = COMMAND_CHANNEL.init(Channel::new());
 
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
-    let timer = MockTimer;
+    let timer = MockTimer::new();
     let my_name = 0xF234_5678_90AB_CDEF; // AAC enabled
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };

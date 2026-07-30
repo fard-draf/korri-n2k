@@ -16,7 +16,7 @@ use tokio::time::Duration;
 #[tokio::test]
 async fn supervisor_tokio_queues_and_sends_pgn() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
-    let timer = MockTimer;
+    let timer = MockTimer::new();
     let my_name = 0xF234_5678_90AB_CDEF;
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
@@ -70,7 +70,7 @@ async fn supervisor_tokio_queues_and_sends_pgn() {
 #[tokio::test]
 async fn supervisor_tokio_exits_on_can_bus_error() {
     let (dut_bus, host_bus) = MockCanBus::create_pair();
-    let timer = MockTimer;
+    let timer = MockTimer::new();
     let my_name = 0x8234_5678_90AB_CDEF;
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
@@ -96,7 +96,7 @@ async fn supervisor_tokio_exits_on_can_bus_error() {
 #[tokio::test]
 async fn supervisor_tokio_handles_cmd_channel_close() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
-    let timer = MockTimer;
+    let timer = MockTimer::new();
     let my_name = 0xF234_5678_90AB_CDEF;
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
@@ -141,7 +141,7 @@ async fn supervisor_tokio_handles_cmd_channel_close() {
 #[tokio::test]
 async fn supervisor_tokio_handles_frame_channel_close() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
-    let timer = MockTimer;
+    let timer = MockTimer::new();
     let my_name = 0xF234_5678_90AB_CDEF;
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };

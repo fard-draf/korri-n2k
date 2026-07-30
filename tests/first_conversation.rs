@@ -14,8 +14,11 @@ use korri_n2k::{
     },
 };
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
 use tokio::time::{sleep, Duration};
+use tokio::{
+    sync::{mpsc, Mutex},
+    time::Instant,
+};
 
 #[derive(Clone)]
 /// Simulated CAN bus for integration tests.
@@ -59,23 +62,40 @@ impl CanBus for MockCanBus {
 }
 
 /// Timer based on `tokio::sleep` to control delays during the test.
-pub struct MockTimer;
+pub struct MockTimer {
+    origin: Instant,
+}
+
+impl MockTimer {
+    pub fn new() -> Self {
+        Self {
+            origin: Instant::now(),
+        }
+    }
+}
 
 impl KorriTimer for MockTimer {
     async fn delay_ms(&mut self, millis: u32) {
         sleep(Duration::from_millis(millis as u64)).await;
     }
+    fn now_ms(&self) -> u64 {
+        self.origin
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
+    }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = false)]
 async fn test_first_conversation() {
     // Steps: emitter claim → reader claim → request → response → assertions.
     // Create simulated buses for emitter and reader
     let (mut emitter_bus, mut reader_bus) = MockCanBus::create_pair();
 
     // Create timers
-    let mut emitter_timer = MockTimer;
-    let mut reader_timer = MockTimer;
+    let mut emitter_timer = MockTimer::new();
+    let mut reader_timer = MockTimer::new();
 
     // Device NAME values (64-bit ISO NAME)
     let emitter_name = 0x9234567890ABCDEF;
@@ -91,6 +111,7 @@ async fn test_first_conversation() {
     let reader_strategy = AddressClaimStrategy::Arbitrary {
         preferred: reader_preferred_address,
     };
+    // tokio::time::ad
 
     // 1. CLAIM ADDRESS – Emitter
     let emitter_claimed_address = claim_address(

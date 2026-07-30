@@ -31,7 +31,7 @@ defmt = { version = "0.3", optional = true }
 [dev-dependencies]
 critical-section = { version = "1.1", features = ["std"] }
 static_cell = "2.1.1"
-tokio = { version = "1.47.1", features = ["full"] }
+tokio = { version = "1.53", features = ["full", "test-util"] }
 log = "0.4"
 env_logger = "0.11"
 

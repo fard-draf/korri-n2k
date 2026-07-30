@@ -59,10 +59,6 @@ pub enum ClaimFault {
     #[error("Inconsistent match between IsoName and Address Claim Strategy")]
     InconsistentStrategy,
 
-    /// Unvalid claim address
-    #[error("Unvalid claim address")]
-    UnvalidClaimAddress,
-
     /// Failed to gather the information required to claim an address.
     #[error("Request address claim error")]
     RequestAddressClaimErr,

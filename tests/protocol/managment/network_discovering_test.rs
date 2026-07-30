@@ -14,7 +14,7 @@ async fn test_request_network_discovery_three_devices() {
     // The function must discover three devices while ignoring duplicates and stray frames.
     // 1. Initialization
     let (mut dut_bus, mut host_bus) = MockCanBus::create_pair();
-    let mut timer = MockTimer;
+    let mut timer = MockTimer::new();
 
     // Prepare a stack buffer large enough to hold all results and a safety margin.
     // This ensures the function neither panics nor miscounts when extra space is available.

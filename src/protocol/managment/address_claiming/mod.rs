@@ -1,7 +1,9 @@
 //! SAE J1939 / NMEA 2000 address-claim algorithm:
 //! emit PGN 60928, listen for conflicts, and fall back to alternative addresses when needed.
-use crate::error::{CanIdBuildError, ClaimFault, ExtractionError};
+use crate::error::ClaimError::SendError;
+use crate::error::{CanIdBuildError, ExtractionError};
 use crate::protocol::constants::address;
+use crate::protocol::managment::address_claiming::engine::AddressClaimer;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
 use crate::{
@@ -10,7 +12,7 @@ use crate::{
 };
 use futures_util::future::{select, Either};
 use futures_util::pin_mut;
-mod machine;
+mod engine;
 
 /// Execute a full address-claim cycle and return the acquired address.
 ///
@@ -30,139 +32,34 @@ pub async fn claim_address<'a, C: CanBus, T: KorriTimer>(
 where
     C::Error: core::fmt::Debug,
 {
-    // Determine consistency between IsoName and Addr Claim Strategy.
-    if !is_addr_capable_and_isoname_match(my_name, strategy) {
-        return Err(ClaimError::Fault(ClaimFault::InconsistentStrategy));
-    };
+    let mut addr_claimer = AddressClaimer::new(my_name);
+    let mut rx: Option<CanFrame> = None;
 
-    // Iterate over allowed addresses (preferred, then 1..251).
-    let addr_iterator = AddressClaimIterator::<'a>::new(strategy);
-    for address_to_claim in addr_iterator {
-        // Step 1: propose our claim.
-        #[cfg(feature = "defmt")]
-        defmt::info!("Trying to claim address: {}", address_to_claim);
-
-        let claim_frame =
-            build_address_claim_frame(my_name, address_to_claim).map_err(ClaimFault::BuildErr)?;
-        can_bus
-            .send(&claim_frame)
-            .await
-            .map_err(ClaimError::SendError)?;
-
-        #[cfg(feature = "defmt")]
-        defmt::info!("Sent claim frame, waiting 250ms for conflicts...");
-
-        // Step 2: 250 ms listening window for conflicts.
-        let timer = timer.delay_ms(250);
-        pin_mut!(timer);
-
-        'listen_loop: loop {
-            let need_defense = {
-                let recv = can_bus.recv();
-                pin_mut!(recv);
-
-                match select(timer.as_mut(), recv).await {
-                    Either::Left(_) => {
-                        #[cfg(feature = "defmt")]
-                        defmt::info!(
-                            "Timer expired, address {} claimed successfully!",
-                            address_to_claim
-                        );
-                        return Ok(address_to_claim);
-                    }
-
-                    Either::Right((incoming_frame, _)) => match incoming_frame {
-                        Ok(incoming_frame) => {
-                            // Ignore everything except Address Claim frames (PGN 60928)
-                            if incoming_frame.id.pgn() != 60928 {
-                                #[cfg(feature = "defmt")]
-                                defmt::trace!(
-                                    "Ignoring non-claim frame: PGN={}",
-                                    incoming_frame.id.pgn()
-                                );
-                                false
-                            } else {
-                                #[cfg(feature = "defmt")]
-                                defmt::debug!(
-                                    "Received claim frame: PGN={}, SA={}",
-                                    incoming_frame.id.pgn(),
-                                    incoming_frame.id.source_address()
-                                );
-
-                                let their_name = extract_name_from_claim(&incoming_frame)
-                                    .map_err(ClaimFault::Extraction)?;
-
-                                #[cfg(feature = "defmt")]
-                                defmt::debug!(
-                                    "Claim RX: SA={}, Their NAME={:#X}, My NAME={:#X}",
-                                    incoming_frame.id.source_address(),
-                                    their_name,
-                                    my_name
-                                );
-
-                                if is_conflicting_claim(&incoming_frame, address_to_claim, my_name)
-                                {
-                                    #[cfg(feature = "defmt")]
-                                    defmt::warn!(
-                                        "CONFLICT DETECTED! Their name: {:#X}, My name: {:#X}",
-                                        their_name,
-                                        my_name
-                                    );
-
-                                    if my_name > their_name {
-                                        #[cfg(feature = "defmt")]
-                                        defmt::warn!(
-                                            "I LOSE (higher name), trying next address..."
-                                        );
-                                        match strategy {
-                                            AddressClaimStrategy::Fixed { preferred: _ } => {
-                                                return Err(ClaimError::Fault(
-                                                    ClaimFault::NoAddressAvailable,
-                                                ));
-                                            }
-                                            AddressClaimStrategy::SelfConfigurable {
-                                                addresses: _,
-                                            } => break 'listen_loop,
-                                            AddressClaimStrategy::Arbitrary { preferred: _ } => {
-                                                break 'listen_loop
-                                            }
-                                        }
-                                    } else {
-                                        #[cfg(feature = "defmt")]
-                                        defmt::info!("I WIN (lower name), defending address...");
-                                        true
-                                    }
-                                } else {
-                                    #[cfg(feature = "defmt")]
-                                    defmt::debug!("NOT a conflict (same NAME or different SA)");
-                                    false
-                                }
-                            }
-                        }
-
-                        Err(e) => {
-                            #[cfg(feature = "defmt")]
-                            defmt::error!("Receive error occurred");
-                            return Err(ClaimError::ReceiveError(e));
-                        }
-                    },
+    loop {
+        let now_ms = timer.now_ms();
+        match addr_claimer.poll(now_ms, rx.as_ref(), strategy) {
+            Ok(claim_action) => match claim_action {
+                engine::ClaimAction::Send(frame) => {
+                    can_bus.send(&frame).await.map_err(SendError)?;
+                    rx = None;
                 }
-            }; // recv borrow is dropped here
-
-            // Optional defensive transmission (outside the `recv` borrow scope).
-            if need_defense {
-                let defense_frame = build_address_claim_frame(my_name, address_to_claim)
-                    .map_err(ClaimFault::BuildErr)?;
-                can_bus
-                    .send(&defense_frame)
-                    .await
-                    .map_err(ClaimError::SendError)?;
-            }
+                engine::ClaimAction::Wait(delay) => {
+                    let recv = can_bus.recv();
+                    pin_mut!(recv);
+                    let timer = timer.delay_ms(delay);
+                    pin_mut!(timer);
+                    match select(timer.as_mut(), recv).await {
+                        Either::Left(_) => rx = None,
+                        Either::Right((f, _)) => {
+                            rx = Some(f.map_err(|e| ClaimError::ReceiveError(e))?)
+                        }
+                    }
+                }
+                engine::ClaimAction::Done(addr) => return Ok(addr),
+            },
+            Err(e) => return Err(ClaimError::Fault(e)),
         }
     }
-
-    // Iterator exhausted: no address available.
-    Err(ClaimError::Fault(ClaimFault::NoAddressAvailable))
 }
 
 //==================================================================================ADDRESS_CLAIM_STRATEGY

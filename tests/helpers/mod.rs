@@ -52,11 +52,28 @@ impl CanBus for MockCanBus {
 
 #[allow(dead_code)]
 /// Timer based on `tokio::time::sleep` to drive delays in tests.
-pub struct MockTimer;
+pub struct MockTimer {
+    origin: tokio::time::Instant,
+}
+
+impl MockTimer {
+    pub fn new() -> Self {
+        Self {
+            origin: tokio::time::Instant::now(),
+        }
+    }
+}
 
 impl KorriTimer for MockTimer {
     async fn delay_ms(&mut self, millis: u32) {
         sleep(Duration::from_millis(millis as u64)).await;
+    }
+    fn now_ms(&self) -> u64 {
+        self.origin
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
     }
 }
 

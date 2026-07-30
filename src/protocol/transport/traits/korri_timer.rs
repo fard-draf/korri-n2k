@@ -5,6 +5,7 @@
 pub trait KorriTimer {
     /// Asynchronously wait for `millis` milliseconds.
     async fn delay_ms(&mut self, millis: u32);
+    fn now_ms(&self) -> u64;
 }
 
 #[cfg(feature = "tokio")]
@@ -15,5 +16,8 @@ pub struct TokioTimer;
 impl KorriTimer for TokioTimer {
     async fn delay_ms(&mut self, millis: u32) {
         tokio::time::sleep(tokio::time::Duration::from_millis(millis as u64)).await;
+    }
+    fn now_ms(&self) -> u64 {
+        tokio::time::Instant::now()
     }
 }

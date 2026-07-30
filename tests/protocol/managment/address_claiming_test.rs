@@ -37,7 +37,7 @@ async fn test_claim_address_no_conflict() {
     // Spawn a task that simulates a quiet network (no conflict)
     tokio::spawn(simulate_no_conflict(host_bus));
 
-    let mut timer = MockTimer;
+    let mut timer = MockTimer::new();
     let my_name = 0x8234567890ABCDEF;
     let preferred = 42;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
@@ -60,7 +60,7 @@ async fn test_claim_address_with_conflict_win() {
     assert!(my_name < their_name);
     let preferred = 42;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
-    let mut timer = MockTimer;
+    let mut timer = MockTimer::new();
 
     tokio::select! {
     claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
@@ -107,7 +107,7 @@ async fn test_claim_address_with_conflict_lose() {
     let preferred2 = 208;
     let preferred3 = 209;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
-    let mut timer = MockTimer;
+    let mut timer = MockTimer::new();
 
     tokio::select! {
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
@@ -173,7 +173,7 @@ async fn test_claim_address_with_conflict_lose_and_with_no_address_available() {
     assert!(my_name > their_name);
     let preferred = 128;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
-    let mut timer = MockTimer;
+    let mut timer = MockTimer::new();
 
     tokio::select! {
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
@@ -216,7 +216,7 @@ async fn test_claim_address_non_arbitrary_loses_and_fails() {
     assert!(my_name > their_name);
     let preferred = 42;
     let strategy = AddressClaimStrategy::Fixed { preferred };
-    let mut timer = MockTimer;
+    let mut timer = MockTimer::new();
 
     tokio::select! {
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
@@ -261,7 +261,7 @@ async fn test_claim_address_non_arbitrary_conflict_and_win() {
     assert!(my_name < their_name);
     let preferred = 42;
     let strategy = AddressClaimStrategy::Fixed { preferred };
-    let mut timer = MockTimer;
+    let mut timer = MockTimer::new();
 
     tokio::select! {
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
