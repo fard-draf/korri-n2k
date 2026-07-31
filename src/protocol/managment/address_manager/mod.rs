@@ -1,7 +1,11 @@
 //! Automated lifecycle management for NMEA 2000 logical addresses:
 //! initial claim, conflict detection, defense, and reclaim.
 use crate::{
-    error::{ClaimError, SendPgnError},
+    error::{
+        AddressManagerError,
+        ClaimError::{self, ReceiveError},
+        ClaimFault, SendPgnError,
+    },
     infra::codec::traits::PgnData,
     protocol::{
         constants::address,
@@ -48,7 +52,6 @@ where
         strategy: AddressClaimStrategy<'a>,
     ) -> Result<Self, ClaimError<C::Error>> {
         // Perform the initial claim
-
         if !is_addr_capable_and_isoname_match(my_name, strategy) {
             return Err(ClaimError::Fault(
                 crate::error::ClaimFault::InconsistentStrategy,
@@ -93,16 +96,23 @@ where
         destination: Option<u8>,
     ) -> Result<(), SendPgnError<C::Error>> {
         let source_address = self.current_address;
-        self.can_bus
-            .send_pgn(pgn_data, pgn, source_address, destination, &mut self.timer)
-            .await
+        if source_address == address::NULL {
+            Ok(())
+        } else {
+            self.can_bus
+                .send_pgn(pgn_data, pgn, source_address, destination, &mut self.timer)
+                .await
+        }
     }
 
     /// Process an incoming frame and apply address management rules.
     ///
     /// Returns `Ok(Some(frame))` for application frames or `Ok(None)` for consumed
     /// frames (claim/defense).
-    pub async fn handle_frame(&mut self, frame: &CanFrame) -> Result<Option<CanFrame>, C::Error> {
+    pub async fn handle_frame(
+        &mut self,
+        frame: &CanFrame,
+    ) -> Result<Option<CanFrame>, AddressManagerError<C::Error>> {
         // Check if this is a claim frame targeting our address
         if frame.id.pgn() == 60928
             && frame.id.source_address() == self.current_address
@@ -113,17 +123,20 @@ where
             // In J1939/NMEA2000 the lowest NAME wins
             if self.my_name > their_name {
                 // We lose, reclaim a new address
-                if let Err(e) = self.reclaim().await {
-                    match e {
-                        ClaimError::SendError(e) | ClaimError::ReceiveError(e) => return Err(e),
-                        // No address available: fall back to the null address
-                        _ => self.current_address = address::NULL,
+                match self.reclaim().await {
+                    Ok(addr) => self.current_address = addr,
+                    Err(e) => {
+                        return Err(AddressManagerError::Claim(
+                            ClaimFault::RequestAddressClaimErr,
+                        ))
                     }
                 }
                 Ok(None)
             } else if their_name != self.my_name {
                 // We win, defend our address
-                self.defend().await?;
+                self.defend()
+                    .await
+                    .map_err(|_| ClaimFault::RequestAddressClaimErr)?;
                 Ok(None)
             } else {
                 // Same NAME (ours), ignore
@@ -193,16 +206,13 @@ where
     }
 
     /// Attempt to acquire a new address after losing the previous one.
-    async fn reclaim(&mut self) -> Result<(), ClaimError<C::Error>> {
-        let new_address = claim_address(
+    async fn reclaim(&mut self) -> Result<u8, ClaimError<C::Error>> {
+        claim_address(
             &mut self.can_bus,
             &mut self.timer,
             self.my_name,
             self.strategy,
         )
-        .await?;
-
-        self.current_address = new_address;
-        Ok(())
+        .await
     }
 }

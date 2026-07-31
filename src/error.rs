@@ -49,6 +49,14 @@ pub enum ClaimError<E: core::fmt::Debug> {
 }
 
 #[derive(Error, Debug)]
+pub enum AddressManagerError<E> {
+    #[error("Can bus error {0:?}")]
+    Bus(E),
+    #[error(transparent)]
+    Claim(#[from] ClaimFault),
+}
+
+#[derive(Error, Debug)]
 /// Claim failure decided from frame content alone. No I/O, fully reproducible.
 pub enum ClaimFault {
     /// No free address was available on the segment.
