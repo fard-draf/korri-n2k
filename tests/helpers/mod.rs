@@ -1,7 +1,10 @@
 /// Test doubles to simulate the CAN bus and timer during integration tests.
 use korri_n2k::protocol::transport::{
     can_frame::CanFrame,
-    traits::{can_bus::CanBus, korri_timer::KorriTimer},
+    traits::{
+        can_bus::CanBus,
+        korri_timer::{Clock, KorriTimer},
+    },
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -52,6 +55,7 @@ impl CanBus for MockCanBus {
 
 #[allow(dead_code)]
 /// Timer based on `tokio::time::sleep` to drive delays in tests.
+#[derive(Debug)]
 pub struct MockTimer {
     origin: tokio::time::Instant,
 }
@@ -64,16 +68,19 @@ impl MockTimer {
     }
 }
 
-impl KorriTimer for MockTimer {
-    async fn delay_ms(&mut self, millis: u32) {
-        sleep(Duration::from_millis(millis as u64)).await;
-    }
+impl Clock for MockTimer {
     fn now_ms(&self) -> u64 {
         self.origin
             .elapsed()
             .as_millis()
             .try_into()
             .unwrap_or(u64::MAX)
+    }
+}
+
+impl KorriTimer for MockTimer {
+    async fn delay_ms(&mut self, millis: u32) {
+        sleep(Duration::from_millis(millis as u64)).await;
     }
 }
 

@@ -2,7 +2,7 @@
 //! emit PGN 60928, listen for conflicts, and fall back to alternative addresses when needed.
 use crate::error::ClaimError::SendError;
 use crate::error::{CanIdBuildError, ExtractionError};
-use crate::protocol::constants::address;
+use crate::protocol::constants::{addr_mgmt_pgns, address};
 use crate::protocol::managment::address_claiming::engine::AddressClaimer;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
@@ -15,14 +15,6 @@ use futures_util::pin_mut;
 mod engine;
 
 /// Execute a full address-claim cycle and return the acquired address.
-///
-/// Strategy:
-/// 1. Try the preferred address first.
-/// 2. If the equipment is Arbitrary Address Capable (AAC), walk upwards from
-///    the preferred address over the whole claimable range, wrapping around
-///    (see [`address`]).
-/// 3. After each attempt, listen for competing claims for 250 ms.
-/// 4. Defend the address if the local NAME wins, otherwise move to the next one.
 pub async fn claim_address<'a, C: CanBus, T: KorriTimer>(
     can_bus: &mut C,
     timer: &mut T,
@@ -56,6 +48,10 @@ where
                     }
                 }
                 engine::ClaimAction::Done(addr) => return Ok(addr),
+                engine::ClaimAction::CannotClaim(frame) => {
+                    can_bus.send(&frame).await.map_err(SendError)?;
+                    return Ok(address::NULL);
+                }
             },
             Err(e) => return Err(ClaimError::Fault(e)),
         }
@@ -166,7 +162,7 @@ pub fn build_address_claim_frame(
     let myname_as_le_bytes = my_name.to_le_bytes();
     Ok(CanFrame {
         id: {
-            match CanId::builder(60928, address_to_claim)
+            match CanId::builder(addr_mgmt_pgns::ADDR_CLAIMED, address_to_claim)
                 .to_destination(address::GLOBAL)
                 .with_priority(6)
                 .build()
@@ -185,14 +181,15 @@ pub fn build_address_claim_frame(
 fn is_conflicting_claim(incoming_frame: &CanFrame, my_claimed_address: u8, my_name: u64) -> bool {
     // All three conditions must be true for a conflict.
     // The `&&` operator ensures every predicate is checked in one expression.
-    incoming_frame.id.pgn() == 60928
+    incoming_frame.id.pgn() == addr_mgmt_pgns::ADDR_CLAIMED
+        && incoming_frame.id.source_address() != address::NULL
         && incoming_frame.id.source_address() == my_claimed_address
         && extract_name_from_claim(incoming_frame).is_ok_and(|their_name| their_name != my_name)
 }
 
 /// Extracts the NAME from an Address Claim frame (PGN 60928).
 pub(super) fn extract_name_from_claim(frame: &CanFrame) -> Result<u64, ExtractionError> {
-    if frame.id.pgn() != 60928 {
+    if frame.id.pgn() != addr_mgmt_pgns::ADDR_CLAIMED {
         return Err(ExtractionError::InvalidIncomingFrame);
     }
     if frame.len != 8usize {

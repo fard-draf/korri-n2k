@@ -177,8 +177,7 @@ async fn test_claim_address_with_conflict_lose_and_with_no_address_available() {
 
     tokio::select! {
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
-            // assert!(claim_result.is_ok());
-            assert!(matches!(claim_result.unwrap_err(), ClaimError::Fault( ClaimFault::NoAddressAvailable )));
+            assert_eq!(claim_result.unwrap(), address::NULL);
         }
 
         _ = async {
@@ -219,8 +218,9 @@ async fn test_claim_address_non_arbitrary_loses_and_fails() {
     let mut timer = MockTimer::new();
 
     tokio::select! {
+
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
-            assert!(matches!(claim_result, Err(ClaimError::Fault( ClaimFault::NoAddressAvailable))));
+            assert_eq!(claim_result.unwrap(), address::NULL);
         }
 
         _ = async {

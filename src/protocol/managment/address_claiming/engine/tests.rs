@@ -1,4 +1,7 @@
-use crate::protocol::{constants::address::CLAIMABLE_COUNT, transport::can_id::CanIdBuilder};
+use crate::protocol::{
+    constants::address::CLAIMABLE_COUNT,
+    managment::address_claiming::engine::ClaimAction::CannotClaim, transport::can_id::CanIdBuilder,
+};
 
 use super::*;
 
@@ -365,14 +368,20 @@ fn test_addr_claim_machine_aac_with_conflict_we_lose_and_no_addr_available() {
 
         // this is the last addr available, next will return None.
         if tested_addr == 251 {
-            assert!(matches!(
-                my_inst.claimer.poll(
-                    timer.ms,
-                    their_inst.can_frame_next.as_ref(),
-                    my_inst.strategy
-                ),
-                Err(ClaimFault::NoAddressAvailable)
-            ));
+            let expected_canframe =
+                build_address_claim_frame(my_inst.name.0, address::NULL).unwrap();
+            assert_eq!(
+                my_inst
+                    .claimer
+                    .poll(
+                        timer.ms,
+                        their_inst.can_frame_next.as_ref(),
+                        my_inst.strategy
+                    )
+                    .unwrap(),
+                ClaimAction::CannotClaim(expected_canframe)
+            );
+
             break;
         }
 
@@ -523,10 +532,14 @@ fn test_addr_claim_machine_non_aac_fixed_addr_we_lose() {
     // Inject conflict claiming frame.
     // * we loose
     // * there is not other addr available
-    assert!(matches!(
-        my_inst.claimer.poll(timer.ms, their_rx, my_inst.strategy),
-        Err(ClaimFault::NoAddressAvailable)
-    ));
+    let expected_frame = build_address_claim_frame(my_inst.name.0, address::NULL).unwrap();
+    assert_eq!(
+        my_inst
+            .claimer
+            .poll(timer.ms, their_rx, my_inst.strategy)
+            .unwrap(),
+        ClaimAction::CannotClaim(expected_frame)
+    );
 }
 
 #[test]

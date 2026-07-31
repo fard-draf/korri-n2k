@@ -1,6 +1,7 @@
 use crate::{
     error::ClaimFault::{self},
     protocol::{
+        constants::{addr_mgmt_pgns, address},
         managment::address_claiming::{
             build_address_claim_frame, extract_name_from_claim, is_addr_capable_and_isoname_match,
             is_conflicting_claim, AddressClaimIterator, AddressClaimStrategy,
@@ -11,6 +12,7 @@ use crate::{
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum ClaimAction {
+    CannotClaim(CanFrame),
     Send(CanFrame),
     Wait(u32),
     Done(u8),
@@ -49,6 +51,7 @@ impl<'a> AddressClaimer<'a> {
         rx: Option<&CanFrame>,
         strategy: AddressClaimStrategy<'a>,
     ) -> Result<ClaimAction, ClaimFault> {
+        // TODO!: check the pseudo-random delay for claiming
         if let Some(my_name) = self.my_name {
             // guards
             if !is_addr_capable_and_isoname_match(my_name, strategy) {
@@ -95,7 +98,17 @@ impl<'a> AddressClaimer<'a> {
                     let Some(recv) = rx else {
                         return Ok(ClaimAction::Wait(deadline_ms as u32));
                     };
-                    if recv.id.pgn() != 60928 {
+                    if recv.id.pgn() != addr_mgmt_pgns::ADDR_CLAIMED {
+                        if recv.id.pgn() == addr_mgmt_pgns::COMMANDED_ADDRESS {
+                            //TODO!: implement COMMANDED_ADDRESS 65240 0xFED8
+                            #[cfg(feature = "defmt")]
+                            defmt::trace!(
+                                "Ignoring COMMANDED_ADDRESS frame: PGN={} // Unimplemented for now",
+                                recv.id.pgn()
+                            );
+                            // unimplemented for now, ignore
+                            return Ok(ClaimAction::Wait(deadline_ms as u32));
+                        }
                         #[cfg(feature = "defmt")]
                         defmt::trace!("Ignoring non-claim frame: PGN={}", recv.id.pgn());
                         return Ok(ClaimAction::Wait(deadline_ms as u32));
@@ -136,33 +149,39 @@ impl<'a> AddressClaimer<'a> {
                             if my_name > their_name {
                                 // we lose -> try next address if possible
                                 #[cfg(feature = "defmt")]
-                                defmt::warn!("I LOSE (higher name), trying next address...");
-                                self.state = State::Idle;
-                                match strategy {
-                                    AddressClaimStrategy::Fixed { preferred: _ } => {
-                                        return Err(ClaimFault::NoAddressAvailable)
-                                    }
+                                defmt::warn!("I LOSE (higher name), trying next address or NULL address if there is not available address");
+                                let addr_to_claim = match strategy {
+                                    //CANNOT_CLAIM_ADDRESS
+                                    AddressClaimStrategy::Fixed { preferred: _ } => address::NULL,
                                     _ => {
                                         // try next addr, available for arbitrary and self_configurable strategies
-                                        let Some(addr_itrerator) = &mut self.addr_iterator else {
-                                            // no addr available on the iterator
-                                            return Err(ClaimFault::NoAddressAvailable);
-                                        };
-                                        let Some(next_addr) = addr_itrerator.next() else {
-                                            // listen     | conflict -> lose, no more address available
-                                            return Err(ClaimFault::NoAddressAvailable);
-                                        };
-                                        let claim_frame =
-                                            build_address_claim_frame(my_name, next_addr)
-                                                .map_err(ClaimFault::BuildErr)?;
-                                        self.state = State::Listening {
-                                            frame: claim_frame.clone(),
-                                            deadline_ms: now_ms + 250,
-                                        };
-
-                                        return Ok(ClaimAction::Send(claim_frame));
+                                        if let Some(addr_iterator) = &mut self.addr_iterator {
+                                            if let Some(next_addr) = addr_iterator.next() {
+                                                next_addr
+                                            } else {
+                                                //CANNOT_CLAIM_ADDRESS
+                                                address::NULL
+                                            }
+                                        } else {
+                                            //CANNOT_CLAIM_ADDRESS
+                                            address::NULL
+                                        }
                                     }
+                                };
+                                let claim_frame = build_address_claim_frame(my_name, addr_to_claim)
+                                    .map_err(ClaimFault::BuildErr)?;
+
+                                if addr_to_claim == address::NULL {
+                                    // the engine is destroyed after returning CannotClaim.
+                                    return Ok(ClaimAction::CannotClaim(claim_frame));
                                 }
+
+                                self.state = State::Listening {
+                                    frame: claim_frame.clone(),
+                                    deadline_ms: now_ms + 250,
+                                };
+
+                                return Ok(ClaimAction::Send(claim_frame));
                             }
                         } else {
                             // listen     | frame without conflict

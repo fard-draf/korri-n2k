@@ -39,10 +39,3 @@ Autopilot telemetry (`130821`) and alarm text (`130856`) are kept as they are:
 rudder angles and "Steering compass missing" identify nobody, and they make
 realistic string payloads.
 
-### Running against a full capture
-
-    KORRI_N2K_CAPTURE=/path/to/capture.bin cargo test --features full-pgns \
-        --test replay_real_capture -- --nocapture
-
-The test is skipped when the path does not exist, so a missing capture never
-fails a build.

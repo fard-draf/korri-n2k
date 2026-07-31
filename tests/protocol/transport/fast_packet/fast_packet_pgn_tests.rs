@@ -5,16 +5,19 @@ use korri_n2k::protocol::transport::fast_packet::{
     assembler::{FastPacketAssembler, ProcessResult},
     builder::FastPacketBuilder,
 };
+use korri_n2k::protocol::transport::traits::korri_timer::Clock;
 use korri_n2k::protocol::{
     lookups::CertificationLevel,
     messages::{Pgn126996, Pgn126998, Pgn129040},
 };
 
+use crate::helpers::MockTimer;
+
 #[test]
 fn test_pgn_129040_fast_packet_roundtrip() {
     // Serialize → segment → reassemble → deserialize and compare to original values.
     let pgn = 129040;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer = MockTimer::new();
     let mut ais = Pgn129040::new();
     ais.user_id = 123_456_789;
     ais.latitude = 48.8566;
@@ -38,9 +41,12 @@ fn test_pgn_129040_fast_packet_roundtrip() {
         let frame = frame_result.expect("frame build");
         frame_count += 1;
 
-        if let ProcessResult::MessageComplete(msg) =
-            assembler.process_frame(fake_timer_ms, pgn, 42, &frame.data)
-        {
+        if let ProcessResult::MessageComplete(msg) = assembler.process_frame(
+            fake_timer.now_ms().try_into().unwrap(),
+            pgn,
+            42,
+            &frame.data,
+        ) {
             complete = Some(msg);
             break;
         }

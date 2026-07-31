@@ -9,7 +9,10 @@ use korri_n2k::{
         transport::{
             can_frame::CanFrame,
             can_id::CanId,
-            traits::{can_bus::CanBus, korri_timer::KorriTimer},
+            traits::{
+                can_bus::CanBus,
+                korri_timer::{Clock, KorriTimer},
+            },
         },
     },
 };
@@ -74,16 +77,19 @@ impl MockTimer {
     }
 }
 
-impl KorriTimer for MockTimer {
-    async fn delay_ms(&mut self, millis: u32) {
-        sleep(Duration::from_millis(millis as u64)).await;
-    }
+impl Clock for MockTimer {
     fn now_ms(&self) -> u64 {
         self.origin
             .elapsed()
             .as_millis()
             .try_into()
             .unwrap_or(u64::MAX)
+    }
+}
+
+impl KorriTimer for MockTimer {
+    async fn delay_ms(&mut self, millis: u32) {
+        sleep(Duration::from_millis(millis as u64)).await;
     }
 }
 

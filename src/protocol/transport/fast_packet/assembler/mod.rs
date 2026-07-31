@@ -119,7 +119,7 @@ impl Default for FastPacketAssembler {
 }
 
 impl FastPacketAssembler {
-    /// Constructor for a node: the Fast Packet PGNs of its manifest, nothing more.
+    /// Constructor for a node: the Fast Packet PGNs of its manifest.
     ///
     /// A gateway wants `with_pgns`.
     pub const fn new() -> Self {
