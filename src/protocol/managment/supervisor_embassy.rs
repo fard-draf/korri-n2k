@@ -17,7 +17,7 @@ use embassy_sync::{
 };
 use futures_util::{future::select, future::Either, pin_mut};
 
-use crate::error::{ClaimError, SendPgnError};
+use crate::error::{AddressManagerError, ClaimError, SendPgnError};
 use crate::infra::codec::traits::PgnData;
 use crate::protocol::managment::address_manager::AddressManager;
 use crate::protocol::transport::can_frame::CanFrame;
@@ -256,7 +256,7 @@ pub enum AddressHandleError {
 
 #[derive(Debug)]
 pub enum AddressSupervisorRunError<E: Debug> {
-    Receive(E),
+    Receive(AddressManagerError<E>),
     Send(E),
     SendPgn(SendPgnError<E>),
 }
