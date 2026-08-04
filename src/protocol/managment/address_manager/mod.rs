@@ -178,12 +178,12 @@ where
         payload: &[u8],
     ) -> Result<(), SendPgnError<C::Error>> {
         let source_address = self.current_address;
-        let builder = FastPacketBuilder::new(pgn, source_address, destination, payload);
+        let builder = FastPacketBuilder::new(pgn, source_address, destination, payload)
+            .with_priority(priority);
         let mut is_first = true;
 
         for frame in builder.build() {
-            let mut frame = frame.map_err(SendPgnError::Build)?;
-            frame.id.0 = (frame.id.0 & !(0x7 << 26)) | (((priority & 0x07) as u32) << 26);
+            let frame = frame.map_err(SendPgnError::Build)?;
 
             if !is_first && payload.len() > 8 {
                 self.timer.delay_ms(FAST_PACKET_INTER_FRAME_DELAY_MS).await;

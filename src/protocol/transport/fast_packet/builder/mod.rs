@@ -41,6 +41,7 @@ pub struct FastPacketBuilder<'a> {
     pgn: u32,
     source_address: u8,
     destination: Option<u8>,
+    priority: u8,
     payload: &'a [u8],
     sequence_id: u8,
 }
@@ -60,7 +61,8 @@ impl<'a> Iterator for FrameIterator<'a> {
             return None;
         }
 
-        let mut id_builder = CanId::builder(self.builder.pgn, self.builder.source_address);
+        let mut id_builder = CanId::builder(self.builder.pgn, self.builder.source_address)
+            .with_priority(self.builder.priority);
 
         if let Some(destination) = self.builder.destination {
             id_builder = id_builder.to_destination(destination);
@@ -147,6 +149,7 @@ impl<'a> FastPacketBuilder<'a> {
         Self {
             pgn,
             source_address,
+            priority: 6,
             destination,
             payload,
             sequence_id: next_sequence_id(),
@@ -160,6 +163,11 @@ impl<'a> FastPacketBuilder<'a> {
     /// In production let `FastPacketBuilder::new` handle auto-increment to avoid collisions.
     pub fn with_sequence_id(mut self, sequence_id: u8) -> Self {
         self.sequence_id = sequence_id & 0x07;
+        self
+    }
+
+    pub fn with_priority(mut self, priority: u8) -> Self {
+        self.priority = priority & 0x07;
         self
     }
 
