@@ -13,12 +13,30 @@ pub trait KorriTimer: Clock {
 
 #[cfg(feature = "tokio")]
 /// Default timer implementation for Tokio runtime.
-pub struct TokioTimer;
+pub struct TokioTimer {
+    start: tokio::time::Instant,
+}
+
+#[cfg(feature = "tokio")]
+impl TokioTimer {
+    fn new() -> Self {
+        Self {
+            start: tokio::time::Instant::now(),
+        }
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl Default for TokioTimer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[cfg(feature = "tokio")]
 impl Clock for TokioTimer {
     fn now_ms(&self) -> u64 {
-        tokio::time::Instant::now()
+        self.start.elapsed().as_millis() as u64
     }
 }
 
