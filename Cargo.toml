@@ -12,7 +12,7 @@ categories = ["embedded", "no-std", "network-programming"]
 exclude = ["tests/", ".github/", "archives/"]
 
 [features]
-default = ["embassy"]
+default = []
 embassy = ["dep:embassy-sync"]
 tokio = ["std", "dep:tokio"]
 std = []
