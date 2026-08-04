@@ -8,6 +8,7 @@ use helpers::{MockCanBus, MockTimer};
 use korri_n2k::protocol::managment::address_claiming::AddressClaimStrategy;
 use korri_n2k::protocol::managment::address_manager::AddressManager;
 use korri_n2k::protocol::managment::address_supervisor::{AddressService, SupervisorCommand};
+use korri_n2k::protocol::managment::iso_name::IsoName;
 use korri_n2k::protocol::messages::Pgn129025;
 use korri_n2k::protocol::transport::traits::can_bus::CanBus;
 use static_cell::StaticCell;
@@ -22,7 +23,7 @@ async fn supervisor_queues_and_sends_pgn() {
 
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer::new();
-    let my_name = 0xF234_5678_90AB_CDEF; // AAC enabled
+    let my_name = IsoName::from_raw(0xF234_5678_90AB_CDEF); // AAC enabled
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 

@@ -43,7 +43,7 @@ async fn test_claim_address_no_conflict() {
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
     // Invoke claim_address
-    let result = claim_address(&mut dut_bus, &mut timer, my_name, strategy).await;
+    let result = claim_address(&mut dut_bus, &mut timer, my_name.into(), strategy).await;
 
     // Assertions
     assert!(result.is_ok());
@@ -63,7 +63,7 @@ async fn test_claim_address_with_conflict_win() {
     let mut timer = MockTimer::new();
 
     tokio::select! {
-    claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
+    claim_result = claim_address(&mut dut_bus, &mut timer, my_name.into(), strategy) => {
         assert!(claim_result.is_ok());
         let claimed_address = claim_result.unwrap();
         assert_eq!(claimed_address, preferred, "Should keep preferred (win)");
@@ -110,7 +110,7 @@ async fn test_claim_address_with_conflict_lose() {
     let mut timer = MockTimer::new();
 
     tokio::select! {
-        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
+        claim_result = claim_address(&mut dut_bus, &mut timer, my_name.into(), strategy) => {
             // assert!(claim_result.is_ok());
             let claimed_address = claim_result.unwrap();
             dbg!("claimed_address: {:?}", claimed_address);
@@ -176,7 +176,7 @@ async fn test_claim_address_with_conflict_lose_and_with_no_address_available() {
     let mut timer = MockTimer::new();
 
     tokio::select! {
-        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
+        claim_result = claim_address(&mut dut_bus, &mut timer, my_name.into(), strategy) => {
             assert_eq!(claim_result.unwrap(), address::NULL);
         }
 
@@ -219,7 +219,7 @@ async fn test_claim_address_non_arbitrary_loses_and_fails() {
 
     tokio::select! {
 
-        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
+        claim_result = claim_address(&mut dut_bus, &mut timer, my_name.into(), strategy) => {
             assert_eq!(claim_result.unwrap(), address::NULL);
         }
 
@@ -264,7 +264,7 @@ async fn test_claim_address_non_arbitrary_conflict_and_win() {
     let mut timer = MockTimer::new();
 
     tokio::select! {
-        claim_result = claim_address(&mut dut_bus, &mut timer, my_name, strategy) => {
+        claim_result = claim_address(&mut dut_bus, &mut timer, my_name.into(), strategy) => {
             // assert!(claim_result.is_ok());
             let claimed_address = claim_result.unwrap();
             dbg!("claimed_address: {:?}", claimed_address);

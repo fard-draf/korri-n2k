@@ -8,6 +8,7 @@ use korri_n2k::protocol::managment::address_manager::AddressManager;
 use korri_n2k::protocol::managment::address_supervisor::{
     AddressService, AddressSupervisorRunError,
 };
+use korri_n2k::protocol::managment::iso_name::IsoName;
 use korri_n2k::protocol::messages::Pgn129025;
 use korri_n2k::protocol::transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus};
 use tokio::task::yield_now;
@@ -17,7 +18,7 @@ use tokio::time::Duration;
 async fn supervisor_tokio_queues_and_sends_pgn() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer::new();
-    let my_name = 0xF234_5678_90AB_CDEF;
+    let my_name = IsoName::from_raw(0xF234_5678_90AB_CDEF);
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
@@ -71,7 +72,7 @@ async fn supervisor_tokio_queues_and_sends_pgn() {
 async fn supervisor_tokio_exits_on_can_bus_error() {
     let (dut_bus, host_bus) = MockCanBus::create_pair();
     let timer = MockTimer::new();
-    let my_name = 0x8234_5678_90AB_CDEF;
+    let my_name = IsoName::from_raw(0x8234_5678_90AB_CDEF);
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
@@ -89,7 +90,7 @@ async fn supervisor_tokio_exits_on_can_bus_error() {
     let result = runner_future.await;
     assert!(matches!(
         result,
-        Err(AddressSupervisorRunError::Receive(()))
+        Err(AddressSupervisorRunError::Receive(AddressManagerError))
     ));
 }
 
@@ -97,7 +98,7 @@ async fn supervisor_tokio_exits_on_can_bus_error() {
 async fn supervisor_tokio_handles_cmd_channel_close() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer::new();
-    let my_name = 0xF234_5678_90AB_CDEF;
+    let my_name = IsoName::from_raw(0xF234_5678_90AB_CDEF);
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
@@ -142,7 +143,7 @@ async fn supervisor_tokio_handles_cmd_channel_close() {
 async fn supervisor_tokio_handles_frame_channel_close() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
     let timer = MockTimer::new();
-    let my_name = 0xF234_5678_90AB_CDEF;
+    let my_name = IsoName::from_raw(0xF234_5678_90AB_CDEF);
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 

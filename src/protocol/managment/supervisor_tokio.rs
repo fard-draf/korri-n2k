@@ -9,11 +9,12 @@
 
 use core::fmt::Debug;
 use futures_util::{future::select, future::Either, pin_mut};
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::error::{ClaimError, SendPgnError};
+use crate::error::{AddressManagerError, ClaimError, SendPgnError};
 use crate::infra::codec::traits::PgnData;
-use crate::protocol::managment::address_manager::AddressManager;
+use crate::protocol::managment::{address_manager::AddressManager, iso_name::IsoName};
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::fast_packet::MAX_FAST_PACKET_PAYLOAD;
 use crate::protocol::transport::traits::can_bus::CanBus;
@@ -66,7 +67,7 @@ where
     pub async fn claim(
         can_bus: C,
         timer: T,
-        my_name: u64,
+        my_name: IsoName,
         strategy: crate::protocol::managment::address_claiming::AddressClaimStrategy<'a>,
         cmd_cap: usize,
         frame_cap: usize,

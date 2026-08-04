@@ -2,6 +2,7 @@
 //! Address Claim responses (PGN 60928) to identify neighbouring nodes.
 use crate::error::ClaimError;
 use crate::error::ClaimError::SendError;
+use crate::protocol::managment::iso_name::IsoName;
 use crate::protocol::managment::network_discovering::engine::AddressRequester;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::traits::{can_bus::CanBus, korri_timer::KorriTimer};
@@ -13,7 +14,7 @@ mod engine;
 pub async fn request_network_discovery<C: CanBus, T: KorriTimer>(
     can_bus: &mut C,
     timer: &mut T,
-    discovered_devices: &mut [(u8, u64)],
+    discovered_devices: &mut [(u8, IsoName)],
 ) -> Result<usize, ClaimError<C::Error>>
 where
     C::Error: core::fmt::Debug,

@@ -3,18 +3,19 @@
 use crate::{
     error::{
         AddressManagerError,
-        ClaimError::{self, ReceiveError},
-        ClaimFault, SendPgnError,
+        ClaimError::{self},
+        ClaimFault::{self},
+        SendPgnError,
     },
     infra::codec::traits::PgnData,
     protocol::{
         constants::address,
-        managment::address_claiming::{
-            claim_address, is_addr_capable_and_isoname_match, AddressClaimStrategy,
+        managment::{
+            address_claiming::{build_address_claim_frame, claim_address, AddressClaimStrategy},
+            iso_name::IsoName,
         },
         transport::{
             can_frame::CanFrame,
-            can_id::CanId,
             fast_packet::builder::FastPacketBuilder,
             traits::{can_bus::CanBus, korri_timer::KorriTimer, pgn_sender::PgnSender},
             FAST_PACKET_INTER_FRAME_DELAY_MS,
@@ -30,7 +31,7 @@ pub struct AddressManager<'a, C: CanBus, T: KorriTimer> {
     /// Asynchronous timer enforcing delays between claim attempts.
     timer: T,
     /// Node NAME identifier (64 bits).
-    my_name: u64,
+    my_name: IsoName,
     /// Address Claim strategy used.
     strategy: AddressClaimStrategy<'a>,
     /// Active address currently owned by the node.
@@ -48,16 +49,10 @@ where
     pub async fn new(
         mut can_bus: C,
         mut timer: T,
-        my_name: u64,
+        my_name: IsoName,
         strategy: AddressClaimStrategy<'a>,
     ) -> Result<Self, ClaimError<C::Error>> {
-        // Perform the initial claim
-        if !is_addr_capable_and_isoname_match(my_name, strategy) {
-            return Err(ClaimError::Fault(
-                crate::error::ClaimFault::InconsistentStrategy,
-            ));
-        };
-
+        // initial claim
         let current_address = claim_address(&mut can_bus, &mut timer, my_name, strategy).await?;
 
         Ok(Self {
@@ -118,14 +113,14 @@ where
             && frame.id.source_address() == self.current_address
             && frame.len == 8
         {
-            let their_name = u64::from_le_bytes(frame.data);
+            let their_name = IsoName::from_raw(u64::from_le_bytes(frame.data));
 
             // In J1939/NMEA2000 the lowest NAME wins
             if self.my_name > their_name {
                 // We lose, reclaim a new address
                 match self.reclaim().await {
                     Ok(addr) => self.current_address = addr,
-                    Err(e) => {
+                    Err(_) => {
                         return Err(AddressManagerError::Claim(
                             ClaimFault::RequestAddressClaimErr,
                         ))

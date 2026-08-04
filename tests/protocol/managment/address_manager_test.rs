@@ -51,7 +51,7 @@ async fn test_address_manager_initial_claim() {
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
     tokio::select! {
-        result = AddressManager::new(dut_bus, timer, my_name, strategy) => {
+        result = AddressManager::new(dut_bus, timer, my_name.into(), strategy) => {
             assert!(result.is_ok());
             let manager = result.unwrap();
             assert_eq!(manager.current_address(), preferred);
@@ -81,7 +81,7 @@ async fn test_address_manager_defend_on_conflict_loose_fixed() {
 
     tokio::select! {
         _ = async {
-            let manager = AddressManager::new(dut_bus, timer, my_name, strategy).await;
+            let manager = AddressManager::new(dut_bus, timer, my_name.into(), strategy).await;
             assert!(matches!(manager, Err(ClaimError::Fault(ClaimFault::NoAddressAvailable))));
         } => {
             // panic!("Manager task should not complete");
@@ -115,7 +115,7 @@ async fn test_address_manager_defend_on_conflict_win_fixed() {
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
+            let mut manager = AddressManager::new(dut_bus, timer, my_name.into(), strategy).await.unwrap();
             assert_eq!(manager.current_address(), preferred);
 
             // Receive in a loop so the manager processes claim frames
@@ -163,7 +163,7 @@ async fn test_address_manager_defend_on_conflict_win() {
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
+            let mut manager = AddressManager::new(dut_bus, timer, my_name.into(), strategy).await.unwrap();
             assert_eq!(manager.current_address(), preferred);
 
             // Receive in a loop so the manager processes claim frames
@@ -211,7 +211,7 @@ async fn test_address_manager_reclaim_on_conflict_lose() {
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
+            let mut manager = AddressManager::new(dut_bus, timer, my_name.into(), strategy).await.unwrap();
             assert_eq!(manager.current_address(), preferred);
 
             // Receive continuously; the manager handles conflicts automatically
@@ -258,7 +258,7 @@ async fn test_address_manager_filters_claim_frames() {
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
+            let mut manager = AddressManager::new(dut_bus, timer, my_name.into(), strategy).await.unwrap();
 
             // Send non-claim data frames to the manager
             let data_frame = build_data_frame(129025, 50);
@@ -293,7 +293,7 @@ async fn test_address_manager_ignores_own_claims() {
 
     tokio::select! {
         _ = async {
-            let mut manager = AddressManager::new(dut_bus, timer, my_name, strategy).await.unwrap();
+            let mut manager = AddressManager::new(dut_bus, timer, my_name.into(), strategy).await.unwrap();
 
             // Send our own claim (same NAME)
             let own_claim = build_conflict_frame(my_name, preferred);

@@ -2,9 +2,13 @@ use crate::{
     error::ClaimFault::{self},
     protocol::{
         constants::{addr_mgmt_pgns, address},
-        managment::address_claiming::{
-            build_address_claim_frame, extract_name_from_claim, is_addr_capable_and_isoname_match,
-            is_conflicting_claim, AddressClaimIterator, AddressClaimStrategy,
+        managment::{
+            address_claiming::{
+                build_address_claim_frame, extract_name_from_claim,
+                is_addr_capable_and_isoname_match, is_conflicting_claim, AddressClaimIterator,
+                AddressClaimStrategy,
+            },
+            iso_name::IsoName,
         },
         transport::can_frame::CanFrame,
     },
@@ -25,13 +29,13 @@ enum State {
 }
 
 pub struct AddressClaimer<'a> {
-    my_name: Option<u64>,
+    my_name: Option<IsoName>,
     addr_iterator: Option<AddressClaimIterator<'a>>,
     state: State,
 }
 
 impl<'a> AddressClaimer<'a> {
-    pub fn new(my_name: u64) -> Self {
+    pub fn new(my_name: IsoName) -> Self {
         Self {
             my_name: Some(my_name),
             addr_iterator: None,
@@ -54,7 +58,7 @@ impl<'a> AddressClaimer<'a> {
         // TODO!: check the pseudo-random delay for claiming
         if let Some(my_name) = self.my_name {
             // guards
-            if !is_addr_capable_and_isoname_match(my_name, strategy) {
+            if !is_addr_capable_and_isoname_match(my_name.raw(), strategy) {
                 return Err(ClaimFault::InconsistentStrategy);
             }
             match self.state {

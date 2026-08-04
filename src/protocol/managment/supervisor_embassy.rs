@@ -20,6 +20,7 @@ use futures_util::{future::select, future::Either, pin_mut};
 use crate::error::{AddressManagerError, ClaimError, SendPgnError};
 use crate::infra::codec::traits::PgnData;
 use crate::protocol::managment::address_manager::AddressManager;
+use crate::protocol::managment::iso_name::IsoName;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::fast_packet::MAX_FAST_PACKET_PAYLOAD;
 use crate::protocol::transport::traits::can_bus::CanBus;
@@ -64,7 +65,7 @@ where
     pub async fn claim(
         can_bus: C,
         timer: T,
-        my_name: u64,
+        my_name: IsoName,
         strategy: super::address_claiming::AddressClaimStrategy<'a>,
         command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
         frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,

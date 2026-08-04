@@ -85,7 +85,7 @@ fn main() {
     // Example 5: prepare a broadcast-ready Address Claim frame.
     println!("5. Building an Address Claim frame:");
     let claim_frame: CanFrame =
-        build_address_claim_frame(name.raw(), /* preferred address */ 37).expect("frame build");
+        build_address_claim_frame(name, /* preferred address */ 37).expect("frame build");
     println!("  CAN ID: 0x{:08X}", claim_frame.id.0);
     println!("  Source address: {}", claim_frame.id.source_address());
     println!(

@@ -123,7 +123,7 @@ async fn test_first_conversation() {
     let emitter_claimed_address = claim_address(
         &mut emitter_bus.clone(),
         &mut emitter_timer,
-        emitter_name,
+        emitter_name.into(),
         emitter_strategy,
     )
     .await
@@ -135,7 +135,7 @@ async fn test_first_conversation() {
     let reader_claimed_address = claim_address(
         &mut reader_bus.clone(),
         &mut reader_timer,
-        reader_name,
+        reader_name.into(),
         reader_strategy,
     )
     .await

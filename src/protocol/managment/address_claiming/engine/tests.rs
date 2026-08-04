@@ -27,33 +27,43 @@ impl ClockTest {
 }
 
 #[derive(Clone, Copy)]
-struct Name(u64);
+struct Name(IsoName);
 
 impl Default for Name {
     fn default() -> Self {
-        Self(0x1234567890ABCDEF)
+        Self(IsoName::from_raw(0x1234567890ABCDEF))
+    }
+}
+
+impl Name {
+    fn from_raw(raw: u64) -> Self {
+        Self(IsoName::from_raw(raw))
+    }
+
+    fn raw(&self) -> u64 {
+        self.0.raw()
     }
 }
 
 impl Name {
     fn new(strategy: AddressClaimStrategy) -> Self {
-        let mut name = Name::default();
+        let name = Name::default();
         match strategy {
             AddressClaimStrategy::Fixed { preferred: _ } => name,
             AddressClaimStrategy::SelfConfigurable { addresses: _ } => name,
             AddressClaimStrategy::Arbitrary { preferred: _ } => {
-                name.0 |= 1u64 << 63;
-                assert_eq!(name.0, 0x9234567890ABCDEF);
-                name
+                let r_name = name.0.raw() | 1u64 << 63;
+                assert_eq!(r_name, 0x9234567890ABCDEF);
+                Name::from_raw(r_name)
             }
         }
     }
 
     fn conflict_priority_builder(mut self, name_priority: ConflictPriority) -> Self {
         match name_priority {
-            ConflictPriority::BuiltToWin => self.0 &= !0xFFFF,
+            ConflictPriority::BuiltToWin => self.0 = IsoName::from_raw(self.0.raw() & !0xFFFF),
             ConflictPriority::Normal => {}
-            ConflictPriority::BuiltToLoose => self.0 |= 0xFFFF,
+            ConflictPriority::BuiltToLoose => self.0 = IsoName::from_raw(self.0.raw() | 0xFFFF),
         }
         return self;
     }
