@@ -144,29 +144,28 @@ where
     }
 
     /// Blocking receive loop that filters out address management frames.
-    pub async fn recv(&mut self) -> Result<Option<CanFrame>, C::Error> {
+    pub async fn recv(&mut self) -> Result<Option<CanFrame>, AddressManagerError<C::Error>> {
         loop {
-            let frame = self.can_bus.recv().await?;
+            let frame = self
+                .can_bus
+                .recv()
+                .await
+                .map_err(|e| AddressManagerError::Bus(e))?;
             if let Some(app_frame) = self.handle_frame(&frame).await? {
                 return Ok(Some(app_frame));
             }
-            // Otherwise it was absorbed by address management, continue listening
         }
     }
 
     /// Re-issue a claim to defend the current address (PGN 60928).
-    async fn defend(&mut self) -> Result<(), C::Error> {
-        let claim_frame = CanFrame {
-            id: CanId::builder(60928, self.current_address)
-                .to_destination(address::GLOBAL)
-                .with_priority(6)
-                .build()
-                .expect("PGN 60928 with a global destination must always produce a valid CanId"),
-            data: self.my_name.to_le_bytes(),
-            len: 8,
-        };
+    async fn defend(&mut self) -> Result<(), AddressManagerError<C::Error>> {
+        let claim_frame = build_address_claim_frame(self.my_name, self.current_address)
+            .map_err(AddressManagerError::Build)?;
 
-        self.can_bus.send(&claim_frame).await
+        self.can_bus
+            .send(&claim_frame)
+            .await
+            .map_err(AddressManagerError::Bus)
     }
 
     /// Send a pre-built payload using the current logical address.
@@ -201,7 +200,7 @@ where
     }
 
     /// Attempt to acquire a new address after losing the previous one.
-    async fn reclaim(&mut self) -> Result<u8, ClaimError<C::Error>> {
+    async fn reclaim(&mut self) -> Result<u8, AddressManagerError<C::Error>> {
         claim_address(
             &mut self.can_bus,
             &mut self.timer,
@@ -209,5 +208,6 @@ where
             self.strategy,
         )
         .await
+        .map_err(|_| AddressManagerError::Claim(ClaimFault::RequestAddressClaimErr))
     }
 }

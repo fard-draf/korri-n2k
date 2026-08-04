@@ -262,7 +262,7 @@ pub enum AddressHandleError {
 
 #[derive(Debug)]
 pub enum AddressSupervisorRunError<E: Debug> {
-    Receive(E),
+    Receive(AddressManagerError<E>),
     Send(E),
     SendPgn(SendPgnError<E>),
 }
