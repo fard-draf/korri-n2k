@@ -142,10 +142,8 @@ impl<'a> Iterator for AddressClaimIterator<'a> {
                     let candidate =
                         ((*preferred as usize + *offset) % address::CLAIMABLE_COUNT) as u8;
 
-                    if address::is_claimable(candidate) {
-                        if candidate != *preferred {
-                            return Some(candidate);
-                        }
+                    if candidate != *preferred {
+                        return Some(candidate);
                     }
                 }
                 None

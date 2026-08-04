@@ -1,7 +1,4 @@
-use crate::protocol::{
-    constants::address::CLAIMABLE_COUNT,
-    managment::address_claiming::engine::ClaimAction::CannotClaim, transport::can_id::CanIdBuilder,
-};
+use crate::protocol::{constants::address::CLAIMABLE_COUNT, transport::can_id::CanIdBuilder};
 
 use super::*;
 
