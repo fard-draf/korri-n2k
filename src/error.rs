@@ -54,6 +54,8 @@ pub enum AddressManagerError<E> {
     Bus(E),
     #[error(transparent)]
     Claim(#[from] ClaimFault),
+    #[error(transparent)]
+    Build(#[from] CanIdBuildError),
 }
 
 #[derive(Error, Debug)]
