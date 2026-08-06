@@ -48,15 +48,18 @@ pub enum SupervisorCommand {
 
 #[derive(Debug)]
 pub enum AddressHandleError {
+    /// The PGN could not be written into the command buffer.
     Serialization,
+    /// The runner is gone: nothing will ever execute this command.
+    RunnerGone,
 }
 
 /// The address a handle emits from, shared with the runner that owns the engine.
 ///
 /// **Best effort, not a lock.** Reading `Some(42)` then sending races a reclaim
-/// that may happen in between; the command is refused in that case. The guard in
-/// [`handle_command`] stays the authority — this only lets a caller avoid asking
-/// for what it knows will be refused.
+/// that may happen in between; the command is refused in that case. The runner's
+/// own guard stays the authority — this only lets a caller avoid asking for what
+/// it knows will be refused.
 ///
 /// One instance per Controller Application: it hangs off the handle, so a node
 /// holding several NAMEs reads each address through its own handle.
@@ -121,8 +124,11 @@ where
             len,
             payload,
         } => {
+            // `len` is a public field of the command, and under embassy the
+            // caller owns the channel: an out-of-range value must not panic.
+            let payload = payload.get(..len).ok_or(SendPgnError::Serialization)?;
             manager
-                .send_payload(pgn, priority, destination, &payload[..len])
+                .send_payload(pgn, priority, destination, payload)
                 .await
         }
     }

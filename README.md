@@ -94,9 +94,12 @@ let handle = parts.handle.expect("a command channel was requested");
 tokio::spawn(parts.runner.drive());
 ```
 
-Until the address is acquired, `send_pgn` refuses with `SendPgnError::NotClaimed`.
-It never returns a silent `Ok(())`: a swallowed emission would let the caller
-believe it spoke.
+Until the address is acquired, `AddressManager::send_pgn` refuses with
+`SendPgnError::NotClaimed`. It never returns a silent `Ok(())`.
+
+`AddressHandle::send_pgn` is a different contract: **it confirms queueing, not
+emission.** The runner may still refuse the command, and reports the refusal
+rather than returning it.
 
 Ask the handle rather than guessing a delay:
 

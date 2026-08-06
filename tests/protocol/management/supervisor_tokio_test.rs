@@ -5,13 +5,16 @@ mod helpers {
 }
 
 use helpers::{MockCanBus, MockTimer};
-use korri_n2k::protocol::management::address_claiming::AddressClaimStrategy;
+use korri_n2k::protocol::management::address_claiming::{
+    build_address_claim_frame, AddressClaimStrategy,
+};
 use korri_n2k::protocol::management::address_manager::AddressManager;
 use korri_n2k::protocol::management::address_supervisor::{
-    AddressService, AddressSupervisorRunError,
+    AddressService, AddressSupervisorRunError, SupervisorCommand,
 };
 use korri_n2k::protocol::management::iso_name::IsoName;
 use korri_n2k::protocol::messages::Pgn129025;
+use korri_n2k::protocol::transport::fast_packet::MAX_FAST_PACKET_PAYLOAD;
 use korri_n2k::protocol::transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus};
 use tokio::time::{sleep, Duration};
 
@@ -100,6 +103,80 @@ async fn handle_reports_the_address_it_emits_from() {
 
             sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
             assert_eq!(handle.claimed_address(), Some(PREFERRED));
+        } => {}
+    }
+}
+
+/// P0: a full application channel must never delay address management.
+#[tokio::test]
+async fn a_full_frame_channel_does_not_stall_the_claim() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    // Capacity 1, and nothing ever drains it.
+    let parts = service(dut_bus, 0, 1).into_parts();
+    let _frames = parts.frames.expect("frame channel requested");
+
+    let runner = parts.runner.drive();
+    tokio::pin!(runner);
+
+    tokio::select! {
+        result = &mut runner => panic!("supervisor ended unexpectedly: {:?}", result),
+        _ = async {
+            let claim = host_bus.recv().await.expect("initial claim expected");
+            assert_eq!(claim.id.source_address(), PREFERRED);
+
+            // Fill the channel, then keep pushing frames the runner must forward.
+            for _ in 0..4 {
+                host_bus.send(&data_frame(129025, 7)).await.unwrap();
+                sleep(Duration::from_millis(5)).await;
+            }
+
+            // A conflict now arrives. The engine loses and must announce the next
+            // candidate on the bus, even though the application is not draining.
+            let rival = build_address_claim_frame(IsoName::from_raw(0x0000_0000_0000_0001), PREFERRED);
+            host_bus.send(&rival).await.unwrap();
+
+            let next = host_bus.recv().await.expect("the next candidate must be emitted");
+            assert_eq!(next.id.pgn(), 60928);
+            assert_eq!(next.id.source_address(), PREFERRED + 1);
+        } => {}
+    }
+}
+
+/// P0: `len` is a public field of the command; an out-of-range value must be
+/// rejected, not sliced into a panic.
+#[tokio::test]
+async fn an_out_of_range_payload_length_is_rejected() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = service(dut_bus, 4, 0).into_parts();
+    let handle = parts.handle.expect("command channel requested");
+
+    let runner = parts.runner.drive();
+    tokio::pin!(runner);
+
+    tokio::select! {
+        result = &mut runner => panic!("a bad command must not stop the runner: {:?}", result),
+        _ = async {
+            host_bus.recv().await.expect("initial claim expected");
+            sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+
+            handle
+                .send_command(SupervisorCommand::SendPayload {
+                    pgn: 129025,
+                    priority: 2,
+                    destination: None,
+                    len: usize::MAX,
+                    payload: [0u8; MAX_FAST_PACKET_PAYLOAD],
+                })
+                .await
+                .expect("queueing must succeed");
+
+            // Still alive, still emitting.
+            let mut position = Pgn129025::new();
+            position.latitude = 47.6;
+            handle.send_pgn(&position, 129025, 2, None).await.unwrap();
+
+            let payload = host_bus.recv().await.expect("the runner must still emit");
+            assert_eq!(payload.id.pgn(), 129025);
         } => {}
     }
 }

@@ -150,9 +150,9 @@ impl IsoName {
     pub fn is_addr_capable_and_isoname_match(&self, strategy: AddressClaimStrategy<'_>) -> bool {
         let is_addr_capable = self.is_arbitrary_address_capable();
         match strategy {
-            AddressClaimStrategy::Fixed { preferred: _ } => is_addr_capable == false,
-            AddressClaimStrategy::SelfConfigurable { addresses: _ } => is_addr_capable == false,
-            AddressClaimStrategy::Arbitrary { preferred: _ } => is_addr_capable == true,
+            AddressClaimStrategy::Fixed { preferred: _ } => !is_addr_capable,
+            AddressClaimStrategy::SelfConfigurable { addresses: _ } => !is_addr_capable,
+            AddressClaimStrategy::Arbitrary { preferred: _ } => is_addr_capable,
         }
     }
 }
@@ -506,12 +506,12 @@ mod tests {
         // Note: device_function is an INDIRECT_LOOKUP encoded across two u8 values
         let mut pgn = Pgn60928::new();
         pgn.unique_number = 123456;
-        pgn.manufacturer_code = ManufacturerCode::try_from(69).unwrap(); // ArksEnterprisesInc
+        pgn.manufacturer_code = ManufacturerCode::from(69); // ArksEnterprisesInc
         pgn.device_instance_lower = 3;
         pgn.device_instance_upper = 5;
         // Use the helper to assign DeviceFunction
         pgn.set_device_function(DeviceFunction::Diagnostic); // 2690 = 0x0A82
-        pgn.device_class = DeviceClass::try_from(25).unwrap(); // InternetworkDevice
+        pgn.device_class = DeviceClass::from(25); // InternetworkDevice
         pgn.system_instance = 7;
         pgn.arbitrary_address_capable = YesNo::Yes;
 
@@ -568,12 +568,12 @@ mod tests {
         // Create a Pgn60928 (using valid enum values)
         let mut original_pgn = Pgn60928::new();
         original_pgn.unique_number = 999888;
-        original_pgn.manufacturer_code = ManufacturerCode::try_from(88).unwrap(); // SAE // HemisphereGpsInc
+        original_pgn.manufacturer_code = ManufacturerCode::from(88); // SAE // HemisphereGpsInc
         original_pgn.device_instance_lower = 1;
         original_pgn.device_instance_upper = 31;
         // Use helper to assign DeviceFunction
         original_pgn.set_device_function(DeviceFunction::AlarmEnunciator5230); // SAE // 5230 = 0x146E
-        original_pgn.device_class = DeviceClass::try_from(30).unwrap(); // SAE //  ElectricalDistribution
+        original_pgn.device_class = DeviceClass::from(30); // SAE //  ElectricalDistribution
         original_pgn.system_instance = 15;
         original_pgn.arbitrary_address_capable = YesNo::Yes;
 

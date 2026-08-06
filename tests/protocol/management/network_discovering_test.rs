@@ -20,11 +20,13 @@ async fn test_request_network_discovery_three_devices() {
     // Prepare a stack buffer large enough to hold all results and a safety margin.
     // This ensures the function neither panics nor miscounts when extra space is available.
     let mut discovered_devices = [(0u8, IsoName::from_raw(0)); 5];
+    // An address the node holds: a request is an ordinary addressed message.
+    let our_address = 17u8;
 
     // 2. Run the function and the simulator in parallel
     tokio::select! {
         // Branch 1: execute the function under test
-        result = request_network_discovery(&mut dut_bus, &mut timer, &mut discovered_devices) => {
+        result = request_network_discovery(&mut dut_bus, &mut timer, our_address, &mut discovered_devices) => {
             // Step 4: assert on the result
             assert!(result.is_ok(), "Function returned an error");
             let count = result.unwrap();
@@ -47,6 +49,11 @@ async fn test_request_network_discovery_three_devices() {
                 .await
                 .expect("DUT did not send a discovery request");
             assert_eq!(request.id.pgn(), 59904, "Unexpected PGN in discovery request");
+            assert_eq!(
+                request.id.source_address(),
+                our_address,
+                "A request must carry a source address the node holds, never 255"
+            );
 
             // Define the three simulated devices
             let device1 = (IsoName::from_raw(0xAAAAAAAAAAAAAAA1), 42);

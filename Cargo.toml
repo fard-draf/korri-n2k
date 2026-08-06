@@ -1,6 +1,6 @@
 [package]
 name = "korri-n2k"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.96"
 description = "no_std-first NMEA 2000 protocol stack for embedded and Linux systems"
@@ -13,8 +13,8 @@ exclude = ["tests/", ".github/", "archives/"]
 
 [features]
 default = []
-embassy = ["dep:embassy-sync"]
-tokio = ["std", "dep:tokio"]
+embassy = ["dep:embassy-sync", "dep:portable-atomic"]
+tokio = ["std", "dep:tokio", "dep:portable-atomic"]
 std = []
 defmt = ["dep:defmt"]
 build-download = ["dep:ureq"]
@@ -28,9 +28,10 @@ embassy-sync = { version = "0.6", optional = true }
 tokio = { version = "1.47.1", optional = true, default-features = false, features = ["sync", "time"] }
 thiserror-no-std = "2.0"
 futures-util = { version = "0.3", default-features = false }
+# Only the supervisor uses it, and no supervisor is compiled without a runtime.
 # Targets without native atomics (thumbv6m, riscv32imc) need
 # `portable-atomic/critical-section` enabled by the final binary.
-portable-atomic = { version = "1.13", default-features = false }
+portable-atomic = { version = "1.13", default-features = false, optional = true }
 
 defmt = { version = "0.3", optional = true }
 
@@ -38,8 +39,6 @@ defmt = { version = "0.3", optional = true }
 critical-section = { version = "1.1", features = ["std"] }
 static_cell = "2.1.1"
 tokio = { version = "1.53", features = ["full", "test-util"] }
-log = "0.4"
-env_logger = "0.11"
 
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }

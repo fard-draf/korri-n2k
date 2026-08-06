@@ -46,7 +46,7 @@ impl<'a> AddressClaimEngine<'a> {
             return Err(ClaimFault::InconsistentStrategy);
         }
         Ok(Self {
-            my_name: my_name,
+            my_name,
             addr_iterator: None,
             strategy,
             state: State::UnClaimed,
@@ -71,7 +71,7 @@ impl<'a> AddressClaimEngine<'a> {
             frame: claim_frame,
             deadline_ms: now_ms + CLAIM_DELAY_MS as u64,
         };
-        return ClaimAction::Send(claim_frame);
+        ClaimAction::Send(claim_frame)
     }
 
     // Strategy:
@@ -90,9 +90,9 @@ impl<'a> AddressClaimEngine<'a> {
                     if is_addressed_claim_request_message(recv_frame, NULL_ADDR_254) =>
                 {
                     let claim_frame = build_address_claim_frame(self.my_name, NULL_ADDR_254);
-                    return ClaimAction::Send(claim_frame);
+                    ClaimAction::Send(claim_frame)
                 }
-                _ => return self.start_claim(now_ms),
+                _ => self.start_claim(now_ms),
             },
             State::Claiming { frame, deadline_ms } => {
                 // The frame comes first: only a conflict changes the state.
@@ -116,7 +116,7 @@ impl<'a> AddressClaimEngine<'a> {
                     self.state = State::Claimed { frame };
                     return ClaimAction::Claimed(frame.id.source_address());
                 }
-                return ClaimAction::Wait(remaining_ms as u32);
+                ClaimAction::Wait(remaining_ms as u32)
             }
 
             State::Claimed { frame } => {
@@ -127,20 +127,14 @@ impl<'a> AddressClaimEngine<'a> {
                     return ClaimAction::Send(frame);
                 }
                 match classify_claim(recv_frame, self.my_name, frame.id.source_address()) {
-                    ClaimRelation::Unrelated => {
-                        return ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
-                    }
-                    ClaimRelation::OwnClaim => {
-                        return ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
-                    }
-                    ClaimRelation::WeWin => return ClaimAction::Send(frame),
-                    ClaimRelation::WeLose => {
-                        return self.handle_loosing_conflict(now_ms);
-                    }
+                    ClaimRelation::Unrelated => ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32),
+                    ClaimRelation::OwnClaim => ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32),
+                    ClaimRelation::WeWin => ClaimAction::Send(frame),
+                    ClaimRelation::WeLose => self.handle_loosing_conflict(now_ms),
                     ClaimRelation::PeerCannotClaim => {
-                        return ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
+                        ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
                     }
-                };
+                }
             }
 
             State::CannotClaim { retry_at_ms } => match rx {
@@ -148,13 +142,13 @@ impl<'a> AddressClaimEngine<'a> {
                     if is_addressed_claim_request_message(recv_frame, NULL_ADDR_254) =>
                 {
                     let claim_frame = build_address_claim_frame(self.my_name, NULL_ADDR_254);
-                    return ClaimAction::Send(claim_frame);
+                    ClaimAction::Send(claim_frame)
                 }
                 _ => {
                     if now_ms < retry_at_ms {
-                        return ClaimAction::Wait(retry_at_ms.saturating_sub(now_ms) as u32);
+                        ClaimAction::Wait(retry_at_ms.saturating_sub(now_ms) as u32)
                     } else {
-                        return self.start_claim(now_ms);
+                        self.start_claim(now_ms)
                     }
                 }
             },
@@ -180,11 +174,11 @@ impl<'a> AddressClaimEngine<'a> {
         }
 
         self.state = State::Claiming {
-            frame: claim_frame.clone(),
+            frame: claim_frame,
             deadline_ms: now_ms + CLAIM_DELAY_MS as u64,
         };
 
-        return ClaimAction::Send(claim_frame);
+        ClaimAction::Send(claim_frame)
     }
 
     /// return an Option with Some(addr) if claimed address, otherwise None.

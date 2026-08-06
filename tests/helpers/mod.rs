@@ -48,7 +48,7 @@ impl CanBus for MockCanBus {
     type Error = ();
 
     async fn send(&mut self, frame: &CanFrame) -> Result<(), Self::Error> {
-        self.tx.send(frame.clone()).map_err(|_| ())?;
+        self.tx.send(*frame).map_err(|_| ())?;
         Ok(())
     }
 

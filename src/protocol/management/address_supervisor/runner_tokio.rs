@@ -11,6 +11,7 @@ use core::fmt::Debug;
 use core::future::pending;
 use futures_util::{future::select, future::Either, pin_mut};
 use std::sync::Arc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::error::{ClaimFault, SendPgnError};
@@ -100,6 +101,7 @@ where
                 command_rx: self.command_rx,
                 frame_tx: self.frame_tx,
                 claimed: self.claimed,
+                dropped_frames: 0,
             },
         }
     }
@@ -128,6 +130,7 @@ where
     command_rx: Option<Receiver<SupervisorCommand>>,
     frame_tx: Option<Sender<CanFrame>>,
     claimed: Arc<ClaimedAddress>,
+    dropped_frames: u32,
 }
 
 impl<'a, C, T> AddressRunner<'a, C, T>
@@ -148,7 +151,7 @@ where
             // The engine saw it first; the application gets it too, unfiltered.
             // This `take` is also the "rx = None after a Send" the engine expects.
             if let Some(frame) = rx.take() {
-                self.forward_frame(frame).await;
+                self.forward_frame(frame);
             }
 
             match action {
@@ -226,14 +229,24 @@ where
         }
     }
 
-    async fn forward_frame(&mut self, frame: CanFrame) {
-        let closed = match self.frame_tx {
-            Some(ref tx) => tx.send(frame).await.is_err(),
-            None => false,
+    /// Hand the frame to the application, or drop it.
+    ///
+    /// Never awaits: a full channel must not delay the action the engine just
+    /// decided. Application traffic is sacrificial, address management is not.
+    fn forward_frame(&mut self, frame: CanFrame) {
+        let Some(tx) = self.frame_tx.as_ref() else {
+            return;
         };
-        if closed {
-            self.frame_tx = None;
+        match tx.try_send(frame) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => self.dropped_frames = self.dropped_frames.wrapping_add(1),
+            Err(TrySendError::Closed(_)) => self.frame_tx = None,
         }
+    }
+
+    /// Frames the application was too slow to take. Wraps on overflow.
+    pub fn dropped_frames(&self) -> u32 {
+        self.dropped_frames
     }
 }
 
@@ -251,12 +264,31 @@ impl AddressHandle {
         self.claimed.get()
     }
 
-    pub async fn send_raw_frame(&self, frame: &CanFrame) {
-        let command = SupervisorCommand::SendRawFrame(frame.clone());
-        // Fire-and-forget: if the runner is gone the frame is silently dropped.
-        let _ = self.sender.send(command).await;
+    /// Queue a command built by the caller. Same contract as
+    /// [`AddressHandle::send_pgn`]: it confirms queueing, not emission.
+    pub async fn send_command(&self, command: SupervisorCommand) -> Result<(), AddressHandleError> {
+        self.sender
+            .send(command)
+            .await
+            .map_err(|_| AddressHandleError::RunnerGone)
     }
 
+    /// Queue a frame. Returns once the runner has taken it from the channel,
+    /// not once it reached the bus: see [`AddressHandle::send_pgn`].
+    pub async fn send_raw_frame(&self, frame: &CanFrame) -> Result<(), AddressHandleError> {
+        let command = SupervisorCommand::SendRawFrame(*frame);
+        self.sender
+            .send(command)
+            .await
+            .map_err(|_| AddressHandleError::RunnerGone)
+    }
+
+    /// Queue a PGN for the runner to emit.
+    ///
+    /// **This confirms queueing, not emission.** The runner may still refuse the
+    /// command — no address acquired, or a conflict between now and execution —
+    /// and a refusal is reported by the runner, not returned here. Check
+    /// [`AddressHandle::claimed_address`] before queueing if that matters.
     pub async fn send_pgn<P: PgnData>(
         &self,
         pgn_data: &P,
@@ -280,9 +312,10 @@ impl AddressHandle {
             payload,
         };
 
-        // Fire-and-forget: if the runner is gone the frame is silently dropped.
-        let _ = self.sender.send(command).await;
-        Ok(())
+        self.sender
+            .send(command)
+            .await
+            .map_err(|_| AddressHandleError::RunnerGone)
     }
 }
 

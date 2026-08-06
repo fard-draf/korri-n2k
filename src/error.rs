@@ -59,17 +59,9 @@ pub enum ClaimFault {
     #[error("Request address claim error")]
     RequestAddressClaimErr,
 
-    /// Name unvailable
-    #[error("Name is requiered here")]
-    UnvailableName,
-
     /// Failed to extract business data.
     #[error(transparent)]
     Extraction(#[from] ExtractionError),
-
-    /// Unable to build the CAN identifier.
-    #[error(transparent)]
-    BuildErr(#[from] CanIdBuildError),
 }
 
 #[derive(Debug, Error)]

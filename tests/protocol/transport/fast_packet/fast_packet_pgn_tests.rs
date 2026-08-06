@@ -31,13 +31,13 @@ fn test_pgn_129040_fast_packet_roundtrip() {
     );
 
     let builder = FastPacketBuilder::new(pgn, 42, None, &buffer[..len]);
-    let mut frames = builder.build();
+    let frames = builder.build();
 
     let mut assembler = FastPacketAssembler::new();
     let mut complete = None;
     let mut frame_count = 0;
 
-    while let Some(frame_result) = frames.next() {
+    for frame_result in frames {
         let frame = frame_result.expect("frame build");
         frame_count += 1;
 
@@ -102,12 +102,12 @@ fn test_pgn_126996_fast_packet_roundtrip() {
     );
 
     let builder = FastPacketBuilder::new(pgn, 35, None, &buffer[..len]);
-    let mut frames = builder.build();
+    let frames = builder.build();
     let mut assembler = FastPacketAssembler::new();
     let mut complete = None;
     let mut frame_count = 0;
 
-    while let Some(frame_result) = frames.next() {
+    for frame_result in frames {
         let frame = frame_result.expect("frame build");
         frame_count += 1;
 
@@ -182,11 +182,11 @@ fn test_pgn_126998_fast_packet_roundtrip() {
     assert!(len > 8, "PGN 126998 must be encoded as a Fast Packet");
 
     let builder = FastPacketBuilder::new(pgn, 77, None, &buffer[..len]);
-    let mut frames = builder.build();
+    let frames = builder.build();
     let mut assembler = FastPacketAssembler::new();
     let mut complete = None;
 
-    while let Some(frame_result) = frames.next() {
+    for frame_result in frames {
         let frame = frame_result.expect("frame build");
         if let ProcessResult::MessageComplete(msg) =
             assembler.process_frame(fake_timer_ms, pgn, 77, &frame.data)

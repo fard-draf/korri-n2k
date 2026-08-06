@@ -84,4 +84,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run clippy (Linter)
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy (tokio)
+        run: cargo clippy --no-default-features --features tokio --all-targets -- -D warnings
+      - name: Clippy (embassy)
+        run: cargo clippy --no-default-features --features embassy --all-targets -- -D warnings

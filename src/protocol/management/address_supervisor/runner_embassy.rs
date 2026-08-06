@@ -6,7 +6,7 @@
 //! * a frame receiver (`AddressFrames`) to pull application traffic filtered by the manager.
 //!
 //! Firmware decides which features it needs by providing pre-allocated
-//! [`embassy_sync::Channel`] instances. No allocation is performed by the
+//! `embassy_sync::channel::Channel` instances. No allocation is performed by the
 //! library and there is no dependency on a particular BSP.
 
 use core::fmt::Debug;
@@ -105,6 +105,7 @@ where
                 command_channel: self.command_channel,
                 frame_channel: self.frame_channel,
                 claimed: self.claimed,
+                dropped_frames: 0,
             },
         }
     }
@@ -133,6 +134,7 @@ where
     command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
     frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
     claimed: &'a ClaimedAddress,
+    dropped_frames: u32,
 }
 
 impl<'a, C, T, const CMD_CAP: usize, const FRAME_CAP: usize>
@@ -155,9 +157,14 @@ where
 
             // The engine saw it first; the application gets it too, unfiltered.
             // This `take` is also the "rx = None after a Send" the engine expects.
+            // Never awaits: a full channel must not delay the action the engine
+            // just decided. Application traffic is sacrificial, address
+            // management is not.
             if let Some(frame) = rx.take() {
                 if let Some(frame_ch) = frame_channel {
-                    frame_ch.send(frame).await;
+                    if frame_ch.try_send(frame).is_err() {
+                        self.dropped_frames = self.dropped_frames.wrapping_add(1);
+                    }
                 }
             }
 
@@ -207,6 +214,11 @@ where
         }
     }
 
+    /// Frames the application was too slow to take. Wraps on overflow.
+    pub fn dropped_frames(&self) -> u32 {
+        self.dropped_frames
+    }
+
     /// Run one command. Only a dead bus stops the runner: a rejected command is
     /// the caller's mistake and must not take address management down with it.
     async fn run_command(
@@ -241,11 +253,20 @@ impl<'a, const CMD_CAP: usize> AddressHandle<'a, CMD_CAP> {
         self.claimed.get()
     }
 
+    /// Queue a frame. Returns once the runner has taken it from the channel,
+    /// not once it reached the bus: see [`AddressHandle::send_pgn`].
     pub async fn send_raw_frame(&self, frame: &CanFrame) {
-        let command = SupervisorCommand::SendRawFrame(frame.clone());
-        self.sender.send(command).await;
+        self.sender
+            .send(SupervisorCommand::SendRawFrame(*frame))
+            .await;
     }
 
+    /// Queue a PGN for the runner to emit.
+    ///
+    /// **This confirms queueing, not emission.** The runner may still refuse the
+    /// command — no address acquired, or a conflict between now and execution —
+    /// and a refusal is reported by the runner, not returned here. Check
+    /// [`AddressHandle::claimed_address`] before queueing if that matters.
     pub async fn send_pgn<P: PgnData>(
         &self,
         pgn_data: &P,

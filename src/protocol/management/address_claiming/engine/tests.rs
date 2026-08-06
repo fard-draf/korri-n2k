@@ -61,7 +61,7 @@ impl Name {
             ConflictPriority::Normal => {}
             ConflictPriority::BuiltToLoose => self.0 = IsoName::from_raw(self.0.raw() | 0xFFFF),
         }
-        return self;
+        self
     }
 }
 
@@ -869,9 +869,8 @@ fn test_iso_request_is_ignored_when_not_for_us() {
         ClaimAction::Claimed(my_preferred)
     );
 
-    // Pre-conditions
-    assert!(ADDR_2 != my_preferred); // addressed to another node
-    assert!(ADDR_2 != GLOBAL);
+    // Pre-conditions: ADDR_2 is neither ours nor the broadcast address.
+    const _: () = assert!(ADDR_2 != ADDR_1 && ADDR_2 != GLOBAL);
 
     // Addressed to another node.
     let other_node_rx = build_request_frame(ADDR_2, CLAIM_PGN_60928, REQUEST_PGN_LEN);

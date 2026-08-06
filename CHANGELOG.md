@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-08-06
 
 This cycle turns address management into an I/O-free engine driven by a runner.
 The engine takes a clock reading and an optional frame, and returns an action.
@@ -21,13 +21,18 @@ The engine takes a clock reading and an optional frame, and returns an action.
 - `classify_claim` and `ClaimRelation`, turning a received frame into one of
   five relations. A claim with source address 254 never becomes a local
   conflict.
-- `AddressRequester`, the same I/O-free shape for network discovery.
+- `AddressRequester`, the same I/O-free shape for network discovery, now
+  reachable: its module was private.
 - `ClaimedAddress` and `AddressHandle::claimed_address()`. Best effort: it
   reports what the engine holds now, and a later conflict can still take the
   address away.
 - `SendPgnError::NotClaimed`. Emitting before an address is acquired now
   returns this instead of a silent `Ok(())`.
 - `ClaimFault`, for claim failures decided from frame content alone.
+- `AddressRunner::dropped_frames`, counting frames the application was too slow
+  to take.
+- `AddressHandleError::RunnerGone`, returned when the runner is no longer there
+  to execute a queued command.
 - `FastPacketBuilder::with_priority`, setting the priority of a built frame.
 - Three runnable examples, `address_claim`, `fast_packet_rx` and
   `blocking_claim`, all run by CI. The last one drives the engine from a plain
@@ -73,6 +78,16 @@ The engine takes a clock reading and an optional frame, and returns an action.
   doctests, and the examples are built and run by CI.
 
 ### Fixed
+- The application channel could stall address management. The runner forwarded
+  each frame with an awaiting send, so a full channel delayed the action the
+  engine had just decided — a lost conflict could move the internal state
+  without the new claim ever reaching the bus. Forwarding is now non-blocking
+  and drops instead, counted by `AddressRunner::dropped_frames`.
+- `SupervisorCommand::SendPayload` panicked on an out-of-range `len`. The field
+  is public and the caller owns the channel under embassy; it is now validated.
+- Network discovery sent its ISO Request with source address 255. That is the
+  broadcast destination, never a valid source; `AddressRequester::new` now takes
+  the address the node holds.
 - A claim campaign could stall forever. In `Claiming`, any harmless frame
   arriving on the deadline returned `Wait(0)` and the deadline was never
   reached again.

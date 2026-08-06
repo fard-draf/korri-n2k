@@ -13,13 +13,13 @@ fn test_roundtrip_15_bytes() {
 
     // Fragmentation
     let builder = FastPacketBuilder::new(pgn, 42, None, &original);
-    let mut iter = builder.build();
+    let iter = builder.build();
 
     // Reassembly
     let mut assembler = FastPacketAssembler::new();
     let mut result = None;
 
-    while let Some(frame_result) = iter.next() {
+    for frame_result in iter {
         let frame = frame_result.unwrap();
         if let ProcessResult::MessageComplete(msg) =
             assembler.process_frame(fake_timer_ms, pgn, 42, &frame.data)
@@ -43,12 +43,12 @@ fn test_roundtrip_max_payload() {
 
     // PGN 129540 is PDU2 (broadcast)
     let builder = FastPacketBuilder::new(pgn, 30, None, &original);
-    let mut iter = builder.build();
+    let iter = builder.build();
 
     let mut assembler = FastPacketAssembler::new();
     let mut result = None;
 
-    while let Some(frame_result) = iter.next() {
+    for frame_result in iter {
         let frame = frame_result.unwrap();
         if let ProcessResult::MessageComplete(msg) =
             assembler.process_frame(fake_timer_ms, pgn, 30, &frame.data)

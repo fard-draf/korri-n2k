@@ -25,13 +25,18 @@ pub enum State {
 
 pub struct AddressRequester<'a> {
     state: State,
+    source_address: u8,
     discovered_devices: &'a mut [(u8, IsoName)],
 }
 
 impl<'a> AddressRequester<'a> {
-    pub fn new(discovered_devices: &'a mut [(u8, IsoName)]) -> Self {
+    /// `source_address` must be an address the node actually holds, from
+    /// `claimed_address()`. A request is an ordinary addressed message: 255 is
+    /// the broadcast destination, never a valid source.
+    pub fn new(source_address: u8, discovered_devices: &'a mut [(u8, IsoName)]) -> Self {
         Self {
             state: State::Idle,
+            source_address,
             discovered_devices,
         }
     }
@@ -48,8 +53,7 @@ impl<'a> AddressRequester<'a> {
                 data[0..3].copy_from_slice(&pgn_bytes[0..3]);
 
                 let request_frame = CanFrame {
-                    // TODO!: fix source address -> GLOBAL isn't correct
-                    id: CanId::builder(addr_mgmt_pgns::REQUEST_PGN_59904, address::GLOBAL)
+                    id: CanId::builder(addr_mgmt_pgns::REQUEST_PGN_59904, self.source_address)
                         .to_destination(address::GLOBAL)
                         .with_priority(6)
                         .build()
@@ -62,7 +66,7 @@ impl<'a> AddressRequester<'a> {
                     device_count: 0,
                     deadline_ms: now_ms + REQUEST_DELAY_MS as u64,
                 };
-                return Ok(RequestAction::Send(request_frame));
+                Ok(RequestAction::Send(request_frame))
             }
             State::Listening {
                 mut device_count,
@@ -81,7 +85,7 @@ impl<'a> AddressRequester<'a> {
                 if frame.id.pgn() != addr_mgmt_pgns::CLAIM_PGN_60928 {
                     return Ok(RequestAction::Wait(remaining_ms as u32));
                 }
-                let Ok(name) = extract_name_from_claim(&frame) else {
+                let Ok(name) = extract_name_from_claim(frame) else {
                     return Ok(RequestAction::Wait(remaining_ms as u32));
                 };
                 let address = frame.id.source_address();
@@ -100,7 +104,7 @@ impl<'a> AddressRequester<'a> {
                     return Ok(RequestAction::Wait(remaining_ms as u32));
                 }
                 // TODO!: add defmt warn -> if the buffer is full or empty, frame is ignored.
-                return Ok(RequestAction::Wait(remaining_ms as u32));
+                Ok(RequestAction::Wait(remaining_ms as u32))
             }
         }
     }

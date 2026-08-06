@@ -165,7 +165,7 @@ pub fn classify_claim(frame: &CanFrame, my_name: IsoName, local_address: u8) -> 
         return ClaimRelation::OwnClaim;
     }
     // Everything else
-    return ClaimRelation::Unrelated;
+    ClaimRelation::Unrelated
 }
 
 /// Extracts the NAME from an Address Claim frame (PGN 60928).
