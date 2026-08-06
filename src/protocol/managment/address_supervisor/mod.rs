@@ -1,8 +1,11 @@
 use core::fmt::Debug;
 
+use portable_atomic::{AtomicU8, Ordering};
+
 use crate::{
     error::SendPgnError,
     protocol::{
+        constants::address::NULL_ADDR_254,
         managment::address_manager::AddressManager,
         transport::{
             can_frame::CanFrame,
@@ -46,6 +49,44 @@ pub enum SupervisorCommand {
 #[derive(Debug)]
 pub enum AddressHandleError {
     Serialization,
+}
+
+/// The address a handle emits from, shared with the runner that owns the engine.
+///
+/// **Best effort, not a lock.** Reading `Some(42)` then sending races a reclaim
+/// that may happen in between; the command is refused in that case. The guard in
+/// [`handle_command`] stays the authority — this only lets a caller avoid asking
+/// for what it knows will be refused.
+///
+/// One instance per Controller Application: it hangs off the handle, so a node
+/// holding several NAMEs reads each address through its own handle.
+pub struct ClaimedAddress(AtomicU8);
+
+impl Default for ClaimedAddress {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClaimedAddress {
+    /// Starts addressless. `no_std` friendly: usable as a `static`.
+    pub const fn new() -> Self {
+        Self(AtomicU8::new(NULL_ADDR_254))
+    }
+
+    /// The current address, or `None` while none is held.
+    pub fn get(&self) -> Option<u8> {
+        match self.0.load(Ordering::Relaxed) {
+            NULL_ADDR_254 => None,
+            address => Some(address),
+        }
+    }
+
+    /// Published by the runner after every engine step.
+    pub(crate) fn set(&self, address: Option<u8>) {
+        self.0
+            .store(address.unwrap_or(NULL_ADDR_254), Ordering::Relaxed);
+    }
 }
 
 /// Failures that stop the runner. A rejected command is not one of them.

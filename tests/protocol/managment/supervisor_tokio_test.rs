@@ -7,7 +7,9 @@ mod helpers {
 use helpers::{MockCanBus, MockTimer};
 use korri_n2k::protocol::managment::address_claiming::AddressClaimStrategy;
 use korri_n2k::protocol::managment::address_manager::AddressManager;
-use korri_n2k::protocol::managment::address_supervisor::{AddressService, AddressSupervisorRunError};
+use korri_n2k::protocol::managment::address_supervisor::{
+    AddressService, AddressSupervisorRunError,
+};
 use korri_n2k::protocol::managment::iso_name::IsoName;
 use korri_n2k::protocol::messages::Pgn129025;
 use korri_n2k::protocol::transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus};
@@ -71,6 +73,33 @@ async fn supervisor_claims_then_sends_a_pgn() {
             let payload = host_bus.recv().await.expect("PGN frame expected");
             assert_eq!(payload.id.pgn(), 129025);
             assert_eq!(payload.id.source_address(), PREFERRED);
+        } => {}
+    }
+}
+
+#[tokio::test]
+async fn handle_reports_the_address_it_emits_from() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = service(dut_bus, 4, 0).into_parts();
+    let handle = parts.handle.expect("command channel requested");
+
+    // Nothing is held before the runner starts.
+    assert_eq!(handle.claimed_address(), None);
+
+    let runner = parts.runner.drive();
+    tokio::pin!(runner);
+
+    tokio::select! {
+        result = &mut runner => panic!("supervisor ended unexpectedly: {:?}", result),
+        _ = async {
+            host_bus.recv().await.expect("initial claim expected");
+
+            // Still nothing during the 250 ms claim window: the address is not
+            // ours until it closes.
+            assert_eq!(handle.claimed_address(), None);
+
+            sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+            assert_eq!(handle.claimed_address(), Some(PREFERRED));
         } => {}
     }
 }

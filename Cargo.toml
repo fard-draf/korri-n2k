@@ -28,6 +28,9 @@ embassy-sync = { version = "0.6", optional = true }
 tokio = { version = "1.47.1", optional = true, default-features = false, features = ["sync", "time"] }
 thiserror-no-std = "2.0"
 futures-util = { version = "0.3", default-features = false }
+# Targets without native atomics (thumbv6m, riscv32imc) need
+# `portable-atomic/critical-section` enabled by the final binary.
+portable-atomic = { version = "1.13", default-features = false }
 
 defmt = { version = "0.3", optional = true }
 

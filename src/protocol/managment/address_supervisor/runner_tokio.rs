@@ -10,13 +10,15 @@
 use core::fmt::Debug;
 use core::future::pending;
 use futures_util::{future::select, future::Either, pin_mut};
+use std::sync::Arc;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::error::{ClaimFault, SendPgnError};
 use crate::infra::codec::traits::PgnData;
 use crate::protocol::managment::address_claiming::engine::ClaimAction;
 use crate::protocol::managment::address_supervisor::{
-    handle_command, AddressHandleError, AddressSupervisorRunError, SupervisorCommand,
+    handle_command, AddressHandleError, AddressSupervisorRunError, ClaimedAddress,
+    SupervisorCommand,
 };
 use crate::protocol::managment::{address_manager::AddressManager, iso_name::IsoName};
 use crate::protocol::transport::can_frame::CanFrame;
@@ -34,6 +36,7 @@ where
     frame_tx: Option<Sender<CanFrame>>,
     handle: Option<AddressHandle>,
     frames: Option<AddressFrames>,
+    claimed: Arc<ClaimedAddress>,
 }
 
 impl<'a, C, T> AddressService<'a, C, T>
@@ -58,12 +61,18 @@ where
             (None, None)
         };
 
+        let claimed = Arc::new(ClaimedAddress::new());
+
         Self {
             manager,
             command_rx: cmd_rx,
             frame_tx,
-            handle: cmd_tx.map(|tx| AddressHandle { sender: tx }),
+            handle: cmd_tx.map(|tx| AddressHandle {
+                sender: tx,
+                claimed: Arc::clone(&claimed),
+            }),
             frames: frame_rx.map(|rx| AddressFrames { receiver: rx }),
+            claimed,
         }
     }
 
@@ -90,6 +99,7 @@ where
                 manager: self.manager,
                 command_rx: self.command_rx,
                 frame_tx: self.frame_tx,
+                claimed: self.claimed,
             },
         }
     }
@@ -117,6 +127,7 @@ where
     manager: AddressManager<'a, C, T>,
     command_rx: Option<Receiver<SupervisorCommand>>,
     frame_tx: Option<Sender<CanFrame>>,
+    claimed: Arc<ClaimedAddress>,
 }
 
 impl<'a, C, T> AddressRunner<'a, C, T>
@@ -132,6 +143,7 @@ where
 
         loop {
             let action = self.manager.poll(rx.as_ref());
+            self.claimed.set(self.manager.claimed_address());
 
             // The engine saw it first; the application gets it too, unfiltered.
             // This `take` is also the "rx = None after a Send" the engine expects.
@@ -228,9 +240,17 @@ where
 /// Transmission handle (optional).
 pub struct AddressHandle {
     sender: Sender<SupervisorCommand>,
+    claimed: Arc<ClaimedAddress>,
 }
 
 impl AddressHandle {
+    /// The address this handle emits from, or `None` while none is held.
+    ///
+    /// Best effort: see [`ClaimedAddress`].
+    pub fn claimed_address(&self) -> Option<u8> {
+        self.claimed.get()
+    }
+
     pub async fn send_raw_frame(&self, frame: &CanFrame) {
         let command = SupervisorCommand::SendRawFrame(frame.clone());
         // Fire-and-forget: if the runner is gone the frame is silently dropped.

@@ -24,7 +24,8 @@ use crate::protocol::managment::address_claiming::engine::ClaimAction;
 use crate::protocol::managment::address_claiming::AddressClaimStrategy;
 use crate::protocol::managment::address_manager::AddressManager;
 use crate::protocol::managment::address_supervisor::{
-    handle_command, AddressHandleError, AddressSupervisorRunError, SupervisorCommand,
+    handle_command, AddressHandleError, AddressSupervisorRunError, ClaimedAddress,
+    SupervisorCommand,
 };
 use crate::protocol::managment::iso_name::IsoName;
 use crate::protocol::transport::can_frame::CanFrame;
@@ -45,6 +46,7 @@ pub struct AddressService<
     manager: AddressManager<'a, C, T>,
     command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
     frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
+    claimed: &'a ClaimedAddress,
 }
 
 impl<'a, C, T, const CMD_CAP: usize, const FRAME_CAP: usize>
@@ -55,15 +57,19 @@ where
     T: KorriTimer,
 {
     /// Wrap an already-initialised [`AddressManager`].
+    /// `claimed` is a `static` you own: no allocation happens in the library.
+    /// One per Controller Application.
     pub fn new(
         manager: AddressManager<'a, C, T>,
         command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
         frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
+        claimed: &'a ClaimedAddress,
     ) -> Self {
         Self {
             manager,
             command_channel,
             frame_channel,
+            claimed,
         }
     }
 
@@ -76,15 +82,17 @@ where
         strategy: AddressClaimStrategy<'a>,
         command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
         frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
+        claimed: &'a ClaimedAddress,
     ) -> Result<Self, ClaimFault> {
         let manager = AddressManager::new(can_bus, timer, my_name, strategy)?;
-        Ok(Self::new(manager, command_channel, frame_channel))
+        Ok(Self::new(manager, command_channel, frame_channel, claimed))
     }
 
     /// Split into handle/receiver/runner components.
     pub fn into_parts(self) -> AddressServiceParts<'a, C, T, CMD_CAP, FRAME_CAP> {
         let handle = self.command_channel.map(|channel| AddressHandle {
             sender: channel.sender(),
+            claimed: self.claimed,
         });
         let frames = self.frame_channel.map(|channel| AddressFrames {
             receiver: channel.receiver(),
@@ -96,6 +104,7 @@ where
                 manager: self.manager,
                 command_channel: self.command_channel,
                 frame_channel: self.frame_channel,
+                claimed: self.claimed,
             },
         }
     }
@@ -123,6 +132,7 @@ where
     manager: AddressManager<'a, C, T>,
     command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
     frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
+    claimed: &'a ClaimedAddress,
 }
 
 impl<'a, C, T, const CMD_CAP: usize, const FRAME_CAP: usize>
@@ -141,6 +151,7 @@ where
 
         loop {
             let action = self.manager.poll(rx.as_ref());
+            self.claimed.set(self.manager.claimed_address());
 
             // The engine saw it first; the application gets it too, unfiltered.
             // This `take` is also the "rx = None after a Send" the engine expects.
@@ -219,9 +230,17 @@ where
 /// Transmission handle (optional).
 pub struct AddressHandle<'a, const CMD_CAP: usize> {
     sender: Sender<'a, CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>,
+    claimed: &'a ClaimedAddress,
 }
 
 impl<'a, const CMD_CAP: usize> AddressHandle<'a, CMD_CAP> {
+    /// The address this handle emits from, or `None` while none is held.
+    ///
+    /// Best effort: see [`ClaimedAddress`].
+    pub fn claimed_address(&self) -> Option<u8> {
+        self.claimed.get()
+    }
+
     pub async fn send_raw_frame(&self, frame: &CanFrame) {
         let command = SupervisorCommand::SendRawFrame(frame.clone());
         self.sender.send(command).await;
