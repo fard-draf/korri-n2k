@@ -134,27 +134,3 @@ pub trait FieldAccess {
         None // Default: no repeating fields
     }
 }
-//==================================================================================TO_PAYLOAD
-/// Serialize a data structure into a sequence of bytes.
-///
-/// Public contract used by the codec engine to turn a high-level PGN into
-/// a binary payload ready to transmit. Implemented by every generated PGN structure.
-pub trait ToPayload {
-    /// Serialize the structure into the provided buffer.
-    ///
-    /// * `buffer`: destination buffer for serialized bytes.
-    ///
-    /// Returns the number of bytes written on success.
-    fn to_payload(&self, buffer: &mut [u8]) -> Result<usize, SerializationError>;
-    /// Maximum serialized payload length for this structure.
-    fn payload_len(&self) -> usize;
-}
-//==================================================================================FROM_PAYLOAD
-/// Deserialize a sequence of bytes into a data structure.
-///
-/// Public contract used by the codec engine to rebuild a high-level PGN
-/// from an incoming binary payload. Implemented by every generated PGN.
-pub trait FromPayload: Sized {
-    /// Deserialize a byte slice to produce a new instance.
-    fn from_payload(bytes_slice: &[u8]) -> Result<Self, DeserializationError>;
-}

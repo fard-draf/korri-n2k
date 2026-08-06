@@ -16,8 +16,8 @@ use std::str::FromStr;
 
 // This build script is the core of the code generation pipeline for korri-n2k.
 // It reads PGN (Packet Group Number) definitions from JSON files and produces the
-// corresponding Rust data structures plus the `ToPayload` (serialization) and
-// `FromPayload` (deserialization) trait implementations.
+// corresponding Rust data structures plus their `PgnData` implementations
+// (serialization and deserialization).
 //
 // The architecture intentionally separates declarative data definitions (JSON) from their
 // runtime manipulation (serialization/deserialization engines in `src/frame/codec/`).
