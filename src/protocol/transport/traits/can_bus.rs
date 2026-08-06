@@ -1,5 +1,5 @@
-//! Minimal abstraction for a CAN bus. Allows the library to plug
-//! into various implementations (blocking, embedded HAL, desktop driver, etc.).
+//! Minimal abstraction for an asynchronous CAN bus. Allows the library to plug
+//! into various implementations (embedded HAL, desktop driver, etc.).
 use crate::protocol::transport::can_frame::CanFrame;
 
 /// Contract to send and receive CAN frames asynchronously.
@@ -9,13 +9,4 @@ pub trait CanBus {
     async fn send(&mut self, frame: &CanFrame) -> Result<(), Self::Error>;
     /// Retrieve the next available frame. Asynchronously waits until data arrives.
     async fn recv(&mut self) -> Result<CanFrame, Self::Error>;
-}
-
-/// Contract to send and receive CAN frames synchronously.
-pub trait CanBusBlocking {
-    type Error: core::fmt::Debug;
-    /// Emit a frame on the bus.
-    fn send(&mut self, frame: &CanFrame) -> Result<(), Self::Error>;
-    /// Retrieve the next available frame.
-    fn recv(&mut self) -> Result<CanFrame, Self::Error>;
 }

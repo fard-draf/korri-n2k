@@ -29,6 +29,7 @@ jobs:
           cargo run --example lookup_enum_usage
           cargo run --example iso_name_usage
           cargo run --example fast_packet_rx --features std
+          cargo run --example blocking_claim --features std
           cargo run --example address_claim --features tokio
 
   check-embedded-cortex-m4:

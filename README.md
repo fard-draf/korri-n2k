@@ -182,6 +182,37 @@ let mut assembler = FastPacketAssembler::with_pgns(FAST_PACKET_PGNS_ALL);
 `full-pgns` is not a substitute: its manifest lists 152 of the 182 Fast Packet
 PGNs CANboat declares. Pass your own sorted table for proprietary PGNs.
 
+### Claim without a runtime
+
+```sh
+cargo run --example blocking_claim --features std
+```
+
+`AddressClaimEngine` is synchronous and does no I/O. It takes a millisecond
+reading and an optional frame, and returns an action — so a bare-metal main
+loop drives it with no executor, no timer trait and no `CanBus` implementation.
+
+```rust,ignore
+loop {
+    let received = bus.try_recv(now_ms);
+
+    match engine.poll(now_ms, received.as_ref()) {
+        ClaimAction::Send(frame) | ClaimAction::CannotClaim(frame) => bus.send(&frame),
+        ClaimAction::Claimed(address) => return address,
+        // Upper bound, not a sleep order.
+        ClaimAction::Wait(delay_ms) => now_ms += (delay_ms as u64).min(TICK_MS),
+    }
+}
+```
+
+The `min` is the whole contract. `Wait(n)` says "nothing is due for n ms", not
+"go to sleep for n ms": a loop that idles the full window misses the conflicts
+inside it, and a blocking read with no timeout hangs forever on a quiet bus.
+
+The library ships no blocking facade. Your read may be a `try_recv`, an
+interrupt flag, a hardware FIFO or a scheduler tick, and no trait covers all
+four honestly.
+
 ### Decode without a bus
 
 ```sh

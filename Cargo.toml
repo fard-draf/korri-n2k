@@ -72,3 +72,8 @@ required-features = ["tokio"]
 name = "fast_packet_rx"
 path = "examples/std/fast_packet_rx.rs"
 required-features = ["std"]
+
+[[example]]
+name = "blocking_claim"
+path = "examples/std/blocking_claim.rs"
+required-features = ["std"]
