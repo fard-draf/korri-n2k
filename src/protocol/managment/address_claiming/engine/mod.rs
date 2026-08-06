@@ -2,7 +2,8 @@ use crate::{
     error::ClaimFault::{self},
     protocol::{
         constants::{
-            address::{self, NULL_ADDR_254},
+            addr_mgmt_pgns::{CLAIM_PGN_60928, REQUEST_PGN_59904, REQUEST_PGN_LEN},
+            address::{self, GLOBAL, NULL_ADDR_254},
             iso_delay::{CANNOT_CLAIM_RETRY_DELAY_MS, CLAIM_DELAY_MS, NO_DEADLINE_DELAY_MS},
         },
         managment::{
@@ -52,10 +53,10 @@ impl<'a> AddressClaimEngine<'a> {
         })
     }
 
-    fn start_claim(&mut self, now_ms: u64, strategy: AddressClaimStrategy<'a>) -> ClaimAction {
+    fn start_claim(&mut self, now_ms: u64) -> ClaimAction {
         let iterator = self
             .addr_iterator
-            .insert(AddressClaimIterator::new(strategy));
+            .insert(AddressClaimIterator::new(self.strategy));
         let addr_to_claim = iterator.try_next_addr();
         let claim_frame = build_address_claim_frame(self.my_name, addr_to_claim);
 
@@ -84,11 +85,22 @@ impl<'a> AddressClaimEngine<'a> {
         // guards
         match self.state {
             // not started | first call
-            State::UnClaimed => self.start_claim(now_ms, self.strategy),
+            State::UnClaimed => match rx {
+                Some(recv_frame)
+                    if is_addressed_claim_request_message(recv_frame, NULL_ADDR_254) =>
+                {
+                    let claim_frame = build_address_claim_frame(self.my_name, NULL_ADDR_254);
+                    return ClaimAction::Send(claim_frame);
+                }
+                _ => return self.start_claim(now_ms),
+            },
             State::Claiming { frame, deadline_ms } => {
                 // The frame comes first: only a conflict changes the state.
                 // TODO!: implement COMMANDED_ADDRESS 65240 0xFED8, today an Unrelated frame.
                 if let Some(recv_frame) = rx {
+                    if is_addressed_claim_request_message(recv_frame, frame.id.source_address()) {
+                        return ClaimAction::Send(frame);
+                    }
                     match classify_claim(recv_frame, self.my_name, frame.id.source_address()) {
                         // we win -> re-send the current claim, deadline untouched
                         ClaimRelation::WeWin => return ClaimAction::Send(frame),
@@ -111,6 +123,9 @@ impl<'a> AddressClaimEngine<'a> {
                 let Some(recv_frame) = rx else {
                     return ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32);
                 };
+                if is_addressed_claim_request_message(recv_frame, frame.id.source_address()) {
+                    return ClaimAction::Send(frame);
+                }
                 match classify_claim(recv_frame, self.my_name, frame.id.source_address()) {
                     ClaimRelation::Unrelated => {
                         return ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
@@ -128,13 +143,21 @@ impl<'a> AddressClaimEngine<'a> {
                 };
             }
 
-            State::CannotClaim { retry_at_ms } => {
-                if now_ms < retry_at_ms {
-                    return ClaimAction::Wait(retry_at_ms.saturating_sub(now_ms) as u32);
-                } else {
-                    return self.start_claim(now_ms, self.strategy);
+            State::CannotClaim { retry_at_ms } => match rx {
+                Some(recv_frame)
+                    if is_addressed_claim_request_message(recv_frame, NULL_ADDR_254) =>
+                {
+                    let claim_frame = build_address_claim_frame(self.my_name, NULL_ADDR_254);
+                    return ClaimAction::Send(claim_frame);
                 }
-            }
+                _ => {
+                    if now_ms < retry_at_ms {
+                        return ClaimAction::Wait(retry_at_ms.saturating_sub(now_ms) as u32);
+                    } else {
+                        return self.start_claim(now_ms);
+                    }
+                }
+            },
         }
     }
 
@@ -163,6 +186,20 @@ impl<'a> AddressClaimEngine<'a> {
 
         return ClaimAction::Send(claim_frame);
     }
+}
+
+fn is_addressed_claim_request_message(frame: &CanFrame, curr_addr: u8) -> bool {
+    if frame.id.pgn() != REQUEST_PGN_59904 || frame.len < REQUEST_PGN_LEN {
+        return false;
+    }
+    // The requested PGN is 3 bytes; the padding bytes are not part of it.
+    let requested_pgn = u32::from_le_bytes([frame.data[0], frame.data[1], frame.data[2], 0]);
+
+    requested_pgn == CLAIM_PGN_60928
+        && frame
+            .id
+            .destination()
+            .is_some_and(|request_addr| request_addr == curr_addr || request_addr == GLOBAL)
 }
 
 #[cfg(test)]

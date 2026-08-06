@@ -1,4 +1,7 @@
-use crate::protocol::{constants::address::CLAIMABLE_COUNT, transport::can_id::CanIdBuilder};
+use crate::protocol::{
+    constants::{addr_mgmt_pgns::COMMAND_ADDR_65240, address::CLAIMABLE_COUNT},
+    transport::can_id::CanIdBuilder,
+};
 
 use super::*;
 
@@ -59,6 +62,22 @@ impl Name {
             ConflictPriority::BuiltToLoose => self.0 = IsoName::from_raw(self.0.raw() | 0xFFFF),
         }
         return self;
+    }
+}
+
+/// Builds an ISO Request frame, `len` and `requested_pgn` left open to forge invalid ones.
+fn build_request_frame(destination: u8, requested_pgn: u32, len: usize) -> CanFrame {
+    let mut data = [0xFFu8; 8];
+    data[0..REQUEST_PGN_LEN].copy_from_slice(&requested_pgn.to_le_bytes()[0..REQUEST_PGN_LEN]);
+
+    CanFrame {
+        id: CanIdBuilder::new(REQUEST_PGN_59904, ADDR_4)
+            .to_destination(destination)
+            .with_priority(6)
+            .build()
+            .expect("must be valid"),
+        data,
+        len,
     }
 }
 
@@ -628,5 +647,282 @@ fn test_addr_claim_machine_aac_disturbed_with_no_effect() {
     assert_eq!(
         my_inst.claimer.poll(timer.ms, their_rx),
         ClaimAction::Claimed(my_inst.preferred_addr)
+    );
+}
+
+#[test]
+fn test_iso_request_from_unclaimed_answers_cannot_claim() {
+    let my_strategy = AddressClaimStrategy::Arbitrary { preferred: ADDR_1 };
+    let mut my_inst = Instance::new(
+        my_strategy,
+        CanFrameClass::Claiming,
+        ConflictPriority::Normal,
+    );
+
+    let request_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+
+    let timer = ClockTest::new(STARTING_TIME);
+
+    // Pre-conditions
+    assert_eq!(my_inst.claimer.state, State::UnClaimed); // correct beggining state
+
+    // J1939-81: an addressless node answers with a Cannot Claim.
+    let expected_frame = build_address_claim_frame(my_inst.name.0, address::NULL_ADDR_254);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&request_rx)),
+        ClaimAction::Send(expected_frame)
+    );
+
+    // The answer neither starts a campaign nor changes the state.
+    assert_eq!(my_inst.claimer.state, State::UnClaimed);
+}
+
+#[test]
+fn test_iso_request_while_claiming_resends_current_claim() {
+    let my_preferred = ADDR_1;
+    let my_strategy = AddressClaimStrategy::Arbitrary {
+        preferred: my_preferred,
+    };
+    let mut my_inst = Instance::new(
+        my_strategy,
+        CanFrameClass::Claiming,
+        ConflictPriority::Normal,
+    );
+
+    let mut timer = ClockTest::new(STARTING_TIME);
+
+    // Start
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, None),
+        ClaimAction::Send(my_inst.can_frame_origin)
+    );
+    let deadline_ms = STARTING_TIME + CLAIM_DELAY_MS as u64;
+
+    // Pre-conditions
+    assert_eq!(
+        my_inst.claimer.state,
+        State::Claiming {
+            frame: my_inst.can_frame_origin,
+            deadline_ms
+        }
+    );
+
+    timer.tick(10);
+    let request_rx = build_request_frame(my_preferred, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&request_rx)),
+        ClaimAction::Send(my_inst.can_frame_origin)
+    );
+
+    // The deadline is not rearmed by an answer.
+    assert_eq!(
+        my_inst.claimer.state,
+        State::Claiming {
+            frame: my_inst.can_frame_origin,
+            deadline_ms
+        }
+    );
+
+    timer.tick(240);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, None),
+        ClaimAction::Claimed(my_preferred)
+    );
+}
+
+#[test]
+fn test_iso_request_while_claimed_resends_current_claim() {
+    let my_preferred = ADDR_1;
+    let my_strategy = AddressClaimStrategy::Arbitrary {
+        preferred: my_preferred,
+    };
+    let mut my_inst = Instance::new(
+        my_strategy,
+        CanFrameClass::Claiming,
+        ConflictPriority::Normal,
+    );
+
+    let mut timer = ClockTest::new(STARTING_TIME);
+
+    // Reach the Claimed state.
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, None),
+        ClaimAction::Send(my_inst.can_frame_origin)
+    );
+    timer.tick(CLAIM_DELAY_MS as u64);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, None),
+        ClaimAction::Claimed(my_preferred)
+    );
+
+    // Pre-conditions
+    assert_eq!(
+        my_inst.claimer.state,
+        State::Claimed {
+            frame: my_inst.can_frame_origin
+        }
+    );
+
+    // A globally broadcast request is answered with the current claim.
+    let global_request_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&global_request_rx)),
+        ClaimAction::Send(my_inst.can_frame_origin)
+    );
+
+    // A request addressed to us is answered the same way.
+    let addressed_request_rx = build_request_frame(my_preferred, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&addressed_request_rx)),
+        ClaimAction::Send(my_inst.can_frame_origin)
+    );
+
+    // No deadline is created by an answer.
+    assert_eq!(
+        my_inst.claimer.state,
+        State::Claimed {
+            frame: my_inst.can_frame_origin
+        }
+    );
+}
+
+#[test]
+fn test_iso_request_from_cannot_claim_answers_cannot_claim() {
+    let my_preferred = ADDR_1;
+    let my_strategy = AddressClaimStrategy::Fixed {
+        preferred: my_preferred,
+    };
+    let mut my_inst = Instance::new(
+        my_strategy,
+        CanFrameClass::Claiming,
+        ConflictPriority::Normal,
+    );
+
+    let their_strategy = AddressClaimStrategy::Fixed {
+        preferred: my_preferred,
+    };
+    let their_inst = Instance::new(
+        their_strategy,
+        CanFrameClass::Claiming,
+        ConflictPriority::BuiltToWin,
+    );
+    let their_rx = Some(&their_inst.can_frame_origin);
+
+    let mut timer = ClockTest::new(STARTING_TIME);
+
+    // Reach the CannotClaim state: Fixed strategy, lost conflict, no fallback address.
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, None),
+        ClaimAction::Send(my_inst.can_frame_origin)
+    );
+    let expected_frame = build_address_claim_frame(my_inst.name.0, address::NULL_ADDR_254);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, their_rx),
+        ClaimAction::CannotClaim(expected_frame)
+    );
+
+    // Pre-conditions
+    let retry_at_ms = STARTING_TIME + CANNOT_CLAIM_RETRY_DELAY_MS as u64;
+    assert_eq!(my_inst.claimer.state, State::CannotClaim { retry_at_ms });
+
+    timer.tick(10);
+    let request_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&request_rx)),
+        ClaimAction::Send(expected_frame)
+    );
+
+    // The retry deadline survives the answer.
+    assert_eq!(my_inst.claimer.state, State::CannotClaim { retry_at_ms });
+
+    // Once elapsed, the retry still happens.
+    timer.tick(CANNOT_CLAIM_RETRY_DELAY_MS as u64);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, None),
+        ClaimAction::Send(my_inst.can_frame_origin)
+    );
+}
+
+#[test]
+fn test_iso_request_is_ignored_when_not_for_us() {
+    let my_preferred = ADDR_1;
+    let my_strategy = AddressClaimStrategy::Arbitrary {
+        preferred: my_preferred,
+    };
+    let mut my_inst = Instance::new(
+        my_strategy,
+        CanFrameClass::Claiming,
+        ConflictPriority::Normal,
+    );
+
+    let mut timer = ClockTest::new(STARTING_TIME);
+
+    // Reach the Claimed state.
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, None),
+        ClaimAction::Send(my_inst.can_frame_origin)
+    );
+    timer.tick(CLAIM_DELAY_MS as u64);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, None),
+        ClaimAction::Claimed(my_preferred)
+    );
+
+    // Pre-conditions
+    assert!(ADDR_2 != my_preferred); // addressed to another node
+    assert!(ADDR_2 != GLOBAL);
+
+    // Addressed to another node.
+    let other_node_rx = build_request_frame(ADDR_2, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&other_node_rx)),
+        ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
+    );
+
+    // Requesting another PGN than the address claim.
+    let other_pgn_rx = build_request_frame(GLOBAL, COMMAND_ADDR_65240, REQUEST_PGN_LEN);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&other_pgn_rx)),
+        ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
+    );
+
+    // Truncated payload: the requested PGN cannot be read.
+    let truncated_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN - 1);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&truncated_rx)),
+        ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
+    );
+
+    assert_eq!(
+        my_inst.claimer.state,
+        State::Claimed {
+            frame: my_inst.can_frame_origin
+        }
+    );
+}
+
+#[test]
+fn test_iso_request_payload_padding_is_not_part_of_the_pgn() {
+    let my_strategy = AddressClaimStrategy::Arbitrary { preferred: ADDR_1 };
+    let mut my_inst = Instance::new(
+        my_strategy,
+        CanFrameClass::Claiming,
+        ConflictPriority::Normal,
+    );
+
+    let request_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+
+    let timer = ClockTest::new(STARTING_TIME);
+
+    // Pre-conditions: three PGN bytes, then J1939 padding.
+    assert_eq!(request_rx.data[0..3], [0x00, 0xEE, 0x00]);
+    assert_eq!(request_rx.data[3..8], [0xFF; 5]);
+
+    // Reading a fourth byte would drown the PGN in the padding.
+    let expected_frame = build_address_claim_frame(my_inst.name.0, address::NULL_ADDR_254);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&request_rx)),
+        ClaimAction::Send(expected_frame)
     );
 }
