@@ -27,9 +27,8 @@ async fn supervisor_queues_and_sends_pgn() {
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
-    let manager = AddressManager::new(dut_bus, timer, my_name, strategy)
-        .await
-        .expect("claim must succeed");
+    let manager =
+        AddressManager::new(dut_bus, timer, my_name, strategy).expect("strategy matches the NAME");
 
     let service = AddressService::<_, _, 4, 0>::new(manager, Some(&*command_channel), None);
     let parts = service.into_parts();

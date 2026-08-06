@@ -49,22 +49,8 @@ pub enum ClaimError<E: core::fmt::Debug> {
 }
 
 #[derive(Error, Debug)]
-pub enum AddressManagerError<E> {
-    #[error("Can bus error {0:?}")]
-    Bus(E),
-    #[error(transparent)]
-    Claim(#[from] ClaimFault),
-    #[error(transparent)]
-    Build(#[from] CanIdBuildError),
-}
-
-#[derive(Error, Debug)]
 /// Claim failure decided from frame content alone. No I/O, fully reproducible.
 pub enum ClaimFault {
-    /// No free address was available on the segment.
-    #[error("No address available")]
-    NoAddressAvailable,
-
     /// IsoName and Address Claim Strategy are inconsistents.
     #[error("Inconsistent match between IsoName and Address Claim Strategy")]
     InconsistentStrategy,
@@ -205,6 +191,10 @@ pub enum SendPgnError<E: core::fmt::Debug> {
     /// CAN layer refused or failed to send the frame.
     #[error("CAN bus send error: {0:?}")]
     Send(E),
+
+    /// No address acquired yet: nothing may be emitted.
+    #[error("No address claimed")]
+    NotClaimed,
 }
 
 //==================================================================================BITREADER_ERRORS

@@ -1,60 +1,13 @@
 //! SAE J1939 / NMEA 2000 address-claim algorithm:
 //! emit PGN 60928, listen for conflicts, and fall back to alternative addresses when needed.
-use crate::error::ClaimError::SendError;
 use crate::error::ExtractionError;
 use crate::protocol::constants::addr_mgmt_pgns::{ADDR_CLAIM_ID_BASE, CLAIM_PGN_60928};
 use crate::protocol::constants::address::NULL_ADDR_254;
 use crate::protocol::constants::{addr_mgmt_pgns, address};
-use crate::protocol::managment::address_claiming::engine::AddressClaimEngine;
 use crate::protocol::managment::iso_name::IsoName;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
-use crate::{
-    error::ClaimError, protocol::transport::traits::can_bus::CanBus,
-    protocol::transport::traits::korri_timer::KorriTimer,
-};
-use futures_util::future::{select, Either};
-use futures_util::pin_mut;
 pub mod engine;
-
-/// Execute a full address-claim cycle and return the acquired address.
-pub async fn claim_address<'a, C: CanBus, T: KorriTimer>(
-    can_bus: &mut C,
-    timer: &mut T,
-    my_name: IsoName,
-    strategy: AddressClaimStrategy<'a>,
-) -> Result<u8, ClaimError<C::Error>>
-where
-    C::Error: core::fmt::Debug,
-{
-    let mut addr_claimer = AddressClaimEngine::new(my_name, strategy)?;
-    let mut rx: Option<CanFrame> = None;
-
-    loop {
-        let now_ms = timer.now_ms();
-        match addr_claimer.poll(now_ms, rx.as_ref()) {
-            engine::ClaimAction::Send(frame) => {
-                can_bus.send(&frame).await.map_err(SendError)?;
-                rx = None;
-            }
-            engine::ClaimAction::Wait(delay) => {
-                let recv = can_bus.recv();
-                pin_mut!(recv);
-                let timer = timer.delay_ms(delay);
-                pin_mut!(timer);
-                match select(timer.as_mut(), recv).await {
-                    Either::Left(_) => rx = None,
-                    Either::Right((f, _)) => rx = Some(f.map_err(|e| ClaimError::ReceiveError(e))?),
-                }
-            }
-            engine::ClaimAction::Claimed(addr) => return Ok(addr),
-            engine::ClaimAction::CannotClaim(frame) => {
-                can_bus.send(&frame).await.map_err(SendError)?;
-                return Ok(address::NULL_ADDR_254);
-            }
-        }
-    }
-}
 
 //==================================================================================ADDRESS_CLAIM_STRATEGY
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

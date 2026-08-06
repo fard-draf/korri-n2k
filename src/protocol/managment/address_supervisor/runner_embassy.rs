@@ -10,6 +10,7 @@
 //! library and there is no dependency on a particular BSP.
 
 use core::fmt::Debug;
+use core::future::pending;
 
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
@@ -17,9 +18,14 @@ use embassy_sync::{
 };
 use futures_util::{future::select, future::Either, pin_mut};
 
-use crate::error::{AddressManagerError, ClaimError, SendPgnError};
+use crate::error::{ClaimFault, SendPgnError};
 use crate::infra::codec::traits::PgnData;
+use crate::protocol::managment::address_claiming::engine::ClaimAction;
+use crate::protocol::managment::address_claiming::AddressClaimStrategy;
 use crate::protocol::managment::address_manager::AddressManager;
+use crate::protocol::managment::address_supervisor::{
+    handle_command, AddressHandleError, AddressSupervisorRunError, SupervisorCommand,
+};
 use crate::protocol::managment::iso_name::IsoName;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::fast_packet::MAX_FAST_PACKET_PAYLOAD;
@@ -61,16 +67,17 @@ where
         }
     }
 
-    /// Convenience helper: claim an address then build the service.
-    pub async fn claim(
+    /// Convenience helper: build the manager and the service in one call.
+    /// The claim itself happens under [`AddressRunner::drive`].
+    pub fn with_name(
         can_bus: C,
         timer: T,
         my_name: IsoName,
-        strategy: super::address_claiming::AddressClaimStrategy<'a>,
+        strategy: AddressClaimStrategy<'a>,
         command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
         frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
-    ) -> Result<Self, ClaimError<C::Error>> {
-        let manager = AddressManager::new(can_bus, timer, my_name, strategy).await?;
+    ) -> Result<Self, ClaimFault> {
+        let manager = AddressManager::new(can_bus, timer, my_name, strategy)?;
         Ok(Self::new(manager, command_channel, frame_channel))
     }
 
@@ -125,61 +132,85 @@ where
     C::Error: Debug,
     T: KorriTimer,
 {
+    /// Own the single `select` of the supervisor: wait, poll the engine
+    /// synchronously, execute, come back. No transition is ever cancelled.
     pub async fn drive(mut self) -> Result<(), AddressSupervisorRunError<C::Error>> {
         let frame_channel = self.frame_channel;
         let command_channel = self.command_channel;
+        let mut rx: Option<CanFrame> = None;
 
         loop {
-            match command_channel {
-                Some(cmd_ch) => {
-                    let mut command_to_process = None;
-                    let mut frame_to_forward = None;
-                    let mut recv_error = None;
+            let action = self.manager.poll(rx.as_ref());
 
+            // The engine saw it first; the application gets it too, unfiltered.
+            // This `take` is also the "rx = None after a Send" the engine expects.
+            if let Some(frame) = rx.take() {
+                if let Some(frame_ch) = frame_channel {
+                    frame_ch.send(frame).await;
+                }
+            }
+
+            match action {
+                ClaimAction::Send(frame) | ClaimAction::CannotClaim(frame) => {
+                    self.manager
+                        .emit_claim(&frame)
+                        .await
+                        .map_err(AddressSupervisorRunError::Send)?;
+                }
+
+                ClaimAction::Claimed(_) => {}
+
+                ClaimAction::Wait(delay_ms) => {
+                    let mut command = None;
+
+                    // Scoped: both futures borrow `self` and must die before
+                    // a command is executed.
                     {
-                        let cmd_future = cmd_ch.receive();
-                        let recv_future = self.manager.recv();
-                        pin_mut!(cmd_future);
-                        pin_mut!(recv_future);
-
-                        match select(recv_future, cmd_future).await {
-                            Either::Left((result, _pending_cmd)) => match result {
-                                Ok(Some(frame)) => frame_to_forward = Some(frame),
-                                Ok(None) => {}
-                                Err(err) => recv_error = Some(err),
-                            },
-                            Either::Right((command, _pending_recv)) => {
-                                command_to_process = Some(command);
+                        // An embassy channel never closes: absent means never ready.
+                        let command_future = async {
+                            match command_channel {
+                                Some(cmd_ch) => cmd_ch.receive().await,
+                                None => pending::<SupervisorCommand>().await,
                             }
+                        };
+                        pin_mut!(command_future);
+
+                        let recv = self.manager.recv_until(delay_ms);
+                        pin_mut!(recv);
+
+                        // `select` polls its first argument first: a frame ready at
+                        // the same instant as the deadline wins, as the engine wants.
+                        match select(recv, command_future).await {
+                            Either::Left((frame, _)) => {
+                                rx = frame.map_err(AddressSupervisorRunError::Receive)?;
+                            }
+                            Either::Right((received, _)) => command = Some(received),
                         }
                     }
 
-                    if let Some(err) = recv_error {
-                        return Err(AddressSupervisorRunError::Receive(err));
-                    }
-
-                    if let Some(frame) = frame_to_forward {
-                        if let Some(frame_ch) = frame_channel {
-                            frame_ch.send(frame).await;
-                        }
-                    }
-
-                    if let Some(command) = command_to_process {
-                        handle_command(&mut self.manager, command).await?;
+                    if let Some(cmd) = command {
+                        self.run_command(cmd).await?;
                     }
                 }
-                None => {
-                    let result = self.manager.recv().await;
-                    match result {
-                        Ok(Some(frame)) => {
-                            if let Some(frame_ch) = frame_channel {
-                                frame_ch.send(frame).await;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(err) => return Err(AddressSupervisorRunError::Receive(err)),
-                    }
-                }
+            }
+        }
+    }
+
+    /// Run one command. Only a dead bus stops the runner: a rejected command is
+    /// the caller's mistake and must not take address management down with it.
+    async fn run_command(
+        &mut self,
+        command: SupervisorCommand,
+    ) -> Result<(), AddressSupervisorRunError<C::Error>> {
+        match handle_command(&mut self.manager, command).await {
+            Ok(()) => Ok(()),
+            Err(SendPgnError::Send(err)) => Err(AddressSupervisorRunError::Send(err)),
+            Err(_rejected) => {
+                #[cfg(feature = "defmt")]
+                defmt::warn!("supervisor command rejected");
+                // ponytail: reported then dropped; add a rejection channel when a
+                // consumer needs programmatic feedback.
+                Ok(())
             }
         }
     }
@@ -191,8 +222,8 @@ pub struct AddressHandle<'a, const CMD_CAP: usize> {
 }
 
 impl<'a, const CMD_CAP: usize> AddressHandle<'a, CMD_CAP> {
-    pub async fn send_frame(&self, frame: &CanFrame) {
-        let command = SupervisorCommand::SendFrame(frame.clone());
+    pub async fn send_raw_frame(&self, frame: &CanFrame) {
+        let command = SupervisorCommand::SendRawFrame(frame.clone());
         self.sender.send(command).await;
     }
 
@@ -232,57 +263,5 @@ pub struct AddressFrames<'a, const FRAME_CAP: usize> {
 impl<'a, const FRAME_CAP: usize> AddressFrames<'a, FRAME_CAP> {
     pub async fn recv(&mut self) -> CanFrame {
         self.receiver.receive().await
-    }
-}
-
-/// Commands queued by producer tasks.
-// No alloc, no box!
-#[allow(clippy::large_enum_variant)]
-#[derive(Clone)]
-pub enum SupervisorCommand {
-    SendFrame(CanFrame),
-    SendPayload {
-        pgn: u32,
-        priority: u8,
-        destination: Option<u8>,
-        len: usize,
-        payload: [u8; MAX_FAST_PACKET_PAYLOAD],
-    },
-}
-
-#[derive(Debug)]
-pub enum AddressHandleError {
-    Serialization,
-}
-
-#[derive(Debug)]
-pub enum AddressSupervisorRunError<E: Debug> {
-    Receive(AddressManagerError<E>),
-    Send(E),
-    SendPgn(SendPgnError<E>),
-}
-
-async fn handle_command<'a, C: CanBus, T: KorriTimer>(
-    manager: &mut AddressManager<'a, C, T>,
-    command: SupervisorCommand,
-) -> Result<(), AddressSupervisorRunError<C::Error>>
-where
-    C::Error: Debug,
-{
-    match command {
-        SupervisorCommand::SendFrame(frame) => manager
-            .send(&frame)
-            .await
-            .map_err(AddressSupervisorRunError::Send),
-        SupervisorCommand::SendPayload {
-            pgn,
-            priority,
-            destination,
-            len,
-            payload,
-        } => manager
-            .send_payload(pgn, priority, destination, &payload[..len])
-            .await
-            .map_err(AddressSupervisorRunError::SendPgn),
     }
 }

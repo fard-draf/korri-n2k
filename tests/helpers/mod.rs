@@ -20,6 +20,11 @@ pub struct MockCanBus {
 
 #[allow(dead_code)]
 impl MockCanBus {
+    /// Take a frame if one is already queued, without waiting.
+    pub fn try_recv(&mut self) -> Option<CanFrame> {
+        self.rx.try_lock().ok()?.try_recv().ok()
+    }
+
     /// Construct a pair of interconnected buses (DUT ↔ host).
     pub fn create_pair() -> (Self, Self) {
         let (dut_tx, host_rx) = mpsc::unbounded_channel();

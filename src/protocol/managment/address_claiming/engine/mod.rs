@@ -186,6 +186,14 @@ impl<'a> AddressClaimEngine<'a> {
 
         return ClaimAction::Send(claim_frame);
     }
+
+    /// return an Option with Some(addr) if claimed address, otherwise None.
+    pub fn claimed_address(&self) -> Option<u8> {
+        match self.state {
+            State::Claimed { frame } => Some(frame.id.source_address()),
+            _ => None,
+        }
+    }
 }
 
 fn is_addressed_claim_request_message(frame: &CanFrame, curr_addr: u8) -> bool {
