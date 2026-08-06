@@ -98,8 +98,9 @@ Until the address is acquired, `AddressManager::send_pgn` refuses with
 `SendPgnError::NotClaimed`. It never returns a silent `Ok(())`.
 
 `AddressHandle::send_pgn` is a different contract: **it confirms queueing, not
-emission.** The runner may still refuse the command, and reports the refusal
-rather than returning it.
+emission.** The runner may still refuse the command — no address, or a conflict
+in between — and a refusal is dropped, not returned. Check
+`claimed_address()` before queueing if that matters.
 
 Ask the handle rather than guessing a delay:
 

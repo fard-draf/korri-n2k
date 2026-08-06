@@ -38,4 +38,3 @@ per-PGN counts.
 Autopilot telemetry (`130821`) and alarm text (`130856`) are kept as they are:
 rudder angles and "Steering compass missing" identify nobody, and they make
 realistic string payloads.
-

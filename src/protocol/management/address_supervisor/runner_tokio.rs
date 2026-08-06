@@ -101,7 +101,6 @@ where
                 command_rx: self.command_rx,
                 frame_tx: self.frame_tx,
                 claimed: self.claimed,
-                dropped_frames: 0,
             },
         }
     }
@@ -130,7 +129,6 @@ where
     command_rx: Option<Receiver<SupervisorCommand>>,
     frame_tx: Option<Sender<CanFrame>>,
     claimed: Arc<ClaimedAddress>,
-    dropped_frames: u32,
 }
 
 impl<'a, C, T> AddressRunner<'a, C, T>
@@ -222,8 +220,8 @@ where
             Err(_rejected) => {
                 #[cfg(feature = "defmt")]
                 defmt::warn!("supervisor command rejected");
-                // ponytail: reported then dropped; add a rejection channel when a
-                // consumer needs programmatic feedback.
+                // dropped, and only visible under `defmt`. A rejection
+                // channel when a consumer needs programmatic feedback.
                 Ok(())
             }
         }
@@ -239,14 +237,11 @@ where
         };
         match tx.try_send(frame) {
             Ok(()) => {}
-            Err(TrySendError::Full(_)) => self.dropped_frames = self.dropped_frames.wrapping_add(1),
+            // dropped silently. A count belongs on `AddressFrames`,
+            // where the consumer that cares about the gap actually lives.
+            Err(TrySendError::Full(_)) => {}
             Err(TrySendError::Closed(_)) => self.frame_tx = None,
         }
-    }
-
-    /// Frames the application was too slow to take. Wraps on overflow.
-    pub fn dropped_frames(&self) -> u32 {
-        self.dropped_frames
     }
 }
 
@@ -287,7 +282,7 @@ impl AddressHandle {
     ///
     /// **This confirms queueing, not emission.** The runner may still refuse the
     /// command — no address acquired, or a conflict between now and execution —
-    /// and a refusal is reported by the runner, not returned here. Check
+    /// and a refusal is dropped, not returned here. Check
     /// [`AddressHandle::claimed_address`] before queueing if that matters.
     pub async fn send_pgn<P: PgnData>(
         &self,

@@ -105,7 +105,6 @@ where
                 command_channel: self.command_channel,
                 frame_channel: self.frame_channel,
                 claimed: self.claimed,
-                dropped_frames: 0,
             },
         }
     }
@@ -134,7 +133,6 @@ where
     command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
     frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
     claimed: &'a ClaimedAddress,
-    dropped_frames: u32,
 }
 
 impl<'a, C, T, const CMD_CAP: usize, const FRAME_CAP: usize>
@@ -162,9 +160,9 @@ where
             // management is not.
             if let Some(frame) = rx.take() {
                 if let Some(frame_ch) = frame_channel {
-                    if frame_ch.try_send(frame).is_err() {
-                        self.dropped_frames = self.dropped_frames.wrapping_add(1);
-                    }
+                    // dropped silently. A count belongs on
+                    // `AddressFrames`, where the consumer that cares lives.
+                    let _ = frame_ch.try_send(frame);
                 }
             }
 
@@ -214,11 +212,6 @@ where
         }
     }
 
-    /// Frames the application was too slow to take. Wraps on overflow.
-    pub fn dropped_frames(&self) -> u32 {
-        self.dropped_frames
-    }
-
     /// Run one command. Only a dead bus stops the runner: a rejected command is
     /// the caller's mistake and must not take address management down with it.
     async fn run_command(
@@ -231,8 +224,8 @@ where
             Err(_rejected) => {
                 #[cfg(feature = "defmt")]
                 defmt::warn!("supervisor command rejected");
-                // ponytail: reported then dropped; add a rejection channel when a
-                // consumer needs programmatic feedback.
+                // dropped, and only visible under `defmt`. A rejection
+                // channel when a consumer needs programmatic feedback.
                 Ok(())
             }
         }
@@ -265,7 +258,7 @@ impl<'a, const CMD_CAP: usize> AddressHandle<'a, CMD_CAP> {
     ///
     /// **This confirms queueing, not emission.** The runner may still refuse the
     /// command — no address acquired, or a conflict between now and execution —
-    /// and a refusal is reported by the runner, not returned here. Check
+    /// and a refusal is dropped, not returned here. Check
     /// [`AddressHandle::claimed_address`] before queueing if that matters.
     pub async fn send_pgn<P: PgnData>(
         &self,

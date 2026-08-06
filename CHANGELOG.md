@@ -45,7 +45,7 @@ The engine takes a clock reading and an optional frame, and returns an action.
 - **BREAKING**: `ClaimError<E>` splits in two, the bus-free faults moving to
   `ClaimFault`. Migration: `ClaimError::InconsistentStrategy` becomes
   `ClaimError::Fault(ClaimFault::InconsistentStrategy)`, and likewise for
-  `RequestAddressClaimErr`, `Extraction` and `BuildErr`.
+  `RequestAddressClaimErr` and `Extraction`.
 - **BREAKING**: `AddressManager::new` is no longer `async` and returns
   `Result<Self, ClaimFault>`. It only validates that the NAME and the strategy
   agree; the claim now happens under the runner.
@@ -68,8 +68,6 @@ The engine takes a clock reading and an optional frame, and returns an action.
   `u64` remains the wire format only.
 - Incoming frames now reach the application unfiltered, PGN 60928 included, so
   network discovery can see claim traffic too.
-- `CanIdBuildError` is reachable through `ClaimFault::BuildErr` instead of being
-  flattened.
 - `TokioTimer::now_ms` returns `u64` instead of a `tokio::time::Instant`, and
   `TokioTimer::new` is public.
 - Claim delays moved to `constants::iso_delay`. `CANNOT_CLAIM_RETRY_DELAY_MS` is
@@ -102,8 +100,9 @@ The engine takes a clock reading and an optional frame, and returns an action.
   The manager no longer duplicates the claim rules; the engine owns them.
 - **BREAKING**: the `ToPayload` and `FromPayload` traits. Nothing referenced
   them; the codec goes through `PgnData`.
-- **BREAKING**: `ClaimFault::NoAddressAvailable`. An exhausted iterator yields
-  Cannot Claim, so nothing produced this variant any more.
+- **BREAKING**: `ClaimFault::NoAddressAvailable`, `UnvailableName` and
+  `BuildErr`. An exhausted iterator yields Cannot Claim, and nothing constructed
+  the other two.
 - **BREAKING**: the `CanBusBlocking` trait. It had no implementor and no caller,
   and its unbounded `recv()` would hang a claim on a quiet bus. See the
   `blocking_claim` example for the shape a blocking driver actually needs.
