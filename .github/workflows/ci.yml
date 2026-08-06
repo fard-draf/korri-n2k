@@ -17,8 +17,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.96.0
-      - name: Run tests
-        run: cargo test --verbose
+      # `default = []`, so a bare `cargo test` compiles no runner at all and
+      # skips every integration test.
+      - name: Run tests (tokio)
+        run: cargo test --verbose --features tokio
+      - name: Run tests (embassy)
+        run: cargo test --verbose --features embassy
+      - name: Build and run the examples
+        run: |
+          cargo run --example quickstart
+          cargo run --example lookup_enum_usage
+          cargo run --example iso_name_usage
+          cargo run --example fast_packet_rx --features std
+          cargo run --example address_claim --features tokio
 
   check-embedded-cortex-m4:
     name: Check (no_std / cortex-m4)

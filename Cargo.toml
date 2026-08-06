@@ -62,3 +62,13 @@ path = "examples/std/lookup_enum_usage.rs"
 [[example]]
 name = "iso_name_usage"
 path = "examples/std/iso_name_usage.rs"
+
+[[example]]
+name = "address_claim"
+path = "examples/std/address_claim.rs"
+required-features = ["tokio"]
+
+[[example]]
+name = "fast_packet_rx"
+path = "examples/std/fast_packet_rx.rs"
+required-features = ["std"]

@@ -8,14 +8,14 @@ An NMEA 2000 / ISO 11783 stack for Rust: send and receive PGNs on a marine CAN
 bus. `no_std`, zero-allocation, one runtime for bare metal and one for Linux.
 
 PGN types are generated at build time from [CANboat](https://github.com/canboat/canboat),
-the reference catalogue of NMEA 2000 messages — you never hand-write a parser,
-and you choose how many get compiled in.
+the reference catalogue of NMEA 2000 messages. You never hand-write a parser.
+You choose how many get compiled in.
 
 ## Quickstart
 
-```toml
-[dependencies]
-korri-n2k = "0.5"
+```sh
+cargo add korri-n2k --features tokio     # Linux
+cargo add korri-n2k --features embassy   # bare metal
 ```
 
 ```rust
@@ -24,32 +24,22 @@ use korri_n2k::protocol::messages::Pgn128267;
 
 // An 8-byte Water Depth frame straight off the bus.
 let payload = [0x2A, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF];
-let depth = Pgn128267::from_payload(&payload)?;
+let depth = Pgn128267::from_payload(&payload).expect("valid Water Depth");
 
-println!("{:.2} m under the transducer", depth.depth);
+// Fields are fixed-point on the wire: compare with a tolerance, never with `==`.
+assert!((depth.depth - 1.0).abs() < 1e-6);
 ```
 
-Three runnable examples need no hardware: `cargo run --example quickstart`,
-`lookup_enum_usage`, `iso_name_usage`.
+## Install
 
-## Installation
-
-`embassy` and `tokio` are mutually exclusive; pick the one matching your target.
+`embassy` and `tokio` are mutually exclusive. Neither is on by default: pick one.
 
 | Feature | Target | `std` | Heap |
 |---|---|---|---|
-| `embassy` *(default)* | Bare metal (`no_std`) | No | **none**, fully static |
+| `embassy` | Bare metal (`no_std`) | No | **none**, fully static |
 | `tokio` | Linux / OS | Yes | channel buffers only |
 
-```toml
-# Bare metal: STM32, ESP32, RP2040…
-korri-n2k = "0.5"
-
-# Linux: Raspberry Pi, SocketCAN…
-korri-n2k = { version = "0.5", default-features = false, features = ["tokio"] }
-```
-
-Under `tokio` the protocol logic stays zero-allocation; only the `mpsc` buffers
+Under `tokio` the protocol logic stays zero-allocation. Only the `mpsc` buffers
 of `AddressService` are heap-allocated. Rust 1.96, edition 2021.
 
 ## Choosing your PGNs
@@ -71,27 +61,85 @@ The build generates types only for the PGN IDs listed in a manifest.
 }
 ```
 
-Matching is on `id`; names are documentation. Precedence:
+Matching is on `id`. Names are documentation. Precedence:
 `KORRI_N2K_MANIFEST_PATH` → `full-pgns` → default manifest. The default covers 42
-common PGNs — position, heading, AIS, depth, wind; `full-pgns` covers the 313 the
+common PGNs — position, heading, AIS, depth, wind. `full-pgns` covers the 313 the
 generator supports, out of CANboat's 348.
 
-## Sending and receiving
+## Use cases
+
+Every example below is compiled and run by CI.
+
+### Claim an address, then talk
+
+```sh
+cargo run --example address_claim --features tokio
+```
+
+A node must own a logical address before it may emit. The claim happens under
+the runner, never in a constructor: a constructor that waited for an address
+could never return on a saturated bus.
+
+```rust,ignore
+// Synchronous. Never touches the bus. Fails only if the NAME and the
+// strategy disagree.
+let manager = AddressManager::new(bus, TokioTimer::new(), my_name, strategy)?;
+
+// 4 queued commands, 8 buffered incoming frames. 0 opts out of either.
+let parts = AddressService::new(manager, 4, 8).into_parts();
+let handle = parts.handle.expect("a command channel was requested");
+
+// The runner owns the event loop: it claims, defends, answers ISO Requests,
+// and emits whatever the handle queues.
+tokio::spawn(parts.runner.drive());
+```
+
+Until the address is acquired, `send_pgn` refuses with `SendPgnError::NotClaimed`.
+It never returns a silent `Ok(())`: a swallowed emission would let the caller
+believe it spoke.
+
+Ask the handle rather than guessing a delay:
+
+```rust,ignore
+match handle.claimed_address() {
+    Some(address) => println!("emitting from {address}"),
+    None => println!("still claiming"),
+}
+```
+
+Best effort, not a lock. It reports what the engine holds right now; a conflict
+can take the address away a microsecond later. The library refuses the emission
+in that case — this only spares you from asking.
+
+The accessor hangs off the handle, not off the service. A node holding several
+NAMEs gets one handle per Controller Application, and reads each address through
+its own.
+
+Under `embassy` the cell is a `static` you own, like the channels:
+
+```rust,ignore
+static CLAIMED: ClaimedAddress = ClaimedAddress::new();
+```
+
+### Send a PGN
 
 Any task holding an `AddressHandle` can send. Fragmentation into Fast Packet
-frames is automatic.
+frames is automatic. The source address is filled in at emission time.
 
-```rust
+```rust,ignore
 let mut pos = Pgn129025::new();
 pos.latitude = 47.7223;
 pos.longitude = -4.0022;
+
 handle.send_pgn(&pos, 129025, 2, None).await?;
 ```
 
-On receive, `AddressFrames` yields raw `CanFrame`s. A single-frame PGN decodes
-directly:
+### Receive a single-frame PGN
 
-```rust
+`AddressFrames` yields raw `CanFrame`s, unfiltered — address-claim traffic
+included, so network discovery can see it too.
+
+```rust,ignore
 // tokio: the channel can close, so recv() returns an Option
 if let Some(frame) = frames.recv().await {
     if let Ok(depth) = Pgn128267::from_payload(&frame.data) {
@@ -103,80 +151,88 @@ if let Some(frame) = frames.recv().await {
 let frame = frames.recv().await;
 ```
 
-**A Fast Packet PGN must be reassembled first** — see [Limits](#limits). Feed
-every frame to a `FastPacketAssembler` and decode what it completes:
+### Reassemble a Fast Packet PGN
 
-```rust
-use korri_n2k::protocol::transport::fast_packet::assembler::{
-    FastPacketAssembler, ProcessResult,
-};
+```sh
+cargo run --example fast_packet_rx
+```
 
-// new() reassembles the Fast Packet PGNs of your manifest.
+A PGN over 8 bytes arrives in fragments. Decoding the first one succeeds and
+returns wrong values, so branch on `handles()`, never on the decode result.
+
+```rust,ignore
 let mut assembler = FastPacketAssembler::new();
 
-// for each incoming frame, with a millisecond clock:
-let pgn = frame.id.pgn();
 if !assembler.handles(pgn) {
-    // Single frame: decode the 8 bytes directly, as in the example above.
+    // Single frame: decode the eight bytes directly.
 } else if let ProcessResult::MessageComplete(msg) =
     assembler.process_frame(now_ms, pgn, frame.id.source_address(), &frame.data)
 {
-    if pgn == 129029 {
-        let fix = Pgn129029::from_payload(&msg.payload[..msg.len])?;
-        println!("{:.6} {:.6}", fix.latitude, fix.longitude);
-    }
+    let fix = Pgn129029::from_payload(&msg.payload[..msg.len])?;
 }
 ```
 
-`new()` carries `FAST_PACKET_PGNS`, the Fast Packet PGNs of your manifest. A
-gateway that forwards payloads it cannot decode wants every one CANboat knows:
+`new()` carries the Fast Packet PGNs of your manifest. A gateway that forwards
+payloads it cannot decode wants every one CANboat knows:
 
-```rust
-use korri_n2k::protocol::transport::fast_packet::FAST_PACKET_PGNS_ALL;
-
+```rust,ignore
 let mut assembler = FastPacketAssembler::with_pgns(FAST_PACKET_PGNS_ALL);
 ```
 
 `full-pgns` is not a substitute: its manifest lists 152 of the 182 Fast Packet
-PGNs CANboat declares. Pass your own sorted table for proprietary PGNs CANboat
-does not list at all.
+PGNs CANboat declares. Pass your own sorted table for proprietary PGNs.
+
+### Decode without a bus
+
+```sh
+cargo run --example quickstart
+cargo run --example lookup_enum_usage
+cargo run --example iso_name_usage
+```
 
 ## Limits
 
-- **Fast Packet reassembly is not wired into the receive path.** Transmission
-  fragments automatically, reception hands you raw frames; run
-  `FastPacketAssembler` yourself as shown above. Decoding the first 8 bytes of a
-  multi-frame message otherwise succeeds and returns wrong values.
-- **The assembler only reassembles the PGNs in its table.** A proprietary PGN
-  CANboat does not list is ignored until you hand it to `with_pgns`. Ask
-  `handles()` what a given assembler covers.
-- **No ISO Transport Protocol.** PGNs 60160 and 60416 decode as messages, but
-  the multi-packet TP transport itself is not implemented.
-- **35 of CANboat's 348 PGNs are not generated**, listed with their reason in
+- **Fast Packet reassembly is not wired into the receive path.** Run
+  `FastPacketAssembler` yourself, as above.
+- **The assembler only reassembles the PGNs in its table.** Ask `handles()`.
+- **No ISO Transport Protocol.** PGNs 60160 and 60416 decode as messages; the
+  multi-packet transport itself is not implemented.
+- **35 of CANboat's 348 PGNs are not generated.** Listed with their reason in
   `build_core/var/pgn_manifest.full.json`. None are in the default manifest.
-- **Runtime-sized fields are unsupported** (`VARIABLE`, `DYNAMIC_FIELD_VALUE`),
-  which is what keeps PGN 126208 — the Group Functions meta-protocol for
-  querying and configuring devices — out of reach. Next on the roadmap.
-- **A repeating group needs an explicit counter field**; the handful of PGNs
-  that size their group implicitly are rejected.
+- **Runtime-sized fields are unsupported** (`VARIABLE`, `DYNAMIC_FIELD_VALUE`).
+  That is what keeps PGN 126208 — the Group Functions meta-protocol — out of
+  reach. Next on the roadmap.
+- **A repeating group needs an explicit counter field.** The few PGNs that size
+  their group implicitly are rejected.
 - `embassy` and `tokio` cannot be enabled together.
 
 ## Architecture
 
 The core knows nothing about your hardware. It sits on two traits: `CanBus` for
-raw frame I/O and `KorriTimer` for non-blocking delays (a `TokioTimer` ships with
-the `tokio` feature).
+raw frame I/O, `KorriTimer` for non-blocking delays.
 
-`AddressManager` claims a logical address from your `IsoName` and defends it
-against conflicts. `AddressService::claim` returns three parts: `AddressHandle`
-to queue outgoing PGNs from any task, `AddressFrames` to receive, and
-`AddressRunner`, the background task routing between them. Channels are static
-under embassy, sized by integer capacities under tokio.
+Address management is a synchronous, I/O-free engine. It is handed a clock
+reading and an optional frame, and returns an action. It never sleeps and never
+touches the bus, which is what makes it testable without a runtime and replayable
+against recorded captures.
+
+The runner owns the single `select` above it: wait, poll the engine, execute,
+repeat. No state transition can be cancelled mid-flight.
+
+`AddressService::into_parts` returns three pieces:
+
+| Piece | Role |
+|---|---|
+| `AddressHandle` | queue outgoing PGNs, from any task |
+| `AddressFrames` | receive incoming frames |
+| `AddressRunner` | the background task, owner of the event loop |
+
+Channels are static under embassy, sized by integer capacities under tokio.
 
 One catch: `#[embassy_executor::task]` cannot be generic, so declare the runner
 task yourself over your concrete types.
 
-```rust
+```rust,ignore
 #[embassy_executor::task]
 async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyTimer, 16, 16>) {
     let _ = runner.drive().await;
