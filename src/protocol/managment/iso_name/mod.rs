@@ -148,11 +148,11 @@ impl IsoName {
     }
 
     pub fn is_addr_capable_and_isoname_match(&self, strategy: AddressClaimStrategy<'_>) -> bool {
-        let is_addr_capable = ((self.0 >> 63) & 0x01) as u8;
+        let is_addr_capable = self.is_arbitrary_address_capable();
         match strategy {
-            AddressClaimStrategy::Fixed { preferred: _ } => is_addr_capable == 0,
-            AddressClaimStrategy::SelfConfigurable { addresses: _ } => is_addr_capable == 0,
-            AddressClaimStrategy::Arbitrary { preferred: _ } => is_addr_capable == 1,
+            AddressClaimStrategy::Fixed { preferred: _ } => is_addr_capable == false,
+            AddressClaimStrategy::SelfConfigurable { addresses: _ } => is_addr_capable == false,
+            AddressClaimStrategy::Arbitrary { preferred: _ } => is_addr_capable == true,
         }
     }
 }
