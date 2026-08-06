@@ -281,8 +281,8 @@ impl AddressHandle {
     /// Queue a PGN for the runner to emit.
     ///
     /// **This confirms queueing, not emission.** The runner may still refuse the
-    /// command — no address acquired, or a conflict between now and execution —
-    /// and a refusal is dropped, not returned here. Check
+    /// command: no address acquired, or a conflict between now and execution.
+    /// A refusal is dropped, not returned here. Check
     /// [`AddressHandle::claimed_address`] before queueing if that matters.
     pub async fn send_pgn<P: PgnData>(
         &self,

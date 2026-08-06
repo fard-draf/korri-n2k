@@ -30,7 +30,7 @@ pub use runner_tokio::{AddressFrames, AddressHandle, AddressRunner, AddressServi
 /// Commands queued by producer tasks.
 ///
 /// One entry costs 240 bytes whatever the payload: the buffer is inline, so no
-/// allocation happens. Size the channel accordingly — `CMD_CAP = 8` reserves
+/// allocation happens. Size the channel accordingly: `CMD_CAP = 8` reserves
 /// about 2 KB.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
@@ -62,7 +62,7 @@ pub enum AddressHandleError {
 ///
 /// **Best effort, not a lock.** Reading `Some(42)` then sending races a reclaim
 /// that may happen in between; the command is refused in that case. The runner's
-/// own guard stays the authority — this only lets a caller avoid asking for what
+/// own guard stays the authority. This only lets a caller avoid asking for what
 /// it knows will be refused.
 ///
 /// One instance per Controller Application: it hangs off the handle, so a node

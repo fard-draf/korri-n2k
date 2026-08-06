@@ -26,7 +26,7 @@ use korri_n2k::protocol::messages::Pgn128267;
 let payload = [0x2A, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF];
 let depth = Pgn128267::from_payload(&payload).expect("valid Water Depth");
 
-// Fields are fixed-point on the wire: compare with a tolerance, never with `==`.
+// Fields are fixed-point on the wire. Compare with a tolerance, never with `==`.
 assert!((depth.depth - 1.0).abs() < 1e-6);
 ```
 
@@ -63,7 +63,7 @@ The build generates types only for the PGN IDs listed in a manifest.
 
 Matching is on `id`. Names are documentation. Precedence:
 `KORRI_N2K_MANIFEST_PATH` → `full-pgns` → default manifest. The default covers 42
-common PGNs — position, heading, AIS, depth, wind. `full-pgns` covers the 313 the
+common PGNs: position, heading, AIS, depth, wind. `full-pgns` covers the 313 the
 generator supports, out of CANboat's 348.
 
 ## Use cases
@@ -76,9 +76,9 @@ Every example below is compiled and run by CI.
 cargo run --example address_claim --features tokio
 ```
 
-A node must own a logical address before it may emit. The claim happens under
-the runner, never in a constructor: a constructor that waited for an address
-could never return on a saturated bus.
+A node must own an address before it may emit. The claim happens under the
+runner, never in a constructor. A constructor that waited for an address could
+never return on a saturated bus.
 
 ```rust,ignore
 // Synchronous. Never touches the bus. Fails only if the NAME and the
@@ -94,15 +94,15 @@ let handle = parts.handle.expect("a command channel was requested");
 tokio::spawn(parts.runner.drive());
 ```
 
-Until the address is acquired, `AddressManager::send_pgn` refuses with
-`SendPgnError::NotClaimed`. It never returns a silent `Ok(())`.
+Two `send_pgn` exist, with different contracts:
 
-`AddressHandle::send_pgn` is a different contract: **it confirms queueing, not
-emission.** The runner may still refuse the command — no address, or a conflict
-in between — and a refusal is dropped, not returned. Check
-`claimed_address()` before queueing if that matters.
+| Method | Guarantees |
+|---|---|
+| `AddressManager::send_pgn` | refuses with `NotClaimed`, never a silent `Ok(())` |
+| `AddressHandle::send_pgn` | confirms queueing only |
 
-Ask the handle rather than guessing a delay:
+The runner may still refuse a queued command, and drops the refusal rather than
+returning it. Ask the handle first:
 
 ```rust,ignore
 match handle.claimed_address() {
@@ -111,13 +111,13 @@ match handle.claimed_address() {
 }
 ```
 
-Best effort, not a lock. It reports what the engine holds right now; a conflict
-can take the address away a microsecond later. The library refuses the emission
-in that case — this only spares you from asking.
+Best effort, not a lock. A conflict can take the address away a microsecond
+later. The library refuses that emission anyway; this only spares you from
+asking.
 
-The accessor hangs off the handle, not off the service. A node holding several
-NAMEs gets one handle per Controller Application, and reads each address through
-its own.
+The accessor hangs off the handle, not the service. A node holding several NAMEs
+gets one handle per Controller Application, and reads each address through its
+own.
 
 Under `embassy` the cell is a `static` you own, like the channels:
 
@@ -127,8 +127,8 @@ static CLAIMED: ClaimedAddress = ClaimedAddress::new();
 
 ### Send a PGN
 
-Any task holding an `AddressHandle` can send. Fragmentation into Fast Packet
-frames is automatic. The source address is filled in at emission time.
+Any task holding an `AddressHandle` can send. Fast Packet fragmentation is
+automatic. The source address is filled in at emission time.
 
 ```rust,ignore
 let mut pos = Pgn129025::new();
@@ -140,7 +140,7 @@ handle.send_pgn(&pos, 129025, 2, None).await?;
 
 ### Receive a single-frame PGN
 
-`AddressFrames` yields raw `CanFrame`s, unfiltered — address-claim traffic
+`AddressFrames` yields raw `CanFrame`s, unfiltered. Address-claim traffic is
 included, so network discovery can see it too.
 
 ```rust,ignore
@@ -154,6 +154,9 @@ if let Some(frame) = frames.recv().await {
 // embassy: the channel never closes
 let frame = frames.recv().await;
 ```
+
+The application is never allowed to slow the engine down. If you stop draining
+this channel, frames are dropped, not queued.
 
 ### Reassemble a Fast Packet PGN
 
@@ -193,8 +196,8 @@ cargo run --example blocking_claim --features std
 ```
 
 `AddressClaimEngine` is synchronous and does no I/O. It takes a millisecond
-reading and an optional frame, and returns an action — so a bare-metal main
-loop drives it with no executor, no timer trait and no `CanBus` implementation.
+reading and an optional frame, and returns an action. A bare-metal main loop
+drives it with no executor, no timer trait, no `CanBus` implementation.
 
 ```rust,ignore
 loop {
@@ -210,12 +213,11 @@ loop {
 ```
 
 The `min` is the whole contract. `Wait(n)` says "nothing is due for n ms", not
-"go to sleep for n ms": a loop that idles the full window misses the conflicts
-inside it, and a blocking read with no timeout hangs forever on a quiet bus.
+"sleep for n ms". A loop that idles the full window misses the conflicts inside
+it, and a blocking read with no timeout hangs forever on a quiet bus.
 
-The library ships no blocking facade. Your read may be a `try_recv`, an
-interrupt flag, a hardware FIFO or a scheduler tick, and no trait covers all
-four honestly.
+The library ships no blocking facade. Your read may be a `try_recv`, an interrupt
+flag, a hardware FIFO or a scheduler tick. No trait covers all four honestly.
 
 ### Decode without a bus
 
@@ -225,20 +227,36 @@ cargo run --example lookup_enum_usage
 cargo run --example iso_name_usage
 ```
 
+## Writing a driver
+
+Implement `CanBus`, two methods. One rule is not obvious.
+
+**`recv()` must be safe to drop.** The supervisor races it against a deadline and
+against queued commands, so it is cancelled often: once per expired `Wait`, once
+per command. An application publishing at 10 Hz cancels a pending `recv` ten
+times a second.
+
+A driver that pulls a frame off its hardware queue before the future resolves
+loses that frame every time. If the lost frame is a competing Address Claim, the
+node keeps an address it no longer owns. Buffer inside the driver and return from
+the buffer.
+
 ## Limits
 
 - **Fast Packet reassembly is not wired into the receive path.** Run
   `FastPacketAssembler` yourself, as above.
 - **The assembler only reassembles the PGNs in its table.** Ask `handles()`.
-- **No ISO Transport Protocol.** PGNs 60160 and 60416 decode as messages; the
+- **No ISO Transport Protocol.** PGNs 60160 and 60416 decode as messages. The
   multi-packet transport itself is not implemented.
 - **35 of CANboat's 348 PGNs are not generated.** Listed with their reason in
   `build_core/var/pgn_manifest.full.json`. None are in the default manifest.
 - **Runtime-sized fields are unsupported** (`VARIABLE`, `DYNAMIC_FIELD_VALUE`).
-  That is what keeps PGN 126208 — the Group Functions meta-protocol — out of
-  reach. Next on the roadmap.
+  That keeps PGN 126208, the Group Functions meta-protocol, out of reach. Next on
+  the roadmap.
 - **A repeating group needs an explicit counter field.** The few PGNs that size
   their group implicitly are rejected.
+- **A full Fast Packet send holds the loop for about 62 ms**, 32 frames with a
+  2 ms gap. Single-frame PGNs are unaffected.
 - `embassy` and `tokio` cannot be enabled together.
 
 ## Architecture
@@ -248,11 +266,11 @@ raw frame I/O, `KorriTimer` for non-blocking delays.
 
 Address management is a synchronous, I/O-free engine. It is handed a clock
 reading and an optional frame, and returns an action. It never sleeps and never
-touches the bus, which is what makes it testable without a runtime and replayable
-against recorded captures.
+touches the bus, which makes it testable without a runtime and replayable against
+recorded captures.
 
 The runner owns the single `select` above it: wait, poll the engine, execute,
-repeat. No state transition can be cancelled mid-flight.
+repeat. No state transition can be cancelled halfway.
 
 `AddressService::into_parts` returns three pieces:
 
@@ -263,7 +281,7 @@ repeat. No state transition can be cancelled mid-flight.
 | `AddressRunner` | the background task, owner of the event loop |
 
 Channels are static under embassy, sized by integer capacities under tokio. A
-command entry costs 240 bytes whatever the payload — the buffer is inline, so
+command entry costs 240 bytes whatever the payload. The buffer is inline, so
 nothing is allocated. Size `CMD_CAP` with that in mind.
 
 One catch: `#[embassy_executor::task]` cannot be generic, so declare the runner
@@ -285,7 +303,7 @@ MIT OR Apache-2.0, at your option. See `LICENSE-MIT` and `LICENSE-APACHE`.
 
 The bundled [CANboat](https://github.com/canboat/canboat) database
 (`build_core/var/canboat.json`) is Apache-2.0, © Kees Verruijt. It stays under
-that licence, as does the code generated from it — PGN and field names,
+that licence, as does the code generated from it: PGN and field names,
 descriptions, lookup variants. See `NOTICE`.
 
 All credit for the NMEA 2000 message catalogue goes to the CANboat authors,
