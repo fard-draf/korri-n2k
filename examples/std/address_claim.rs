@@ -12,10 +12,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use korri_n2k::protocol::managment::address_claiming::AddressClaimStrategy;
-use korri_n2k::protocol::managment::address_manager::AddressManager;
-use korri_n2k::protocol::managment::address_supervisor::{AddressHandle, AddressService};
-use korri_n2k::protocol::managment::iso_name::IsoName;
+use korri_n2k::protocol::management::address_claiming::AddressClaimStrategy;
+use korri_n2k::protocol::management::address_manager::AddressManager;
+use korri_n2k::protocol::management::address_supervisor::{AddressHandle, AddressService};
+use korri_n2k::protocol::management::iso_name::IsoName;
 use korri_n2k::protocol::messages::Pgn129025;
 use korri_n2k::protocol::transport::can_frame::CanFrame;
 use korri_n2k::protocol::transport::traits::can_bus::CanBus;

@@ -14,7 +14,7 @@
 //! ```
 
 use korri_n2k::infra::codec::traits::PgnData;
-use korri_n2k::protocol::managment::iso_name::IsoName;
+use korri_n2k::protocol::management::iso_name::IsoName;
 use korri_n2k::protocol::messages::{Pgn128267, Pgn129025, Pgn60928};
 use korri_n2k::protocol::transport::can_id::CanId;
 

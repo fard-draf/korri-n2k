@@ -1,5 +1,5 @@
 use super::*;
-use crate::protocol::managment::iso_name::IsoName;
+use crate::protocol::management::iso_name::IsoName;
 #[test]
 fn addr_capable_and_isoname_match() {
     let dut_name_no_aac = IsoName::from_raw(0x0234567890ABCDEF); // AAC disabled

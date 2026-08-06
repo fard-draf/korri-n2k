@@ -3,9 +3,9 @@ mod helpers {
     include!("../../helpers/mod.rs");
 }
 use helpers::{MockCanBus, MockTimer};
-use korri_n2k::protocol::managment::address_claiming::build_address_claim_frame;
-use korri_n2k::protocol::managment::iso_name::IsoName;
-use korri_n2k::protocol::managment::network_discovering::request_network_discovery;
+use korri_n2k::protocol::management::address_claiming::build_address_claim_frame;
+use korri_n2k::protocol::management::iso_name::IsoName;
+use korri_n2k::protocol::management::network_discovering::request_network_discovery;
 use korri_n2k::protocol::transport::can_frame::CanFrame;
 use korri_n2k::protocol::transport::can_id::CanId;
 use korri_n2k::protocol::transport::traits::can_bus::CanBus;

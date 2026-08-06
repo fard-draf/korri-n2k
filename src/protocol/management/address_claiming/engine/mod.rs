@@ -6,7 +6,7 @@ use crate::{
             address::{self, GLOBAL, NULL_ADDR_254},
             iso_delay::{CANNOT_CLAIM_RETRY_DELAY_MS, CLAIM_DELAY_MS, NO_DEADLINE_DELAY_MS},
         },
-        managment::{
+        management::{
             address_claiming::{
                 build_address_claim_frame, classify_claim, AddressClaimIterator,
                 AddressClaimStrategy, ClaimRelation,

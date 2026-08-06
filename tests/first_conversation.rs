@@ -9,7 +9,7 @@ use helpers::{MockCanBus, MockTimer};
 use korri_n2k::{
     infra::codec::traits::PgnData,
     protocol::{
-        managment::{
+        management::{
             address_claiming::AddressClaimStrategy, address_manager::AddressManager,
             address_supervisor::AddressService, iso_name::IsoName,
         },

@@ -6,7 +6,7 @@ use crate::{
     error::SendPgnError,
     protocol::{
         constants::address::NULL_ADDR_254,
-        managment::address_manager::AddressManager,
+        management::address_manager::AddressManager,
         transport::{
             can_frame::CanFrame,
             fast_packet::MAX_FAST_PACKET_PAYLOAD,

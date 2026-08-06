@@ -8,7 +8,7 @@ use helpers::{MockCanBus, MockTimer};
 use korri_n2k::{
     error::{ClaimFault, SendPgnError},
     protocol::{
-        managment::{
+        management::{
             address_claiming::AddressClaimStrategy, address_manager::AddressManager,
             iso_name::IsoName,
         },

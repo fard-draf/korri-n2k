@@ -1,4 +1,4 @@
 //! Protocol-layer tests (network management and transport).
-mod managment;
+mod management;
 mod messages;
 mod transport;

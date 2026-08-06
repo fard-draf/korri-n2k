@@ -2,6 +2,6 @@
 //! network management, message structures, and CAN/Fast Packet transport.
 pub mod constants;
 pub mod lookups;
-pub mod managment;
+pub mod management;
 pub mod messages;
 pub mod transport;

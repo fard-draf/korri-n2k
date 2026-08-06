@@ -2,8 +2,8 @@
 //! Address Claim responses (PGN 60928) to identify neighbouring nodes.
 use crate::error::ClaimError;
 use crate::error::ClaimError::SendError;
-use crate::protocol::managment::iso_name::IsoName;
-use crate::protocol::managment::network_discovering::engine::AddressRequester;
+use crate::protocol::management::iso_name::IsoName;
+use crate::protocol::management::network_discovering::engine::AddressRequester;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::traits::{can_bus::CanBus, korri_timer::KorriTimer};
 use futures_util::future::{select, Either};

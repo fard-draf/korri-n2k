@@ -18,7 +18,7 @@
 //! ```
 
 use crate::protocol::lookups::*;
-use crate::protocol::managment::address_claiming::AddressClaimStrategy;
+use crate::protocol::management::address_claiming::AddressClaimStrategy;
 use crate::protocol::messages::Pgn60928;
 use core::fmt;
 
@@ -30,7 +30,7 @@ use core::fmt;
 /// # Example
 ///
 /// ```
-/// use korri_n2k::protocol::managment::iso_name::IsoName;
+/// use korri_n2k::protocol::management::iso_name::IsoName;
 ///
 /// let name = IsoName::builder()
 ///     .unique_number(123456)
@@ -237,7 +237,7 @@ impl fmt::Display for IsoName {
 /// # Example
 ///
 /// ```
-/// use korri_n2k::protocol::managment::iso_name::IsoName;
+/// use korri_n2k::protocol::management::iso_name::IsoName;
 ///
 /// let name = IsoName::builder()
 ///     .unique_number(12345)

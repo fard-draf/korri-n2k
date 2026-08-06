@@ -5,12 +5,12 @@ mod helpers {
 }
 
 use helpers::{MockCanBus, MockTimer};
-use korri_n2k::protocol::managment::address_claiming::AddressClaimStrategy;
-use korri_n2k::protocol::managment::address_manager::AddressManager;
-use korri_n2k::protocol::managment::address_supervisor::{
+use korri_n2k::protocol::management::address_claiming::AddressClaimStrategy;
+use korri_n2k::protocol::management::address_manager::AddressManager;
+use korri_n2k::protocol::management::address_supervisor::{
     AddressService, AddressSupervisorRunError,
 };
-use korri_n2k::protocol::managment::iso_name::IsoName;
+use korri_n2k::protocol::management::iso_name::IsoName;
 use korri_n2k::protocol::messages::Pgn129025;
 use korri_n2k::protocol::transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus};
 use tokio::time::{sleep, Duration};

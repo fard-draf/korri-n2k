@@ -1,77 +1,74 @@
-//! Address supervisor built on top of [`AddressManager`] for Tokio runtime.
+//! Address supervisor built on top of [`AddressManager`].
 //!
 //! It keeps the claiming state-machine alive and optionally offers:
 //!
 //! * a transmission handle (`AddressHandle`) to queue frames/PGNs;
 //! * a frame receiver (`AddressFrames`) to pull application traffic filtered by the manager.
 //!
-//! This implementation uses `tokio::sync::mpsc` channels.
+//! Firmware decides which features it needs by providing pre-allocated
+//! [`embassy_sync::Channel`] instances. No allocation is performed by the
+//! library and there is no dependency on a particular BSP.
 
 use core::fmt::Debug;
 use core::future::pending;
+
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    channel::{Channel, Receiver, Sender},
+};
 use futures_util::{future::select, future::Either, pin_mut};
-use std::sync::Arc;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::error::{ClaimFault, SendPgnError};
 use crate::infra::codec::traits::PgnData;
-use crate::protocol::managment::address_claiming::engine::ClaimAction;
-use crate::protocol::managment::address_supervisor::{
+use crate::protocol::management::address_claiming::engine::ClaimAction;
+use crate::protocol::management::address_claiming::AddressClaimStrategy;
+use crate::protocol::management::address_manager::AddressManager;
+use crate::protocol::management::address_supervisor::{
     handle_command, AddressHandleError, AddressSupervisorRunError, ClaimedAddress,
     SupervisorCommand,
 };
-use crate::protocol::managment::{address_manager::AddressManager, iso_name::IsoName};
+use crate::protocol::management::iso_name::IsoName;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::fast_packet::MAX_FAST_PACKET_PAYLOAD;
 use crate::protocol::transport::traits::can_bus::CanBus;
 use crate::protocol::transport::traits::korri_timer::KorriTimer;
 
 /// Service assembling the supervisor components.
-pub struct AddressService<'a, C: CanBus, T: KorriTimer>
-where
+pub struct AddressService<
+    'a,
+    C: CanBus,
+    T: KorriTimer,
+    const CMD_CAP: usize,
+    const FRAME_CAP: usize,
+> where
     C::Error: Debug,
 {
     manager: AddressManager<'a, C, T>,
-    command_rx: Option<Receiver<SupervisorCommand>>,
-    frame_tx: Option<Sender<CanFrame>>,
-    handle: Option<AddressHandle>,
-    frames: Option<AddressFrames>,
-    claimed: Arc<ClaimedAddress>,
+    command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
+    frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
+    claimed: &'a ClaimedAddress,
 }
 
-impl<'a, C, T> AddressService<'a, C, T>
+impl<'a, C, T, const CMD_CAP: usize, const FRAME_CAP: usize>
+    AddressService<'a, C, T, CMD_CAP, FRAME_CAP>
 where
     C: CanBus,
     C::Error: Debug,
     T: KorriTimer,
 {
     /// Wrap an already-initialised [`AddressManager`].
-    pub fn new(manager: AddressManager<'a, C, T>, cmd_cap: usize, frame_cap: usize) -> Self {
-        let (cmd_tx, cmd_rx) = if cmd_cap > 0 {
-            let (tx, rx) = channel(cmd_cap);
-            (Some(tx), Some(rx))
-        } else {
-            (None, None)
-        };
-
-        let (frame_tx, frame_rx) = if frame_cap > 0 {
-            let (tx, rx) = channel(frame_cap);
-            (Some(tx), Some(rx))
-        } else {
-            (None, None)
-        };
-
-        let claimed = Arc::new(ClaimedAddress::new());
-
+    /// `claimed` is a `static` you own: no allocation happens in the library.
+    /// One per Controller Application.
+    pub fn new(
+        manager: AddressManager<'a, C, T>,
+        command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
+        frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
+        claimed: &'a ClaimedAddress,
+    ) -> Self {
         Self {
             manager,
-            command_rx: cmd_rx,
-            frame_tx,
-            handle: cmd_tx.map(|tx| AddressHandle {
-                sender: tx,
-                claimed: Arc::clone(&claimed),
-            }),
-            frames: frame_rx.map(|rx| AddressFrames { receiver: rx }),
+            command_channel,
+            frame_channel,
             claimed,
         }
     }
@@ -82,23 +79,31 @@ where
         can_bus: C,
         timer: T,
         my_name: IsoName,
-        strategy: crate::protocol::managment::address_claiming::AddressClaimStrategy<'a>,
-        cmd_cap: usize,
-        frame_cap: usize,
+        strategy: AddressClaimStrategy<'a>,
+        command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
+        frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
+        claimed: &'a ClaimedAddress,
     ) -> Result<Self, ClaimFault> {
         let manager = AddressManager::new(can_bus, timer, my_name, strategy)?;
-        Ok(Self::new(manager, cmd_cap, frame_cap))
+        Ok(Self::new(manager, command_channel, frame_channel, claimed))
     }
 
     /// Split into handle/receiver/runner components.
-    pub fn into_parts(self) -> AddressServiceParts<'a, C, T> {
+    pub fn into_parts(self) -> AddressServiceParts<'a, C, T, CMD_CAP, FRAME_CAP> {
+        let handle = self.command_channel.map(|channel| AddressHandle {
+            sender: channel.sender(),
+            claimed: self.claimed,
+        });
+        let frames = self.frame_channel.map(|channel| AddressFrames {
+            receiver: channel.receiver(),
+        });
         AddressServiceParts {
-            handle: self.handle,
-            frames: self.frames,
+            handle,
+            frames,
             runner: AddressRunner {
                 manager: self.manager,
-                command_rx: self.command_rx,
-                frame_tx: self.frame_tx,
+                command_channel: self.command_channel,
+                frame_channel: self.frame_channel,
                 claimed: self.claimed,
             },
         }
@@ -106,31 +111,32 @@ where
 }
 
 /// Bundle returned by [`AddressService::into_parts`].
-pub struct AddressServiceParts<'a, C, T>
+pub struct AddressServiceParts<'a, C, T, const CMD_CAP: usize, const FRAME_CAP: usize>
 where
     C: CanBus,
     C::Error: Debug,
     T: KorriTimer,
 {
-    pub handle: Option<AddressHandle>,
-    pub frames: Option<AddressFrames>,
-    pub runner: AddressRunner<'a, C, T>,
+    pub handle: Option<AddressHandle<'a, CMD_CAP>>,
+    pub frames: Option<AddressFrames<'a, FRAME_CAP>>,
+    pub runner: AddressRunner<'a, C, T, CMD_CAP, FRAME_CAP>,
 }
 
 /// Runner that drives the supervisor loop.
-pub struct AddressRunner<'a, C, T>
+pub struct AddressRunner<'a, C, T, const CMD_CAP: usize, const FRAME_CAP: usize>
 where
     C: CanBus,
     C::Error: Debug,
     T: KorriTimer,
 {
     manager: AddressManager<'a, C, T>,
-    command_rx: Option<Receiver<SupervisorCommand>>,
-    frame_tx: Option<Sender<CanFrame>>,
-    claimed: Arc<ClaimedAddress>,
+    command_channel: Option<&'a Channel<CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>>,
+    frame_channel: Option<&'a Channel<CriticalSectionRawMutex, CanFrame, FRAME_CAP>>,
+    claimed: &'a ClaimedAddress,
 }
 
-impl<'a, C, T> AddressRunner<'a, C, T>
+impl<'a, C, T, const CMD_CAP: usize, const FRAME_CAP: usize>
+    AddressRunner<'a, C, T, CMD_CAP, FRAME_CAP>
 where
     C: CanBus,
     C::Error: Debug,
@@ -139,6 +145,8 @@ where
     /// Own the single `select` of the supervisor: wait, poll the engine
     /// synchronously, execute, come back. No transition is ever cancelled.
     pub async fn drive(mut self) -> Result<(), AddressSupervisorRunError<C::Error>> {
+        let frame_channel = self.frame_channel;
+        let command_channel = self.command_channel;
         let mut rx: Option<CanFrame> = None;
 
         loop {
@@ -148,7 +156,9 @@ where
             // The engine saw it first; the application gets it too, unfiltered.
             // This `take` is also the "rx = None after a Send" the engine expects.
             if let Some(frame) = rx.take() {
-                self.forward_frame(frame).await;
+                if let Some(frame_ch) = frame_channel {
+                    frame_ch.send(frame).await;
+                }
             }
 
             match action {
@@ -163,16 +173,15 @@ where
 
                 ClaimAction::Wait(delay_ms) => {
                     let mut command = None;
-                    let mut channel_closed = false;
 
                     // Scoped: both futures borrow `self` and must die before
-                    // `command_rx` is cleared or a command is executed.
+                    // a command is executed.
                     {
-                        let command_rx = &mut self.command_rx;
+                        // An embassy channel never closes: absent means never ready.
                         let command_future = async {
-                            match command_rx {
-                                Some(rx) => rx.recv().await,
-                                None => pending::<Option<SupervisorCommand>>().await,
+                            match command_channel {
+                                Some(cmd_ch) => cmd_ch.receive().await,
+                                None => pending::<SupervisorCommand>().await,
                             }
                         };
                         pin_mut!(command_future);
@@ -186,17 +195,8 @@ where
                             Either::Left((frame, _)) => {
                                 rx = frame.map_err(AddressSupervisorRunError::Receive)?;
                             }
-                            Either::Right((received, _)) => match received {
-                                Some(cmd) => command = Some(cmd),
-                                None => channel_closed = true,
-                            },
+                            Either::Right((received, _)) => command = Some(received),
                         }
-                    }
-
-                    // A closed channel returns `None` instantly and forever:
-                    // drop it so the next round falls back on `pending()`.
-                    if channel_closed {
-                        self.command_rx = None;
                     }
 
                     if let Some(cmd) = command {
@@ -225,25 +225,15 @@ where
             }
         }
     }
-
-    async fn forward_frame(&mut self, frame: CanFrame) {
-        let closed = match self.frame_tx {
-            Some(ref tx) => tx.send(frame).await.is_err(),
-            None => false,
-        };
-        if closed {
-            self.frame_tx = None;
-        }
-    }
 }
 
 /// Transmission handle (optional).
-pub struct AddressHandle {
-    sender: Sender<SupervisorCommand>,
-    claimed: Arc<ClaimedAddress>,
+pub struct AddressHandle<'a, const CMD_CAP: usize> {
+    sender: Sender<'a, CriticalSectionRawMutex, SupervisorCommand, CMD_CAP>,
+    claimed: &'a ClaimedAddress,
 }
 
-impl AddressHandle {
+impl<'a, const CMD_CAP: usize> AddressHandle<'a, CMD_CAP> {
     /// The address this handle emits from, or `None` while none is held.
     ///
     /// Best effort: see [`ClaimedAddress`].
@@ -253,8 +243,7 @@ impl AddressHandle {
 
     pub async fn send_raw_frame(&self, frame: &CanFrame) {
         let command = SupervisorCommand::SendRawFrame(frame.clone());
-        // Fire-and-forget: if the runner is gone the frame is silently dropped.
-        let _ = self.sender.send(command).await;
+        self.sender.send(command).await;
     }
 
     pub async fn send_pgn<P: PgnData>(
@@ -280,19 +269,18 @@ impl AddressHandle {
             payload,
         };
 
-        // Fire-and-forget: if the runner is gone the frame is silently dropped.
-        let _ = self.sender.send(command).await;
+        self.sender.send(command).await;
         Ok(())
     }
 }
 
 /// Optional receiver returning application frames filtered by the supervisor.
-pub struct AddressFrames {
-    receiver: Receiver<CanFrame>,
+pub struct AddressFrames<'a, const FRAME_CAP: usize> {
+    receiver: Receiver<'a, CriticalSectionRawMutex, CanFrame, FRAME_CAP>,
 }
 
-impl AddressFrames {
-    pub async fn recv(&mut self) -> Option<CanFrame> {
-        self.receiver.recv().await
+impl<'a, const FRAME_CAP: usize> AddressFrames<'a, FRAME_CAP> {
+    pub async fn recv(&mut self) -> CanFrame {
+        self.receiver.receive().await
     }
 }

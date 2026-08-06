@@ -10,7 +10,7 @@ use crate::{
     },
     infra::codec::traits::PgnData,
     protocol::{
-        managment::{
+        management::{
             address_claiming::{
                 engine::{AddressClaimEngine, ClaimAction},
                 AddressClaimStrategy,

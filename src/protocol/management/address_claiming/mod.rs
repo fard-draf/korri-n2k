@@ -4,7 +4,7 @@ use crate::error::ExtractionError;
 use crate::protocol::constants::addr_mgmt_pgns::{ADDR_CLAIM_ID_BASE, CLAIM_PGN_60928};
 use crate::protocol::constants::address::NULL_ADDR_254;
 use crate::protocol::constants::{addr_mgmt_pgns, address};
-use crate::protocol::managment::iso_name::IsoName;
+use crate::protocol::management::iso_name::IsoName;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
 pub mod engine;

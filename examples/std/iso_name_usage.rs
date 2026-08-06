@@ -3,7 +3,7 @@
 
 use korri_n2k::protocol::{
     lookups::{DeviceClass, IndustryCode, ManufacturerCode, YesNo},
-    managment::{address_claiming::build_address_claim_frame, iso_name::IsoName},
+    management::{address_claiming::build_address_claim_frame, iso_name::IsoName},
     messages::Pgn60928,
     transport::can_frame::CanFrame,
 };

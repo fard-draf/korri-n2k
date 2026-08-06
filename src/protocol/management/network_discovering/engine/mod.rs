@@ -2,7 +2,7 @@ use crate::{
     error::ClaimFault,
     protocol::{
         constants::{addr_mgmt_pgns, address, iso_delay::REQUEST_DELAY_MS},
-        managment::{address_claiming::extract_name_from_claim, iso_name::IsoName},
+        management::{address_claiming::extract_name_from_claim, iso_name::IsoName},
         transport::{can_frame::CanFrame, can_id::CanId},
     },
 };

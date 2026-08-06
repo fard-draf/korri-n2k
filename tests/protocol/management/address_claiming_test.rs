@@ -7,7 +7,7 @@ mod helpers {
 use helpers::{MockCanBus, MockTimer};
 use korri_n2k::protocol::{
     constants::address,
-    managment::{
+    management::{
         address_claiming::AddressClaimStrategy, address_manager::AddressManager,
         address_supervisor::AddressService, iso_name::IsoName,
     },
