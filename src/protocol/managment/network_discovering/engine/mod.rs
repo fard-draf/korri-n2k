@@ -95,7 +95,7 @@ impl<'a> AddressRequester<'a> {
                     }
                     self.state = State::Listening {
                         device_count,
-                        deadline_ms: (deadline_ms - now_ms),
+                        deadline_ms,
                     };
                     return Ok(RequestAction::Wait(remaining_ms as u32));
                 }
