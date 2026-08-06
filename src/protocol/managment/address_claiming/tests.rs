@@ -1,8 +1,9 @@
 use super::*;
+use crate::protocol::managment::iso_name::IsoName;
 #[test]
 fn addr_capable_and_isoname_match() {
-    let dut_name_no_aac: u64 = 0x0234567890ABCDEF; // AAC disabled
-    let dut_name_aac: u64 = 0xF234567890ABCDEE; // AAC enabled
+    let dut_name_no_aac = IsoName::from_raw(0x0234567890ABCDEF); // AAC disabled
+    let dut_name_aac = IsoName::from_raw(0xF234567890ABCDEE); // AAC enabled
 
     const DUT_ADDRESSES: &[u8] = &[145, 158];
     let preferred = 145;
@@ -13,28 +14,28 @@ fn addr_capable_and_isoname_match() {
         addresses: DUT_ADDRESSES,
     };
 
-    assert!(is_addr_capable_and_isoname_match(
-        dut_name_no_aac,
+    assert!(IsoName::is_addr_capable_and_isoname_match(
+        &dut_name_no_aac,
         strategy_fixed
     ));
-    assert!(!is_addr_capable_and_isoname_match(
-        dut_name_aac,
+    assert!(!IsoName::is_addr_capable_and_isoname_match(
+        &dut_name_aac,
         strategy_fixed
     ));
-    assert!(is_addr_capable_and_isoname_match(
-        dut_name_aac,
+    assert!(IsoName::is_addr_capable_and_isoname_match(
+        &dut_name_aac,
         strategy_arbitrary
     ));
-    assert!(!is_addr_capable_and_isoname_match(
-        dut_name_no_aac,
+    assert!(!IsoName::is_addr_capable_and_isoname_match(
+        &dut_name_no_aac,
         strategy_arbitrary
     ));
-    assert!(is_addr_capable_and_isoname_match(
-        dut_name_no_aac,
+    assert!(IsoName::is_addr_capable_and_isoname_match(
+        &dut_name_no_aac,
         strategy_self_conf
     ));
-    assert!(!is_addr_capable_and_isoname_match(
-        dut_name_aac,
+    assert!(!IsoName::is_addr_capable_and_isoname_match(
+        &dut_name_aac,
         strategy_self_conf
     ));
 }

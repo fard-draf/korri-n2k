@@ -34,7 +34,7 @@ pub const GLOBAL: u8 = 255;
 ///
 /// Sent as the source address by a node that lost arbitration and has no
 /// claimable address left.
-pub const NULL: u8 = 254;
+pub const NULL_ADDR_254: u8 = 254;
 
 //==================================================================================CLAIMABLE_RANGE
 

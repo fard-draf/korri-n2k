@@ -54,12 +54,12 @@ async fn test_request_network_discovery_three_devices() {
             let device3 = (IsoName::from_raw(0xCCCCCCCCCCCCCCC3), 200);
 
             // Simulate responses by sending Address Claim frames
-            host_bus.send(&build_address_claim_frame(device1.0, device1.1).unwrap()).await.unwrap();
-            host_bus.send(&build_address_claim_frame(device2.0, device2.1).unwrap()).await.unwrap();
-            host_bus.send(&build_address_claim_frame(device3.0, device3.1).unwrap()).await.unwrap();
+            host_bus.send(&build_address_claim_frame(device1.0, device1.1)).await.unwrap();
+            host_bus.send(&build_address_claim_frame(device2.0, device2.1)).await.unwrap();
+            host_bus.send(&build_address_claim_frame(device3.0, device3.1)).await.unwrap();
 
             // Add a duplicate and an irrelevant frame to ensure they are ignored
-            host_bus.send(&build_address_claim_frame(device1.0, device1.1).unwrap()).await.unwrap();
+            host_bus.send(&build_address_claim_frame(device1.0, device1.1)).await.unwrap();
             let non_relevant_frame = CanFrame {
                 id: CanId::builder(129025, 248)
                     .with_priority(2)

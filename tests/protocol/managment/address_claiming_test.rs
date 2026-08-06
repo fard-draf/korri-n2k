@@ -4,13 +4,10 @@ mod helpers {
 }
 
 use helpers::{simulate_no_conflict, MockCanBus, MockTimer};
-use korri_n2k::{
-    error::{ClaimError, ClaimFault},
-    protocol::{
-        constants::address,
-        managment::address_claiming::{claim_address, AddressClaimStrategy},
-        transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus},
-    },
+use korri_n2k::protocol::{
+    constants::address,
+    managment::address_claiming::{claim_address, AddressClaimStrategy},
+    transport::{can_frame::CanFrame, can_id::CanId, traits::can_bus::CanBus},
 };
 
 use tokio::time::Duration;
@@ -177,7 +174,7 @@ async fn test_claim_address_with_conflict_lose_and_with_no_address_available() {
 
     tokio::select! {
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name.into(), strategy) => {
-            assert_eq!(claim_result.unwrap(), address::NULL);
+            assert_eq!(claim_result.unwrap(), address::NULL_ADDR_254);
         }
 
         _ = async {
@@ -220,7 +217,7 @@ async fn test_claim_address_non_arbitrary_loses_and_fails() {
     tokio::select! {
 
         claim_result = claim_address(&mut dut_bus, &mut timer, my_name.into(), strategy) => {
-            assert_eq!(claim_result.unwrap(), address::NULL);
+            assert_eq!(claim_result.unwrap(), address::NULL_ADDR_254);
         }
 
         _ = async {

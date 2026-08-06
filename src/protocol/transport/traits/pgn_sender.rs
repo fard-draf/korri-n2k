@@ -21,10 +21,7 @@ use crate::{
 ///
 /// Provides convenience methods to send NMEA 2000 messages with automatic serialization,
 /// Fast Packet segmentation, and inter-frame delays.
-pub trait PgnSender: CanBus
-where
-    <Self as CanBus>::Error: core::fmt::Debug,
-{
+pub trait PgnSender: CanBus {
     /// Serialize, segment, and send a PGN over the CAN bus.
     ///
     /// Transparently handles:

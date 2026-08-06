@@ -1,9 +1,11 @@
 //! SAE J1939 / NMEA 2000 address-claim algorithm:
 //! emit PGN 60928, listen for conflicts, and fall back to alternative addresses when needed.
 use crate::error::ClaimError::SendError;
-use crate::error::{CanIdBuildError, ExtractionError};
+use crate::error::ExtractionError;
+use crate::protocol::constants::addr_mgmt_pgns::{ADDR_CLAIM_ID_BASE, CLAIM_PGN_60928};
+use crate::protocol::constants::address::NULL_ADDR_254;
 use crate::protocol::constants::{addr_mgmt_pgns, address};
-use crate::protocol::managment::address_claiming::engine::AddressClaimer;
+use crate::protocol::managment::address_claiming::engine::AddressClaimEngine;
 use crate::protocol::managment::iso_name::IsoName;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
@@ -13,48 +15,43 @@ use crate::{
 };
 use futures_util::future::{select, Either};
 use futures_util::pin_mut;
-mod engine;
+pub mod engine;
 
 /// Execute a full address-claim cycle and return the acquired address.
 pub async fn claim_address<'a, C: CanBus, T: KorriTimer>(
     can_bus: &mut C,
     timer: &mut T,
-    my_name: super::iso_name::IsoName,
+    my_name: IsoName,
     strategy: AddressClaimStrategy<'a>,
 ) -> Result<u8, ClaimError<C::Error>>
 where
     C::Error: core::fmt::Debug,
 {
-    let mut addr_claimer = AddressClaimer::new(my_name);
+    let mut addr_claimer = AddressClaimEngine::new(my_name, strategy)?;
     let mut rx: Option<CanFrame> = None;
 
     loop {
         let now_ms = timer.now_ms();
-        match addr_claimer.poll(now_ms, rx.as_ref(), strategy) {
-            Ok(claim_action) => match claim_action {
-                engine::ClaimAction::Send(frame) => {
-                    can_bus.send(&frame).await.map_err(SendError)?;
-                    rx = None;
+        match addr_claimer.poll(now_ms, rx.as_ref()) {
+            engine::ClaimAction::Send(frame) => {
+                can_bus.send(&frame).await.map_err(SendError)?;
+                rx = None;
+            }
+            engine::ClaimAction::Wait(delay) => {
+                let recv = can_bus.recv();
+                pin_mut!(recv);
+                let timer = timer.delay_ms(delay);
+                pin_mut!(timer);
+                match select(timer.as_mut(), recv).await {
+                    Either::Left(_) => rx = None,
+                    Either::Right((f, _)) => rx = Some(f.map_err(|e| ClaimError::ReceiveError(e))?),
                 }
-                engine::ClaimAction::Wait(delay) => {
-                    let recv = can_bus.recv();
-                    pin_mut!(recv);
-                    let timer = timer.delay_ms(delay);
-                    pin_mut!(timer);
-                    match select(timer.as_mut(), recv).await {
-                        Either::Left(_) => rx = None,
-                        Either::Right((f, _)) => {
-                            rx = Some(f.map_err(|e| ClaimError::ReceiveError(e))?)
-                        }
-                    }
-                }
-                engine::ClaimAction::Done(addr) => return Ok(addr),
-                engine::ClaimAction::CannotClaim(frame) => {
-                    can_bus.send(&frame).await.map_err(SendError)?;
-                    return Ok(address::NULL);
-                }
-            },
-            Err(e) => return Err(ClaimError::Fault(e)),
+            }
+            engine::ClaimAction::Claimed(addr) => return Ok(addr),
+            engine::ClaimAction::CannotClaim(frame) => {
+                can_bus.send(&frame).await.map_err(SendError)?;
+                return Ok(address::NULL_ADDR_254);
+            }
         }
     }
 }
@@ -105,6 +102,10 @@ impl<'a> AddressClaimIterator<'a> {
             },
         }
     }
+
+    pub(crate) fn try_next_addr(&mut self) -> u8 {
+        self.next().unwrap_or(address::NULL_ADDR_254)
+    }
 }
 
 impl<'a> Iterator for AddressClaimIterator<'a> {
@@ -154,45 +155,69 @@ impl<'a> Iterator for AddressClaimIterator<'a> {
 
 //==================================================================================ADDRESS_CLAIM_FRAME
 /// Build a claim frame (PGN 60928) for the provided NAME.
-pub fn build_address_claim_frame(
-    my_name: IsoName,
-    address_to_claim: u8,
-) -> Result<CanFrame, CanIdBuildError> {
+/// Infaillible!
+pub fn build_address_claim_frame(my_name: IsoName, address_to_claim: u8) -> CanFrame {
     let myname_as_le_bytes = my_name.raw().to_le_bytes();
-    Ok(CanFrame {
-        id: {
-            match CanId::builder(addr_mgmt_pgns::ADDR_CLAIMED, address_to_claim)
-                .to_destination(address::GLOBAL)
-                .with_priority(6)
-                .build()
-            {
-                Ok(can_id) => can_id,
-                Err(_) => return Err(CanIdBuildError::InvalidData),
-            }
-        },
+
+    CanFrame {
+        id: CanId(ADDR_CLAIM_ID_BASE | address_to_claim as u32),
         data: myname_as_le_bytes,
         len: myname_as_le_bytes.len(),
-    })
+    }
 }
 
 //==================================================================================TOOLS
-/// Check whether an incoming claim frame conflicts with our current address.
-fn is_conflicting_claim(
-    incoming_frame: &CanFrame,
-    my_claimed_address: u8,
-    my_name: IsoName,
-) -> bool {
-    // All three conditions must be true for a conflict.
-    // The `&&` operator ensures every predicate is checked in one expression.
-    incoming_frame.id.pgn() == addr_mgmt_pgns::ADDR_CLAIMED
-        && incoming_frame.id.source_address() != address::NULL
-        && incoming_frame.id.source_address() == my_claimed_address
-        && extract_name_from_claim(incoming_frame).is_ok_and(|their_name| their_name != my_name)
+pub enum ClaimRelation {
+    Unrelated,
+    OwnClaim,
+    WeWin,
+    WeLose,
+    PeerCannotClaim,
+}
+
+/// Classify claim relation between incoming frame and us.
+pub fn classify_claim(frame: &CanFrame, my_name: IsoName, local_address: u8) -> ClaimRelation {
+    if frame.id.pgn() != CLAIM_PGN_60928 {
+        return ClaimRelation::Unrelated;
+    }
+    if frame.len != 8usize {
+        return ClaimRelation::Unrelated;
+    }
+    let their_name = IsoName::from_raw(u64::from_le_bytes(frame.data));
+    #[cfg(feature = "defmt")]
+    defmt::debug!(
+        "Claim RX: SA={}, Their NAME={:#X}, My NAME={:#X}",
+        frame.id.source_address(),
+        their_name,
+        my_name
+    );
+    if their_name != my_name {
+        if frame.id.source_address() == NULL_ADDR_254 {
+            // PeerCannotClaim
+            return ClaimRelation::PeerCannotClaim;
+        }
+        if frame.id.source_address() == local_address {
+            // WeLoose
+            if their_name < my_name {
+                return ClaimRelation::WeLose;
+            }
+            // WeWin
+            if their_name > my_name {
+                return ClaimRelation::WeWin;
+            }
+        }
+    }
+    // OwnClaim
+    if their_name == my_name {
+        return ClaimRelation::OwnClaim;
+    }
+    // Everything else
+    return ClaimRelation::Unrelated;
 }
 
 /// Extracts the NAME from an Address Claim frame (PGN 60928).
 pub(super) fn extract_name_from_claim(frame: &CanFrame) -> Result<IsoName, ExtractionError> {
-    if frame.id.pgn() != addr_mgmt_pgns::ADDR_CLAIMED {
+    if frame.id.pgn() != addr_mgmt_pgns::CLAIM_PGN_60928 {
         return Err(ExtractionError::InvalidIncomingFrame);
     }
     if frame.len != 8usize {
@@ -202,17 +227,6 @@ pub(super) fn extract_name_from_claim(frame: &CanFrame) -> Result<IsoName, Extra
     Ok(IsoName::from_raw(u64::from_le_bytes(frame.data)))
 }
 
-pub(super) fn is_addr_capable_and_isoname_match(
-    my_name: u64,
-    strategy: AddressClaimStrategy<'_>,
-) -> bool {
-    let is_addr_capable = ((my_name >> 63) & 0x01) as u8;
-    match strategy {
-        AddressClaimStrategy::Fixed { preferred: _ } => is_addr_capable == 0,
-        AddressClaimStrategy::SelfConfigurable { addresses: _ } => is_addr_capable == 0,
-        AddressClaimStrategy::Arbitrary { preferred: _ } => is_addr_capable == 1,
-    }
-}
 //==================================================================================TESTS
 #[cfg(test)]
 pub mod tests;

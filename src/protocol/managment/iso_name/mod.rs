@@ -18,6 +18,7 @@
 //! ```
 
 use crate::protocol::lookups::*;
+use crate::protocol::managment::address_claiming::AddressClaimStrategy;
 use crate::protocol::messages::Pgn60928;
 use core::fmt;
 
@@ -144,6 +145,15 @@ impl IsoName {
     #[inline]
     pub const fn is_marine(&self) -> bool {
         self.industry_group() == 4
+    }
+
+    pub fn is_addr_capable_and_isoname_match(&self, strategy: AddressClaimStrategy<'_>) -> bool {
+        let is_addr_capable = ((self.0 >> 63) & 0x01) as u8;
+        match strategy {
+            AddressClaimStrategy::Fixed { preferred: _ } => is_addr_capable == 0,
+            AddressClaimStrategy::SelfConfigurable { addresses: _ } => is_addr_capable == 0,
+            AddressClaimStrategy::Arbitrary { preferred: _ } => is_addr_capable == 1,
+        }
     }
 }
 

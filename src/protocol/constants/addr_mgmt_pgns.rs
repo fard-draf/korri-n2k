@@ -1,3 +1,4 @@
-pub const ADDR_CLAIMED: u32 = 60_928;
-pub const REQUEST: u32 = 59_904;
-pub const COMMANDED_ADDRESS: u32 = 65_240;
+pub const CLAIM_PGN_60928: u32 = 60_928;
+pub const REQUEST_PGN_59904: u32 = 59_904;
+pub const COMMAND_ADDR_65240: u32 = 65_240;
+pub const ADDR_CLAIM_ID_BASE: u32 = 0x18EE_FF00;

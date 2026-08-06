@@ -1,7 +1,7 @@
 use crate::{
     error::ClaimFault,
     protocol::{
-        constants::{addr_mgmt_pgns, address},
+        constants::{addr_mgmt_pgns, address, iso_delay::REQUEST_DELAY_MS},
         managment::{address_claiming::extract_name_from_claim, iso_name::IsoName},
         transport::{can_frame::CanFrame, can_id::CanId},
     },
@@ -44,12 +44,12 @@ impl<'a> AddressRequester<'a> {
         match self.state {
             State::Idle => {
                 let mut data = [0xFFu8; 8];
-                let pgn_bytes = addr_mgmt_pgns::ADDR_CLAIMED.to_le_bytes();
+                let pgn_bytes = addr_mgmt_pgns::CLAIM_PGN_60928.to_le_bytes();
                 data[0..3].copy_from_slice(&pgn_bytes[0..3]);
 
                 let request_frame = CanFrame {
                     // TODO!: fix source address -> GLOBAL isn't correct
-                    id: CanId::builder(addr_mgmt_pgns::REQUEST, address::GLOBAL)
+                    id: CanId::builder(addr_mgmt_pgns::REQUEST_PGN_59904, address::GLOBAL)
                         .to_destination(address::GLOBAL)
                         .with_priority(6)
                         .build()
@@ -60,7 +60,7 @@ impl<'a> AddressRequester<'a> {
 
                 self.state = State::Listening {
                     device_count: 0,
-                    deadline_ms: now_ms + 300,
+                    deadline_ms: now_ms + REQUEST_DELAY_MS as u64,
                 };
                 return Ok(RequestAction::Send(request_frame));
             }
@@ -78,7 +78,7 @@ impl<'a> AddressRequester<'a> {
                     return Ok(RequestAction::Wait(remaining_ms as u32));
                 };
 
-                if frame.id.pgn() != addr_mgmt_pgns::ADDR_CLAIMED {
+                if frame.id.pgn() != addr_mgmt_pgns::CLAIM_PGN_60928 {
                     return Ok(RequestAction::Wait(remaining_ms as u32));
                 }
                 let Ok(name) = extract_name_from_claim(&frame) else {

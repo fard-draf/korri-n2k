@@ -30,7 +30,7 @@ pub struct AddressManager<'a, C: CanBus, T: KorriTimer> {
     can_bus: C,
     /// Asynchronous timer enforcing delays between claim attempts.
     timer: T,
-    /// Node NAME identifier (64 bits).
+    /// Node NAME identifier.
     my_name: IsoName,
     /// Address Claim strategy used.
     strategy: AddressClaimStrategy<'a>,
@@ -91,7 +91,7 @@ where
         destination: Option<u8>,
     ) -> Result<(), SendPgnError<C::Error>> {
         let source_address = self.current_address;
-        if source_address == address::NULL {
+        if source_address == address::NULL_ADDR_254 {
             Ok(())
         } else {
             self.can_bus
@@ -159,8 +159,7 @@ where
 
     /// Re-issue a claim to defend the current address (PGN 60928).
     async fn defend(&mut self) -> Result<(), AddressManagerError<C::Error>> {
-        let claim_frame = build_address_claim_frame(self.my_name, self.current_address)
-            .map_err(AddressManagerError::Build)?;
+        let claim_frame = build_address_claim_frame(self.my_name, self.current_address);
 
         self.can_bus
             .send(&claim_frame)
