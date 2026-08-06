@@ -291,13 +291,12 @@ impl AddressHandle {
         priority: u8,
         destination: Option<u8>,
     ) -> Result<(), AddressHandleError> {
-        let mut buffer = [0u8; MAX_FAST_PACKET_PAYLOAD];
-        let len = pgn_data
-            .to_payload(&mut buffer)
-            .map_err(|_| AddressHandleError::Serialization)?;
-
+        // Serialized straight into the command: a second buffer would cost
+        // another 223 bytes of stack and a copy, for nothing.
         let mut payload = [0u8; MAX_FAST_PACKET_PAYLOAD];
-        payload[..len].copy_from_slice(&buffer[..len]);
+        let len = pgn_data
+            .to_payload(&mut payload)
+            .map_err(|_| AddressHandleError::Serialization)?;
 
         let command = SupervisorCommand::SendPayload {
             pgn,

@@ -262,7 +262,9 @@ repeat. No state transition can be cancelled mid-flight.
 | `AddressFrames` | receive incoming frames |
 | `AddressRunner` | the background task, owner of the event loop |
 
-Channels are static under embassy, sized by integer capacities under tokio.
+Channels are static under embassy, sized by integer capacities under tokio. A
+command entry costs 240 bytes whatever the payload — the buffer is inline, so
+nothing is allocated. Size `CMD_CAP` with that in mind.
 
 One catch: `#[embassy_executor::task]` cannot be generic, so declare the runner
 task yourself over your concrete types.

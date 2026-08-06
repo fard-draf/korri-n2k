@@ -28,6 +28,10 @@ pub use runner_embassy::{AddressFrames, AddressHandle, AddressRunner, AddressSer
 pub use runner_tokio::{AddressFrames, AddressHandle, AddressRunner, AddressService};
 
 /// Commands queued by producer tasks.
+///
+/// One entry costs 240 bytes whatever the payload: the buffer is inline, so no
+/// allocation happens. Size the channel accordingly — `CMD_CAP = 8` reserves
+/// about 2 KB.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum SupervisorCommand {
