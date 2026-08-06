@@ -19,7 +19,7 @@ pub struct TokioTimer {
 
 #[cfg(feature = "tokio")]
 impl TokioTimer {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             start: tokio::time::Instant::now(),
         }
