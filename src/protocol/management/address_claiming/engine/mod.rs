@@ -26,6 +26,7 @@ use crate::{
 /// # Contract
 ///
 /// * `tx` carries at most one frame to emit.
+/// * Call [`AddressClaimEngine::tx_sent`] after a successful emission.
 /// * `status` is the state **after** `rx` and the deadlines have been handled.
 /// * `wake_at_ms` is an **absolute** deadline. It lives in the same domain as
 ///   the `now_ms` passed to [`AddressClaimEngine::poll`].
@@ -85,6 +86,7 @@ pub struct AddressClaimEngine<'a> {
     addr_iterator: Option<AddressClaimIterator<'a>>,
     strategy: AddressClaimStrategy<'a>,
     state: State,
+    tx_pending: bool,
 }
 
 impl<'a> AddressClaimEngine<'a> {
@@ -97,6 +99,7 @@ impl<'a> AddressClaimEngine<'a> {
             addr_iterator: None,
             strategy,
             state: State::Unclaimed,
+            tx_pending: false,
         })
     }
 
@@ -109,12 +112,15 @@ impl<'a> AddressClaimEngine<'a> {
             // Unreachable: `output` only runs after a transition, and every
             // transition leaves `Unclaimed` behind for good.
             State::Unclaimed => unreachable!("output() called before the first campaign"),
-            State::Claiming { frame, deadline_ms } => (
-                ClaimStatus::Claiming(frame.id.source_address()),
-                Some(deadline_ms),
-            ),
+            State::Claiming { frame, deadline_ms } => {
+                let wake_at_ms = (!self.tx_pending).then_some(deadline_ms);
+                (ClaimStatus::Claiming(frame.id.source_address()), wake_at_ms)
+            }
             State::Claimed { frame } => (ClaimStatus::Claimed(frame.id.source_address()), None),
-            State::CannotClaim { retry_at_ms } => (ClaimStatus::CannotClaim, Some(retry_at_ms)),
+            State::CannotClaim { retry_at_ms } => {
+                let wake_at_ms = (!self.tx_pending).then_some(retry_at_ms);
+                (ClaimStatus::CannotClaim, wake_at_ms)
+            }
         };
 
         ClaimOutput {
@@ -141,8 +147,27 @@ impl<'a> AddressClaimEngine<'a> {
                 deadline_ms: now_ms.saturating_add(CLAIM_DELAY_MS as u64),
             };
         }
+        self.tx_pending = true;
 
         self.output(Some(claim_frame))
+    }
+
+    /// Start the timer after the frame was sent.
+    pub fn tx_sent(&mut self, now_ms: u64) -> ClaimOutput {
+        if self.tx_pending {
+            match &mut self.state {
+                State::Claiming { deadline_ms, .. } => {
+                    *deadline_ms = now_ms.saturating_add(CLAIM_DELAY_MS as u64);
+                }
+                State::CannotClaim { retry_at_ms } => {
+                    *retry_at_ms = now_ms.saturating_add(CANNOT_CLAIM_RETRY_DELAY_MS as u64);
+                }
+                _ => {}
+            }
+            self.tx_pending = false;
+        }
+
+        self.output(None)
     }
 
     // Strategy:
@@ -152,6 +177,15 @@ impl<'a> AddressClaimEngine<'a> {
     // 3. After each attempt, listen for competing claims for 250 ms.
     // 4. Defend the address if the local NAME wins, otherwise move to the next one.
     pub fn poll(&mut self, now_ms: u64, rx: Option<&CanFrame>) -> ClaimOutput {
+        if self.tx_pending {
+            let tx = match self.state {
+                State::Claiming { frame, .. } => frame,
+                State::CannotClaim { .. } => build_address_claim_frame(self.my_name, NULL_ADDR_254),
+                _ => unreachable!("pending send without a frame"),
+            };
+            return self.output(Some(tx));
+        }
+
         // TODO!: check the pseudo-random delay for claiming
         match self.state {
             // Not started. Whatever arrived, the campaign begins now.
@@ -255,6 +289,7 @@ impl<'a> AddressClaimEngine<'a> {
                 deadline_ms: now_ms.saturating_add(CLAIM_DELAY_MS as u64),
             };
         }
+        self.tx_pending = true;
 
         self.output(Some(claim_frame))
     }

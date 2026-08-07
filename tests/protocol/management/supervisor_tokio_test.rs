@@ -24,6 +24,23 @@ const PREFERRED: u8 = 142;
 /// Long enough for a 250 ms claim window to close.
 const CLAIM_SETTLED_MS: u64 = 400;
 
+struct SlowSendBus {
+    inner: MockCanBus,
+}
+
+impl CanBus for SlowSendBus {
+    type Error = ();
+
+    async fn send(&mut self, frame: &CanFrame) -> Result<(), Self::Error> {
+        sleep(Duration::from_millis(300)).await;
+        self.inner.send(frame).await
+    }
+
+    async fn recv(&mut self) -> Result<CanFrame, Self::Error> {
+        self.inner.recv().await
+    }
+}
+
 fn service(
     bus: MockCanBus,
     cmd_cap: usize,
@@ -78,6 +95,32 @@ async fn supervisor_claims_then_sends_a_pgn() {
             assert_eq!(payload.id.source_address(), PREFERRED);
         } => {}
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn claim_timer_starts_after_slow_send() {
+    let (dut_bus, _host_bus) = MockCanBus::create_pair();
+    let manager = AddressManager::new(
+        SlowSendBus { inner: dut_bus },
+        MockTimer::new(),
+        IsoName::from_raw(AAC_NAME),
+        AddressClaimStrategy::Arbitrary {
+            preferred: PREFERRED,
+        },
+    )
+    .expect("strategy must match the NAME");
+    let parts = AddressService::new(manager, 1, 0).into_parts();
+    let handle = parts.handle.expect("command channel requested");
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(350)).await;
+    assert_eq!(handle.claimed_address(), None);
+
+    sleep(Duration::from_millis(201)).await;
+    assert_eq!(handle.claimed_address(), Some(PREFERRED));
+
+    runner.abort();
+    let _ = runner.await;
 }
 
 #[tokio::test]

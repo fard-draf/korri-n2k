@@ -32,6 +32,7 @@ where
             Ok(request_action) => match request_action {
                 engine::RequestAction::Send(frame) => {
                     can_bus.send(&frame).await.map_err(SendError)?;
+                    network_discover.tx_sent(timer.now_ms());
                     rx = None;
                 }
                 engine::RequestAction::Wait(delay) => {

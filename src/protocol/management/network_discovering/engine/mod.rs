@@ -17,6 +17,7 @@ pub enum RequestAction {
 #[derive(PartialEq, Eq)]
 pub enum State {
     Idle,
+    Sending(CanFrame),
     Listening {
         device_count: usize,
         deadline_ms: u64,
@@ -41,6 +42,16 @@ impl<'a> AddressRequester<'a> {
         }
     }
 
+    /// Start the timer after the request was sent.
+    pub fn tx_sent(&mut self, now_ms: u64) {
+        if matches!(self.state, State::Sending(_)) {
+            self.state = State::Listening {
+                device_count: 0,
+                deadline_ms: now_ms.saturating_add(REQUEST_DELAY_MS as u64),
+            };
+        }
+    }
+
     pub fn poll(
         &mut self,
         now_ms: u64,
@@ -62,14 +73,10 @@ impl<'a> AddressRequester<'a> {
                     len: 3,
                 };
 
-                self.state = State::Listening {
-                    device_count: 0,
-                    // Same temporal contract as the claim engine: a clock
-                    // reading near `u64::MAX` pins the deadline, never panics.
-                    deadline_ms: now_ms.saturating_add(REQUEST_DELAY_MS as u64),
-                };
+                self.state = State::Sending(request_frame);
                 Ok(RequestAction::Send(request_frame))
             }
+            State::Sending(frame) => Ok(RequestAction::Send(frame)),
             State::Listening {
                 mut device_count,
                 deadline_ms,
@@ -109,5 +116,35 @@ impl<'a> AddressRequester<'a> {
                 Ok(RequestAction::Wait(remaining_ms as u32))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_timer_starts_after_send() {
+        let mut devices = [];
+        let mut requester = AddressRequester::new(17, &mut devices);
+
+        assert!(matches!(
+            requester.poll(100, None),
+            Ok(RequestAction::Send(_))
+        ));
+        assert!(matches!(
+            requester.poll(500, None),
+            Ok(RequestAction::Send(_))
+        ));
+
+        requester.tx_sent(500);
+        assert!(matches!(
+            requester.poll(799, None),
+            Ok(RequestAction::Wait(1))
+        ));
+        assert!(matches!(
+            requester.poll(800, None),
+            Ok(RequestAction::Done(0))
+        ));
     }
 }
