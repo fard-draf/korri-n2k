@@ -190,7 +190,7 @@ async fn supervisor_exits_on_can_bus_error() {
     drop(host_bus);
 
     // The very first thing the runner does is emit a claim, so the bus error
-    // surfaces there — unwrapped, exactly as the driver reported it.
+    // surfaces there, unwrapped, exactly as the driver reported it.
     let result = parts.runner.drive().await;
     assert!(matches!(result, Err(AddressSupervisorRunError::Send(()))));
 }

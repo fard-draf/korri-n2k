@@ -77,8 +77,8 @@ impl<'a> Iterator for AddressClaimIterator<'a> {
             },
             // Preferred address first, then the rest of the claimable range
             // walked upwards and wrapping around. This mirrors what real nodes
-            // do — increment on conflict — instead of jumping into a dedicated
-            // block where no other device sits.
+            // do: increment on conflict. Jumping into a dedicated block would
+            // park the node where no other device sits.
             Self::Arbitrary {
                 preferred,
                 tried_preferred,

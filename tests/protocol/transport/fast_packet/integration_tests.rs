@@ -384,8 +384,8 @@ fn test_assembler_max_sessions() {
 #[test]
 /// Stress test: process 100 PGNs in a row to validate stability.
 ///
-/// Confirms the assembler can tolerate continuous traffic without leaks, corruption,
-/// or panics—critical for long-lived embedded systems.
+/// Confirms the assembler can tolerate continuous traffic without leaks,
+/// corruption or panics. This matters for long-lived embedded systems.
 fn test_stress_100_pgns() {
     let mut assembler = FastPacketAssembler::new();
 
