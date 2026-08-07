@@ -64,7 +64,9 @@ impl<'a> AddressRequester<'a> {
 
                 self.state = State::Listening {
                     device_count: 0,
-                    deadline_ms: now_ms + REQUEST_DELAY_MS as u64,
+                    // Same temporal contract as the claim engine: a clock
+                    // reading near `u64::MAX` pins the deadline, never panics.
+                    deadline_ms: now_ms.saturating_add(REQUEST_DELAY_MS as u64),
                 };
                 Ok(RequestAction::Send(request_frame))
             }

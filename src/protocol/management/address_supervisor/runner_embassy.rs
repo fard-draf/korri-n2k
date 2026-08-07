@@ -20,7 +20,6 @@ use futures_util::{future::select, future::Either, pin_mut};
 
 use crate::error::{ClaimFault, SendPgnError};
 use crate::infra::codec::traits::PgnData;
-use crate::protocol::management::address_claiming::engine::ClaimAction;
 use crate::protocol::management::address_claiming::AddressClaimStrategy;
 use crate::protocol::management::address_manager::AddressManager;
 use crate::protocol::management::address_supervisor::{
@@ -150,11 +149,14 @@ where
         let mut rx: Option<CanFrame> = None;
 
         loop {
-            let action = self.manager.poll(rx.as_ref());
-            self.claimed.set(self.manager.claimed_address());
+            let output = self.manager.poll(rx.as_ref());
+
+            // Published before the emission below: a lost address must stop
+            // producers now, not after an `await` on a possibly slow bus.
+            self.claimed.set(output.status.claimed_address());
 
             // The engine saw it first; the application gets it too, unfiltered.
-            // This `take` is also the "rx = None after a Send" the engine expects.
+            // This `take` is also the "rx = None once consumed" the engine expects.
             // Never awaits: a full channel must not delay the action the engine
             // just decided. Application traffic is sacrificial, address
             // management is not.
@@ -166,48 +168,46 @@ where
                 }
             }
 
-            match action {
-                ClaimAction::Send(frame) | ClaimAction::CannotClaim(frame) => {
-                    self.manager
-                        .emit_claim(&frame)
-                        .await
-                        .map_err(AddressSupervisorRunError::Send)?;
-                }
+            // Always emitted, whatever the status: a `Claimed` returned together
+            // with a defence frame still owes that frame to the bus.
+            if let Some(frame) = output.tx {
+                self.manager
+                    .emit_claim(&frame)
+                    .await
+                    .map_err(AddressSupervisorRunError::Send)?;
+            }
 
-                ClaimAction::Claimed(_) => {}
+            let mut command = None;
 
-                ClaimAction::Wait(delay_ms) => {
-                    let mut command = None;
-
-                    // Scoped: both futures borrow `self` and must die before
-                    // a command is executed.
-                    {
-                        // An embassy channel never closes: absent means never ready.
-                        let command_future = async {
-                            match command_channel {
-                                Some(cmd_ch) => cmd_ch.receive().await,
-                                None => pending::<SupervisorCommand>().await,
-                            }
-                        };
-                        pin_mut!(command_future);
-
-                        let recv = self.manager.recv_until(delay_ms);
-                        pin_mut!(recv);
-
-                        // `select` polls its first argument first: a frame ready at
-                        // the same instant as the deadline wins, as the engine wants.
-                        match select(recv, command_future).await {
-                            Either::Left((frame, _)) => {
-                                rx = frame.map_err(AddressSupervisorRunError::Receive)?;
-                            }
-                            Either::Right((received, _)) => command = Some(received),
-                        }
+            // Scoped: both futures borrow `self` and must die before
+            // a command is executed.
+            {
+                // An embassy channel never closes: absent means never ready.
+                let command_future = async {
+                    match command_channel {
+                        Some(cmd_ch) => cmd_ch.receive().await,
+                        None => pending::<SupervisorCommand>().await,
                     }
+                };
+                pin_mut!(command_future);
 
-                    if let Some(cmd) = command {
-                        self.run_command(cmd).await?;
+                // `None` waits on the bus and on commands alone. It never means
+                // "done": a conflict must still be able to wake the engine.
+                let recv = self.manager.recv_until(output.wake_at_ms);
+                pin_mut!(recv);
+
+                // `select` polls its first argument first: a frame ready at
+                // the same instant as the deadline wins, as the engine wants.
+                match select(recv, command_future).await {
+                    Either::Left((frame, _)) => {
+                        rx = frame.map_err(AddressSupervisorRunError::Receive)?;
                     }
+                    Either::Right((received, _)) => command = Some(received),
                 }
+            }
+
+            if let Some(cmd) = command {
+                self.run_command(cmd).await?;
             }
         }
     }

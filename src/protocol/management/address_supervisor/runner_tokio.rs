@@ -16,7 +16,6 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::error::{ClaimFault, SendPgnError};
 use crate::infra::codec::traits::PgnData;
-use crate::protocol::management::address_claiming::engine::ClaimAction;
 use crate::protocol::management::address_supervisor::{
     handle_command, AddressHandleError, AddressSupervisorRunError, ClaimedAddress,
     SupervisorCommand,
@@ -143,67 +142,68 @@ where
         let mut rx: Option<CanFrame> = None;
 
         loop {
-            let action = self.manager.poll(rx.as_ref());
-            self.claimed.set(self.manager.claimed_address());
+            let output = self.manager.poll(rx.as_ref());
+
+            // Published before the emission below: a lost address must stop
+            // producers now, not after an `await` on a possibly slow bus.
+            self.claimed.set(output.status.claimed_address());
 
             // The engine saw it first; the application gets it too, unfiltered.
-            // This `take` is also the "rx = None after a Send" the engine expects.
+            // This `take` is also the "rx = None once consumed" the engine expects.
             if let Some(frame) = rx.take() {
                 self.forward_frame(frame);
             }
 
-            match action {
-                ClaimAction::Send(frame) | ClaimAction::CannotClaim(frame) => {
-                    self.manager
-                        .emit_claim(&frame)
-                        .await
-                        .map_err(AddressSupervisorRunError::Send)?;
+            // Always emitted, whatever the status: a `Claimed` returned together
+            // with a defence frame still owes that frame to the bus.
+            if let Some(frame) = output.tx {
+                self.manager
+                    .emit_claim(&frame)
+                    .await
+                    .map_err(AddressSupervisorRunError::Send)?;
+            }
+
+            let mut command = None;
+            let mut channel_closed = false;
+
+            // Scoped: both futures borrow `self` and must die before
+            // `command_rx` is cleared or a command is executed.
+            {
+                let command_rx = &mut self.command_rx;
+                let command_future = async {
+                    match command_rx {
+                        Some(rx) => rx.recv().await,
+                        None => pending::<Option<SupervisorCommand>>().await,
+                    }
+                };
+                pin_mut!(command_future);
+
+                // `None` waits on the bus and on commands alone. It never means
+                // "done": a conflict must still be able to wake the engine.
+                let recv = self.manager.recv_until(output.wake_at_ms);
+                pin_mut!(recv);
+
+                // `select` polls its first argument first: a frame ready at
+                // the same instant as the deadline wins, as the engine wants.
+                match select(recv, command_future).await {
+                    Either::Left((frame, _)) => {
+                        rx = frame.map_err(AddressSupervisorRunError::Receive)?;
+                    }
+                    Either::Right((received, _)) => match received {
+                        Some(cmd) => command = Some(cmd),
+                        None => channel_closed = true,
+                    },
                 }
+            }
 
-                ClaimAction::Claimed(_) => {}
+            // A closed channel returns `None` instantly and forever:
+            // drop it so the next round falls back on `pending()`.
+            if channel_closed {
+                self.command_rx = None;
+            }
 
-                ClaimAction::Wait(delay_ms) => {
-                    let mut command = None;
-                    let mut channel_closed = false;
-
-                    // Scoped: both futures borrow `self` and must die before
-                    // `command_rx` is cleared or a command is executed.
-                    {
-                        let command_rx = &mut self.command_rx;
-                        let command_future = async {
-                            match command_rx {
-                                Some(rx) => rx.recv().await,
-                                None => pending::<Option<SupervisorCommand>>().await,
-                            }
-                        };
-                        pin_mut!(command_future);
-
-                        let recv = self.manager.recv_until(delay_ms);
-                        pin_mut!(recv);
-
-                        // `select` polls its first argument first: a frame ready at
-                        // the same instant as the deadline wins, as the engine wants.
-                        match select(recv, command_future).await {
-                            Either::Left((frame, _)) => {
-                                rx = frame.map_err(AddressSupervisorRunError::Receive)?;
-                            }
-                            Either::Right((received, _)) => match received {
-                                Some(cmd) => command = Some(cmd),
-                                None => channel_closed = true,
-                            },
-                        }
-                    }
-
-                    // A closed channel returns `None` instantly and forever:
-                    // drop it so the next round falls back on `pending()`.
-                    if channel_closed {
-                        self.command_rx = None;
-                    }
-
-                    if let Some(cmd) = command {
-                        self.run_command(cmd).await?;
-                    }
-                }
+            if let Some(cmd) = command {
+                self.run_command(cmd).await?;
             }
         }
     }

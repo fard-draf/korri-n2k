@@ -1,6 +1,22 @@
 /// Universal synchronous timer abstraction providing the instant timing primitive
 /// required by claim and retransmission logic.
 pub trait Clock {
+    /// Milliseconds since an arbitrary but fixed origin.
+    ///
+    /// # Contract
+    ///
+    /// The engines store absolute deadlines built from these readings. Three
+    /// properties are required.
+    ///
+    /// * **Monotonic.** A reading never decreases.
+    /// * **Free of wall-clock adjustments.** An NTP step backwards would push a
+    ///   deadline out of reach and stall a claim.
+    /// * **Wrap-free while the engine lives.** Count from process or board boot.
+    ///   Never from a truncated 32-bit tick counter. `u64` milliseconds cover
+    ///   580 million years.
+    ///
+    /// Deadlines use `saturating_add`. A reading close to `u64::MAX` cannot
+    /// panic. It pins the deadline to the maximum instead.
     fn now_ms(&self) -> u64;
 }
 
