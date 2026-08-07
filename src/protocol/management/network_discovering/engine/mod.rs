@@ -59,6 +59,10 @@ impl<'a> AddressRequester<'a> {
     ) -> Result<RequestAction, ClaimFault> {
         match self.state {
             State::Idle => {
+                if !address::is_claimable(self.source_address) {
+                    return Err(ClaimFault::RequestAddressClaimErr);
+                }
+
                 let mut data = [0xFFu8; 8];
                 let pgn_bytes = addr_mgmt_pgns::CLAIM_PGN_60928.to_le_bytes();
                 data[0..3].copy_from_slice(&pgn_bytes[0..3]);
@@ -146,5 +150,18 @@ mod tests {
             requester.poll(800, None),
             Ok(RequestAction::Done(0))
         ));
+    }
+
+    #[test]
+    fn invalid_source_addresses_are_rejected() {
+        for source_address in 252..=255 {
+            let mut devices = [];
+            let mut requester = AddressRequester::new(source_address, &mut devices);
+
+            assert!(matches!(
+                requester.poll(0, None),
+                Err(ClaimFault::RequestAddressClaimErr)
+            ));
+        }
     }
 }
