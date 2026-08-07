@@ -195,6 +195,57 @@ async fn supervisor_exits_on_can_bus_error() {
     assert!(matches!(result, Err(AddressSupervisorRunError::Send(()))));
 }
 
+/// P1: the published address must not outlive the runner.
+///
+/// Nothing defends an address once the loop is gone, so a handle still handing
+/// out `Some(142)` would invite the application to emit from an address it no
+/// longer holds.
+#[tokio::test]
+async fn a_dead_bus_clears_the_published_address() {
+    let (dut_bus, host_bus) = MockCanBus::create_pair();
+    let parts = service(dut_bus, 4, 0).into_parts();
+    let handle = parts.handle.expect("command channel requested");
+
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    assert_eq!(handle.claimed_address(), Some(PREFERRED));
+
+    // The driver disappears: the pending `recv` fails and the runner stops.
+    drop(host_bus);
+
+    let result = runner.await.expect("the runner task must not panic");
+    assert!(matches!(
+        result,
+        Err(AddressSupervisorRunError::Receive(()))
+    ));
+
+    assert_eq!(
+        handle.claimed_address(),
+        None,
+        "a dead runner must not keep publishing an address"
+    );
+}
+
+/// The same cleanup on cancellation: no error is ever returned here, so only
+/// `Drop` can clear the address.
+#[tokio::test]
+async fn a_cancelled_runner_clears_the_published_address() {
+    let (dut_bus, _host_bus) = MockCanBus::create_pair();
+    let parts = service(dut_bus, 4, 0).into_parts();
+    let handle = parts.handle.expect("command channel requested");
+
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    assert_eq!(handle.claimed_address(), Some(PREFERRED));
+
+    runner.abort();
+    let _ = runner.await;
+
+    assert_eq!(handle.claimed_address(), None);
+}
+
 #[tokio::test]
 async fn supervisor_survives_a_rejected_command() {
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
