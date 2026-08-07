@@ -212,8 +212,11 @@ where
         }
     }
 
-    /// Run one command. Only a dead bus stops the runner: a rejected command is
+    /// Run one command. Only a bus error stops the runner: a rejected command is
     /// the caller's mistake and must not take address management down with it.
+    ///
+    /// Any `Err` from `CanBus` is terminal, transient or not. The driver is
+    /// responsible for recovering what it can: see [`CanBus`].
     async fn run_command(
         &mut self,
         command: SupervisorCommand,
@@ -244,6 +247,12 @@ impl<'a, const CMD_CAP: usize> AddressHandle<'a, CMD_CAP> {
     /// Best effort: see [`ClaimedAddress`].
     pub fn claimed_address(&self) -> Option<u8> {
         self.claimed.get()
+    }
+
+    /// Queue a command built by the caller. Same contract as
+    /// [`AddressHandle::send_pgn`]: it confirms queueing, not emission.
+    pub async fn send_command(&self, command: SupervisorCommand) {
+        self.sender.send(command).await;
     }
 
     /// Queue a frame. Returns once the runner has taken it from the channel,

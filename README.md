@@ -94,12 +94,18 @@ let handle = parts.handle.expect("a command channel was requested");
 tokio::spawn(parts.runner.drive());
 ```
 
-Two `send_pgn` exist, with different contracts:
+Two `send_pgn` exist. Which one you use is decided by who owns the manager, not
+by preference:
 
-| Method | Guarantees |
-|---|---|
-| `AddressManager::send_pgn` | refuses with `NotClaimed`, never a silent `Ok(())` |
-| `AddressHandle::send_pgn` | confirms queueing only |
+| You drive | Emission API | Guarantees |
+|---|---|---|
+| the manager yourself, no runner | `AddressManager::send_pgn` / `send_payload` | refuses with `NotClaimed`, never a silent `Ok(())` |
+| a runner | `AddressHandle::send_pgn` / `send_raw_frame` | confirms queueing only |
+
+`AddressService::into_parts` moves the manager into the `AddressRunner`, so its
+methods become unreachable from then on. The runner does not hand out a
+`&mut AddressManager`: the engine would then be mutated from outside its own
+loop, which is exactly what this design removes.
 
 The runner may still refuse a queued command, and drops the refusal rather than
 returning it. Ask the handle first:
@@ -252,17 +258,27 @@ cargo run --example iso_name_usage
 
 ## Writing a driver
 
-Implement `CanBus`, two methods. One rule is not obvious.
+Implement `CanBus`, two methods. Two rules are not obvious.
 
 **`recv()` must be safe to drop.** The supervisor races it against a deadline and
-against queued commands, so it is cancelled often: once per expired `Wait`, once
-per command. An application publishing at 10 Hz cancels a pending `recv` ten
+against queued commands, so it is cancelled often: once per expired deadline,
+once per command. An application publishing at 10 Hz cancels a pending `recv` ten
 times a second.
 
 A driver that pulls a frame off its hardware queue before the future resolves
 loses that frame every time. If the lost frame is a competing Address Claim, the
 node keeps an address it no longer owns. Buffer inside the driver and return from
 the buffer.
+
+**Any error you return is terminal.** An `Err` from `send` or `recv` stops
+`AddressRunner` for good, and the node keeps no address. Absorb what you can
+recover from: arbitration loss, a full TX mailbox, a bus-off recovery cycle.
+Return an error only for a condition the caller has to act on, such as a closed
+socket or a dead peripheral.
+
+The library does not retry. It cannot tell a transient failure from a permanent
+one through an opaque `Error`, and a blind retry loop on a dead bus is worse than
+stopping.
 
 ## Limits
 
@@ -271,6 +287,13 @@ the buffer.
 - **The assembler only reassembles the PGNs in its table.** Ask `handles()`.
 - **No ISO Transport Protocol.** PGNs 60160 and 60416 decode as messages. The
   multi-packet transport itself is not implemented.
+- **No ISO Commanded Address.** PGN 65240 is treated as ordinary traffic, so a
+  tool cannot force this node onto a given address. The PGN carries nine bytes
+  and arrives by BAM, so implementing it needs the transport above first.
+- **No pseudo-random delay before a claim.** J1939-81 asks a node to jitter its
+  first Address Claim. This one emits immediately. Nodes powering up together on
+  the same preferred address therefore collide, and resolve by NAME arbitration
+  instead of by spreading out.
 - **35 of CANboat's 348 PGNs are not generated.** Listed with their reason in
   `build_core/var/pgn_manifest.full.json`. None are in the default manifest.
 - **Runtime-sized fields are unsupported** (`VARIABLE`, `DYNAMIC_FIELD_VALUE`).
@@ -306,6 +329,20 @@ repeat. No state transition can be cancelled halfway.
 Channels are static under embassy, sized by integer capacities under tokio. A
 command entry costs 240 bytes whatever the payload. The buffer is inline, so
 nothing is allocated. Size `CMD_CAP` with that in mind.
+
+The two runtimes expose the same methods with different signatures. An embassy
+channel never closes and never refuses, so the failures tokio has to report
+simply do not exist there:
+
+| Method | `tokio` | `embassy` |
+|---|---|---|
+| `AddressHandle::send_pgn` | `Result<(), AddressHandleError>` | `Result<(), AddressHandleError>` |
+| `AddressHandle::send_raw_frame` | `Result<(), AddressHandleError>` | `()` |
+| `AddressHandle::send_command` | `Result<(), AddressHandleError>` | `()` |
+| `AddressFrames::recv` | `Option<CanFrame>` | `CanFrame` |
+
+Only `send_pgn` matches, because serialization can fail under both. Code that
+must build for the two runtimes needs a `cfg` at these three call sites.
 
 One catch: `#[embassy_executor::task]` cannot be generic, so declare the runner
 task yourself over your concrete types.

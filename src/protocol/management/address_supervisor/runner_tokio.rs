@@ -208,8 +208,11 @@ where
         }
     }
 
-    /// Run one command. Only a dead bus stops the runner: a rejected command is
+    /// Run one command. Only a bus error stops the runner: a rejected command is
     /// the caller's mistake and must not take address management down with it.
+    ///
+    /// Any `Err` from `CanBus` is terminal, transient or not. The driver is
+    /// responsible for recovering what it can: see [`CanBus`].
     async fn run_command(
         &mut self,
         command: SupervisorCommand,
