@@ -60,16 +60,6 @@ fn cannot_claim(tx: Option<CanFrame>, retry_at_ms: u64) -> ClaimOutput {
     }
 }
 
-/// Answering a request before any campaign started: wake immediately, since a
-/// silent bus would otherwise never let the claim begin.
-fn unclaimed_answer(tx: CanFrame, now_ms: u64) -> ClaimOutput {
-    ClaimOutput {
-        tx: Some(tx),
-        status: ClaimStatus::Unclaimed,
-        wake_at_ms: Some(now_ms),
-    }
-}
-
 //==================================================================================FIXTURES
 
 struct ClockTest {
@@ -745,8 +735,10 @@ fn test_addr_claim_machine_aac_disturbed_with_no_effect() {
 
 //==================================================================================ISO_REQUEST
 
+/// A request arriving before the campaign starts it. The Address Claim that
+/// goes out is the answer, so no separate Cannot Claim is owed.
 #[test]
-fn test_iso_request_from_unclaimed_answers_cannot_claim() {
+fn test_iso_request_from_unclaimed_starts_the_campaign() {
     let my_strategy = AddressClaimStrategy::Arbitrary { preferred: ADDR_1 };
     let mut my_inst = Instance::new(
         my_strategy,
@@ -761,25 +753,71 @@ fn test_iso_request_from_unclaimed_answers_cannot_claim() {
     // Pre-conditions
     assert_eq!(my_inst.claimer.state, State::Unclaimed); // correct beginning state
 
-    // J1939-81: an addressless node answers with a Cannot Claim.
-    let expected_frame = build_address_claim_frame(my_inst.name.0, address::NULL_ADDR_254);
     assert_eq!(
         my_inst.claimer.poll(timer.ms, Some(&request_rx)),
-        unclaimed_answer(expected_frame, timer.ms)
-    );
-
-    // The answer neither starts a campaign nor changes the state.
-    assert_eq!(my_inst.claimer.state, State::Unclaimed);
-
-    // But it does not leave the engine asleep either: the very next poll starts
-    // the campaign, which is why `wake_at_ms` above is `now`, not `None`.
-    assert_eq!(
-        my_inst.claimer.poll(timer.ms, None),
         claiming(
             my_inst.can_frame_origin,
             ADDR_1,
             timer.ms + CLAIM_DELAY_MS as u64
         )
+    );
+}
+
+/// A strategy with nothing claimable still owes the Cannot Claim, and the first
+/// poll is where it goes out.
+#[test]
+fn test_a_strategy_with_no_claimable_address_answers_cannot_claim() {
+    // Built without `Instance`: an empty address list has no preferred address.
+    let name = Name::default().0;
+    let strategy = AddressClaimStrategy::SelfConfigurable { addresses: &[] };
+    let mut engine = AddressClaimEngine::new(name, strategy).expect("SAC name, SAC strategy");
+
+    let request_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+    let timer = ClockTest::new(STARTING_TIME);
+
+    let expected_frame = build_address_claim_frame(name, address::NULL_ADDR_254);
+    assert_eq!(
+        engine.poll(timer.ms, Some(&request_rx)),
+        cannot_claim(
+            Some(expected_frame),
+            timer.ms + CANNOT_CLAIM_RETRY_DELAY_MS as u64
+        )
+    );
+}
+
+/// Regression: a stream of requests arriving from the very first poll must not
+/// keep the node addressless.
+///
+/// The runner reads the bus before the wake deadline, so an engine that answered
+/// a request without starting its campaign would be handed the next request
+/// instead of ever reaching `start_claim`.
+#[test]
+fn test_continuous_requests_from_unclaimed_do_not_starve_the_first_claim() {
+    let my_strategy = AddressClaimStrategy::Arbitrary { preferred: ADDR_1 };
+    let mut my_inst = Instance::new(
+        my_strategy,
+        CanFrameClass::Claiming,
+        ConflictPriority::Normal,
+    );
+
+    let request_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN);
+    let mut timer = ClockTest::new(STARTING_TIME);
+
+    // Every poll is handed a request, starting with the first.
+    for _ in 0..10 {
+        my_inst.claimer.poll(timer.ms, Some(&request_rx));
+        assert!(
+            matches!(my_inst.claimer.state, State::Claiming { .. }),
+            "a request stream must not keep the engine out of a campaign"
+        );
+        timer.tick(10);
+    }
+
+    // And the campaign still closes on time.
+    timer.tick(CLAIM_DELAY_MS as u64);
+    assert_eq!(
+        my_inst.claimer.poll(timer.ms, Some(&request_rx)),
+        defending(my_inst.can_frame_origin, ADDR_1)
     );
 }
 
@@ -1016,7 +1054,10 @@ fn test_iso_request_is_ignored_when_not_for_us() {
 
 #[test]
 fn test_iso_request_payload_padding_is_not_part_of_the_pgn() {
-    let my_strategy = AddressClaimStrategy::Arbitrary { preferred: ADDR_1 };
+    let my_preferred = ADDR_1;
+    let my_strategy = AddressClaimStrategy::Arbitrary {
+        preferred: my_preferred,
+    };
     let mut my_inst = Instance::new(
         my_strategy,
         CanFrameClass::Claiming,
@@ -1025,17 +1066,22 @@ fn test_iso_request_payload_padding_is_not_part_of_the_pgn() {
 
     let request_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN);
 
-    let timer = ClockTest::new(STARTING_TIME);
+    let mut timer = ClockTest::new(STARTING_TIME);
 
     // Pre-conditions: three PGN bytes, then J1939 padding.
     assert_eq!(request_rx.data[0..3], [0x00, 0xEE, 0x00]);
     assert_eq!(request_rx.data[3..8], [0xFF; 5]);
 
-    // Reading a fourth byte would drown the PGN in the padding.
-    let expected_frame = build_address_claim_frame(my_inst.name.0, address::NULL_ADDR_254);
+    // Reach the Claimed state, where a request is answered with the claim.
+    my_inst.claimer.poll(timer.ms, None);
+    timer.tick(CLAIM_DELAY_MS as u64);
+    assert_eq!(my_inst.claimer.poll(timer.ms, None), claimed(my_preferred));
+
+    // Reading a fourth byte would drown the PGN in the padding, and the request
+    // would go unanswered.
     assert_eq!(
         my_inst.claimer.poll(timer.ms, Some(&request_rx)),
-        unclaimed_answer(expected_frame, timer.ms)
+        defending(my_inst.can_frame_origin, my_preferred)
     );
 }
 

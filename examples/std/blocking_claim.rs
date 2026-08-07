@@ -83,7 +83,7 @@ fn run(engine: &mut AddressClaimEngine, bus: &mut ScriptedBus) -> Option<u8> {
             // This example gives up here; a long-running node would instead wait
             // for `wake_at_ms` and let the engine retry the whole campaign.
             ClaimStatus::CannotClaim => return None,
-            ClaimStatus::Unclaimed | ClaimStatus::Claiming(_) => {}
+            ClaimStatus::Claiming(_) => {}
         }
 
         // An absolute deadline, and an upper bound rather than a sleep order:
