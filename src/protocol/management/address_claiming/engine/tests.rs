@@ -60,6 +60,36 @@ fn cannot_claim(tx: Option<CanFrame>, retry_at_ms: u64) -> ClaimOutput {
     }
 }
 
+struct TestEngine<'a>(AddressClaimEngine<'a>);
+
+impl TestEngine<'_> {
+    fn poll(&mut self, now_ms: u64, rx: Option<&CanFrame>) -> ClaimOutput {
+        let output = self.0.poll(now_ms, rx);
+        if output.tx.is_none() {
+            return output;
+        }
+        let sent = self.0.tx_sent(now_ms);
+        ClaimOutput {
+            tx: output.tx,
+            ..sent
+        }
+    }
+}
+
+impl<'a> core::ops::Deref for TestEngine<'a> {
+    type Target = AddressClaimEngine<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for TestEngine<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 //==================================================================================FIXTURES
 
 struct ClockTest {
@@ -137,7 +167,7 @@ struct Instance<'a> {
     preferred_addr: u8,
     can_frame_origin: CanFrame,
     can_frame_next: Option<CanFrame>,
-    claimer: AddressClaimEngine<'a>,
+    claimer: TestEngine<'a>,
 }
 
 enum CanFrameClass {
@@ -178,8 +208,10 @@ impl<'a> Instance<'a> {
             }
         };
 
-        let claimer = AddressClaimEngine::new(name.0, strategy)
-            .expect("Instance::new() // Claimer must be valid");
+        let claimer = TestEngine(
+            AddressClaimEngine::new(name.0, strategy)
+                .expect("Instance::new() // Claimer must be valid"),
+        );
 
         Self {
             name,
@@ -225,6 +257,31 @@ fn test_addr_claim_machine_aac_without_rx() {
     timer.tick(240);
 
     assert_eq!(my_inst.claimer.poll(timer.ms, None), claimed(my_preferred));
+}
+
+#[test]
+fn test_claim_timer_starts_after_send() {
+    let strategy = AddressClaimStrategy::Arbitrary { preferred: ADDR_1 };
+    let mut instance = Instance::new(strategy, CanFrameClass::Claiming, ConflictPriority::Normal);
+    let mut timer = ClockTest::new(STARTING_TIME);
+
+    let output = instance.claimer.0.poll(timer.ms, None);
+    assert_eq!(output.wake_at_ms, None);
+    assert!(output.tx.is_some());
+
+    timer.tick(300);
+    let output = instance.claimer.0.poll(timer.ms, None);
+    assert_eq!(output.wake_at_ms, None);
+    assert!(output.tx.is_some());
+
+    let deadline_ms = timer.ms + CLAIM_DELAY_MS as u64;
+    assert_eq!(
+        instance.claimer.tx_sent(timer.ms),
+        waiting_claim(ADDR_1, deadline_ms)
+    );
+
+    timer.tick(CLAIM_DELAY_MS as u64);
+    assert_eq!(instance.claimer.0.poll(timer.ms, None), claimed(ADDR_1));
 }
 
 #[test]
@@ -770,7 +827,8 @@ fn test_a_strategy_with_no_claimable_address_answers_cannot_claim() {
     // Built without `Instance`: an empty address list has no preferred address.
     let name = Name::default().0;
     let strategy = AddressClaimStrategy::SelfConfigurable { addresses: &[] };
-    let mut engine = AddressClaimEngine::new(name, strategy).expect("SAC name, SAC strategy");
+    let mut engine =
+        TestEngine(AddressClaimEngine::new(name, strategy).expect("SAC name, SAC strategy"));
 
     let request_rx = build_request_frame(GLOBAL, CLAIM_PGN_60928, REQUEST_PGN_LEN);
     let timer = ClockTest::new(STARTING_TIME);

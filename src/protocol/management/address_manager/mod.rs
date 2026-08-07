@@ -74,6 +74,11 @@ where
         self.engine.poll(self.timer.now_ms(), rx)
     }
 
+    #[cfg(any(feature = "embassy", feature = "tokio"))]
+    pub(crate) fn tx_sent(&mut self) -> ClaimOutput {
+        self.engine.tx_sent(self.timer.now_ms())
+    }
+
     /// Emit a frame decided by the engine. Deliberately not guarded by 'claimed_address()':
     /// a CannotClaim legitimately goes out with SA = 254.
     #[cfg(any(feature = "embassy", feature = "tokio"))]

@@ -70,12 +70,13 @@ fn run(engine: &mut AddressClaimEngine, bus: &mut ScriptedBus) -> Option<u8> {
 
     loop {
         let received = bus.try_recv(now_ms);
-        let output = engine.poll(now_ms, received.as_ref());
+        let mut output = engine.poll(now_ms, received.as_ref());
 
         // First, always. A `Claimed` handed back with a defence frame still owes
         // that frame to the bus, and leaving on the status would drop it.
         if let Some(frame) = output.tx {
             bus.send(now_ms, &frame);
+            output = engine.tx_sent(now_ms);
         }
 
         match output.status {

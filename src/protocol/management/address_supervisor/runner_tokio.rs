@@ -142,7 +142,7 @@ where
         let mut rx: Option<CanFrame> = None;
 
         loop {
-            let output = self.manager.poll(rx.as_ref());
+            let mut output = self.manager.poll(rx.as_ref());
 
             // Published before the emission below: a lost address must stop
             // producers now, not after an `await` on a possibly slow bus.
@@ -161,6 +161,7 @@ where
                     .emit_claim(&frame)
                     .await
                     .map_err(AddressSupervisorRunError::Send)?;
+                output = self.manager.tx_sent();
             }
 
             let mut command = None;

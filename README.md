@@ -246,11 +246,12 @@ loop drives it with no executor, no timer trait, no `CanBus` implementation.
 ```rust,ignore
 loop {
     let received = bus.try_recv(now_ms);
-    let output = engine.poll(now_ms, received.as_ref());
+    let mut output = engine.poll(now_ms, received.as_ref());
 
     // First, always: leaving on the status would drop this frame.
     if let Some(frame) = output.tx {
         bus.send(&frame);
+        output = engine.tx_sent(now_ms);
     }
 
     if let ClaimStatus::Claimed(address) = output.status {
@@ -276,6 +277,8 @@ The output answers three questions that do not fold into one another.
 Emitting first is not a style preference. A request arriving on the exact
 millisecond the claim window closes returns a defence frame *and*
 `Claimed(addr)`. Return on the status and that frame never reaches the bus.
+
+Call `tx_sent(now_ms)` after each successful send. This starts the timer.
 
 The `clamp` is the other half of the contract. `wake_at_ms` says "nothing is due
 before this instant", not "sleep until it". A loop that idles the full window
