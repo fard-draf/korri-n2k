@@ -45,6 +45,10 @@ jobs:
           targets: thumbv7em-none-eabihf
       - name: Check compilation for stm32
         run: cargo check --target thumbv7em-none-eabihf --verbose
+      # The bare-metal runner only exists under `embassy`, so the job above
+      # never compiles it.
+      - name: Check the embassy runner for stm32
+        run: cargo check --lib --target thumbv7em-none-eabihf --features embassy --verbose
 
   check-embedded-esp32c3:
     name: Check (no_std / esp32c3 / RISC-V)
@@ -57,6 +61,8 @@ jobs:
           targets: riscv32imc-unknown-none-elf
       - name: Check library compilation
         run: cargo check --lib --target riscv32imc-unknown-none-elf --verbose
+      - name: Check the embassy runner for esp32c3
+        run: cargo check --lib --target riscv32imc-unknown-none-elf --features embassy --verbose
 
   # check-embedded-esp32s3:
   #   name: Check (no_std / esp32s3 / Xtensa)

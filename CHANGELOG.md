@@ -18,9 +18,9 @@ The engine takes a clock reading and an optional frame, and returns an action.
   the frame to emit, `status` the state reached, `wake_at_ms` the absolute
   deadline. None of them folds into another. A defence frame handed back on the
   very poll that acquires the address is no longer lost.
-- `ClaimStatus`, the state the caller sees: `Unclaimed`, `Claiming(addr)`,
-  `Claimed(addr)`, `CannotClaim`. `ClaimStatus::claimed_address()` returns the
-  address only once it is held. `Claiming` is not yours yet.
+- `ClaimStatus`, the state the caller sees: `Claiming(addr)`, `Claimed(addr)`
+  or `CannotClaim`. `ClaimStatus::claimed_address()` returns the address only
+  once it is held. `Claiming` is not yours yet.
 - `AddressClaimEngine::claimed_address() -> Option<u8>`. `None` replaces the
   address 254 that used to stand for "no address".
 - Incoming ISO Request (PGN 59904 asking for 60928) is now answered. A node
@@ -73,7 +73,7 @@ The engine takes a clock reading and an optional frame, and returns an action.
 - **BREAKING**: `SupervisorCommand::SendFrame` becomes `SendRawFrame` and is now
   guarded. A frame whose source address is not the claimed one is refused.
 - **BREAKING**: a refused command no longer stops the runner. Only a bus failure
-  does; a rejected command is reported and dropped.
+  does. A rejected command is dropped, and says so only under `defmt`.
 - **BREAKING**: `AddressSupervisorRunError` keeps `Receive(E)` and `Send(E)`.
   Bus errors reach the caller unwrapped.
 - **BREAKING**: `default = []`. Pick `embassy` or `tokio` explicitly; neither is
@@ -95,6 +95,10 @@ The engine takes a clock reading and an optional frame, and returns an action.
   engine had just decided. A lost conflict could move the internal state without
   the new claim ever reaching the bus. Forwarding is now non-blocking and drops
   instead.
+- `AddressHandle::claimed_address` kept reporting an address after the runner
+  had stopped. Nothing defends that address any more, so the reading invited the
+  application to emit from an address it no longer held. `AddressRunner` now
+  clears it on `Drop`, which also covers a cancelled task.
 - `SupervisorCommand::SendPayload` panicked on an out-of-range `len`. The field
   is public and the caller owns the channel under embassy; it is now validated.
 - Network discovery sent its ISO Request with source address 255. That is the

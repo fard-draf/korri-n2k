@@ -91,7 +91,15 @@ let handle = parts.handle.expect("a command channel was requested");
 
 // The runner owns the event loop: it claims, defends, answers ISO Requests,
 // and emits whatever the handle queues.
-tokio::spawn(parts.runner.drive());
+//
+// `drive` returns only on a bus error, and that error is terminal: nothing
+// restarts the loop, and `claimed_address()` drops back to `None`. Report it
+// rather than detaching the task and never hearing about it.
+tokio::spawn(async move {
+    if let Err(error) = parts.runner.drive().await {
+        eprintln!("address management stopped: {error:?}");
+    }
+});
 ```
 
 Two `send_pgn` exist. Which one you use is decided by who owns the manager, not
@@ -232,7 +240,7 @@ The output answers three questions that do not fold into one another.
 | Field | Meaning |
 |---|---|
 | `tx` | at most one frame to emit, **before** you act on `status` |
-| `status` | `Unclaimed`, `Claiming(addr)`, `Claimed(addr)` or `CannotClaim` |
+| `status` | `Claiming(addr)`, `Claimed(addr)` or `CannotClaim` |
 | `wake_at_ms` | absolute deadline in the `now_ms` domain, `None` if no timer is pending |
 
 Emitting first is not a style preference. A request arriving on the exact
@@ -350,7 +358,11 @@ task yourself over your concrete types.
 ```rust,ignore
 #[embassy_executor::task]
 async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyTimer, 16, 16>) {
-    let _ = runner.drive().await;
+    // Reached only on a bus error, and there is no coming back from it: the
+    // task ends, `claimed_address()` goes to `None`, and every later send is
+    // refused. Reset the board, or re-arm your driver and start a new runner.
+    let error = runner.drive().await;
+    defmt::error!("address management stopped: {:?}", defmt::Debug2Format(&error));
 }
 ```
 
