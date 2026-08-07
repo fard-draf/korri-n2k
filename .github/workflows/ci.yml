@@ -17,8 +17,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.96.0
-      # `default = []`, so a bare `cargo test` compiles no runner at all and
-      # skips every integration test.
+      # `default = []`, so this compiles no runner at all: it is the I/O-free
+      # engine and the codec on their own, which is now a first-class API.
+      - name: Run tests (no runtime)
+        run: cargo test --verbose --no-default-features
       - name: Run tests (tokio)
         run: cargo test --verbose --features tokio
       - name: Run tests (embassy)

@@ -196,25 +196,48 @@ cargo run --example blocking_claim --features std
 ```
 
 `AddressClaimEngine` is synchronous and does no I/O. It takes a millisecond
-reading and an optional frame, and returns an action. A bare-metal main loop
-drives it with no executor, no timer trait, no `CanBus` implementation.
+reading and an optional frame, and returns a `ClaimOutput`. A bare-metal main
+loop drives it with no executor, no timer trait, no `CanBus` implementation.
 
 ```rust,ignore
 loop {
     let received = bus.try_recv(now_ms);
+    let output = engine.poll(now_ms, received.as_ref());
 
-    match engine.poll(now_ms, received.as_ref()) {
-        ClaimAction::Send(frame) | ClaimAction::CannotClaim(frame) => bus.send(&frame),
-        ClaimAction::Claimed(address) => return address,
-        // Upper bound, not a sleep order.
-        ClaimAction::Wait(delay_ms) => now_ms += (delay_ms as u64).min(TICK_MS),
+    // First, always: leaving on the status would drop this frame.
+    if let Some(frame) = output.tx {
+        bus.send(&frame);
     }
+
+    if let ClaimStatus::Claimed(address) = output.status {
+        return address;
+    }
+
+    // Upper bound, not a sleep order.
+    now_ms += match output.wake_at_ms {
+        Some(deadline_ms) => deadline_ms.saturating_sub(now_ms).clamp(1, TICK_MS),
+        None => TICK_MS,
+    };
 }
 ```
 
-The `min` is the whole contract. `Wait(n)` says "nothing is due for n ms", not
-"sleep for n ms". A loop that idles the full window misses the conflicts inside
-it, and a blocking read with no timeout hangs forever on a quiet bus.
+The output answers three questions that do not fold into one another.
+
+| Field | Meaning |
+|---|---|
+| `tx` | at most one frame to emit, **before** you act on `status` |
+| `status` | `Unclaimed`, `Claiming(addr)`, `Claimed(addr)` or `CannotClaim` |
+| `wake_at_ms` | absolute deadline in the `now_ms` domain, `None` if no timer is pending |
+
+Emitting first is not a style preference. A request arriving on the exact
+millisecond the claim window closes returns a defence frame *and*
+`Claimed(addr)`. Return on the status and that frame never reaches the bus.
+
+The `clamp` is the other half of the contract. `wake_at_ms` says "nothing is due
+before this instant", not "sleep until it". A loop that idles the full window
+misses the conflicts inside it. A blocking read with no timeout hangs forever on
+a quiet bus. And `None` means no timer is pending, never that the engine is
+finished: a conflict must still be able to wake it.
 
 The library ships no blocking facade. Your read may be a `try_recv`, an interrupt
 flag, a hardware FIFO or a scheduler tick. No trait covers all four honestly.
