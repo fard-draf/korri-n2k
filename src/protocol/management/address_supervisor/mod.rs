@@ -55,6 +55,12 @@ pub enum AddressHandleError {
     /// The PGN could not be written into the command buffer.
     Serialization,
     /// The runner is gone: nothing will ever execute this command.
+    ///
+    /// `tokio` only. An embassy channel never closes, so it cannot report a
+    /// missing consumer: a queued command simply waits, and the producer blocks
+    /// once the channel is full. Read
+    /// [`AddressHandle::claimed_address`](crate::protocol::management::address_supervisor::AddressHandle::claimed_address)
+    /// to notice a runner that stopped.
     RunnerGone,
 }
 

@@ -352,6 +352,11 @@ simply do not exist there:
 Only `send_pgn` matches, because serialization can fail under both. Code that
 must build for the two runtimes needs a `cfg` at these three call sites.
 
+The `()` under embassy is not a stronger guarantee. A tokio handle reports
+`RunnerGone` once the runner has stopped. An embassy channel never closes, so
+the command is queued instead, and the producer blocks once the channel fills.
+There, `claimed_address()` returning `None` is the only sign the runner is gone.
+
 One catch: `#[embassy_executor::task]` cannot be generic, so declare the runner
 task yourself over your concrete types.
 
@@ -359,8 +364,10 @@ task yourself over your concrete types.
 #[embassy_executor::task]
 async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyTimer, 16, 16>) {
     // Reached only on a bus error, and there is no coming back from it: the
-    // task ends, `claimed_address()` goes to `None`, and every later send is
-    // refused. Reset the board, or re-arm your driver and start a new runner.
+    // task ends, `claimed_address()` goes to `None`, and no later command can
+    // reach the bus. The static channel never closes, so a producer that keeps
+    // queueing blocks once it fills. Reset the board, or re-arm the driver and
+    // start a new runner.
     let error = runner.drive().await;
     defmt::error!("address management stopped: {:?}", defmt::Debug2Format(&error));
 }
