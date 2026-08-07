@@ -96,7 +96,15 @@ async fn main() {
 
     // The runner owns the event loop from here on: it claims, defends, answers
     // ISO Requests, and emits whatever the handle queues.
-    tokio::spawn(parts.runner.drive());
+    //
+    // `drive` returns only on a bus error, and that error is terminal: nothing
+    // restarts the loop, and `claimed_address()` drops back to `None`. Report it
+    // rather than detaching the task and never hearing about it.
+    tokio::spawn(async move {
+        if let Err(error) = parts.runner.drive().await {
+            eprintln!("address management stopped: {error:?}");
+        }
+    });
 
     // Ask the handle instead of guessing a delay. Emissions before the address
     // is acquired are refused, never silently swallowed: the node must not speak
