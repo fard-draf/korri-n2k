@@ -4,21 +4,21 @@
 //! |-----------|------------------------------------------|
 //! | 0..=251   | Claimable source addresses               |
 //! | 252..=253 | Reserved                                 |
-//! | 254       | NULL — no address claimed                |
-//! | 255       | GLOBAL — broadcast                       |
+//! | 254       | NULL, no address claimed                 |
+//! | 255       | GLOBAL, broadcast                        |
 //!
 //! # Why the whole `0..=251` range is claimable
 //!
 //! J1939-81 reserves `0..=127` for preferred addresses assigned by the SAE and
 //! keeps `128..=247` for self-configurable nodes. **NMEA 2000 does not inherit
 //! that split**: the SAE assignments describe the on-road industry groups, not
-//! the marine one, so a marine node may claim anywhere in `0..=251`.
+//! the marine one. A marine node may claim anywhere in `0..=251`.
 //!
 //! This is not a reading of the standard alone. The reference C++ stack defines
-//! `N2kMaxCanBusAddress` as `251`, its documentation states that "each device
-//! will get device source address (0-251)", and a 28-minute capture of an
-//! 18-device bus shows every node — all of them flagged Arbitrary Address
-//! Capable — sitting between 0 and 43.
+//! `N2kMaxCanBusAddress` as `251`, and its documentation states that "each
+//! device will get device source address (0-251)". A 28-minute capture of an
+//! 18-device bus shows every node sitting between 0 and 43. All of them are
+//! flagged Arbitrary Address Capable.
 //!
 //! Restricting claims to `128..=207` would therefore park a node in an empty
 //! part of the bus, where no arbitration ever happens.

@@ -73,7 +73,7 @@ async fn main() {
     let strategy = AddressClaimStrategy::Arbitrary { preferred: 42 };
 
     // Synchronous, and it never touches the bus. It only checks that the NAME
-    // and the strategy agree — the single way this call can fail.
+    // and the strategy agree. That is the single way this call can fail.
     let manager = AddressManager::new(node_bus, TokioTimer::new(), my_name, strategy)
         .expect("the NAME must be Arbitrary Address Capable");
 
