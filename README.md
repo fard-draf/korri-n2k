@@ -4,8 +4,9 @@
 
 ![CI](https://github.com/fard-draf/korri-n2k/actions/workflows/ci.yml/badge.svg)
 
-An NMEA 2000 / ISO 11783 stack for Rust: send and receive PGNs on a marine CAN
-bus. `no_std`, zero-allocation, one runtime for bare metal and one for Linux.
+An embedded-first NMEA 2000 / ISO 11783 stack for Rust. It sends and receives
+PGNs on a marine CAN bus. Embassy is `no_std` and uses no heap. Tokio provides
+the same protocol logic on Linux (other OS non-tested).
 
 PGN types are generated at build time from [CANboat](https://github.com/canboat/canboat),
 the reference catalogue of NMEA 2000 messages. You never hand-write a parser.
@@ -14,8 +15,8 @@ You choose how many get compiled in.
 ## Quickstart
 
 ```sh
-cargo add korri-n2k --features tokio     # Linux
 cargo add korri-n2k --features embassy   # bare metal
+cargo add korri-n2k --features tokio     # Linux
 ```
 
 ```rust
@@ -39,18 +40,20 @@ assert!((depth.depth - 1.0).abs() < 1e-6);
 | `embassy` | Bare metal (`no_std`) | No | **none**, fully static |
 | `tokio` | Linux / OS | Yes | channel buffers only |
 
-Under `tokio` the protocol logic stays zero-allocation. Only the `mpsc` buffers
-of `AddressService` are heap-allocated. Rust 1.96, edition 2021.
+Embassy uses static channels owned by the application. Tokio allocates only the
+`mpsc` channel buffers of `AddressService`. The protocol logic does not allocate.
+The minimum Rust version is 1.96. The crate uses edition 2021.
 
 ## Choosing your PGNs
 
 The build generates types only for the PGN IDs listed in a manifest.
 
-| Your project | What you compile | How |
-|---|---|---|
-| A specific device | the PGNs you list | edit `pgn_manifest.json` |
-| A proprietary set | your IDs, kept outside the crate | `KORRI_N2K_MANIFEST_PATH=…` |
-| A gateway or logger | every supported PGN | `features = ["full-pgns"]` |
+| Need | Configuration |
+|---|---|
+| 42 common PGNs | no configuration |
+| A custom or minimal set | `KORRI_N2K_MANIFEST_PATH=/absolute/path/manifest.json` |
+| Every supported PGN | `features = ["full-pgns"]` |
+| A fork of the generator | edit `build_core/var/pgn_manifest.json` |
 
 ```json
 {
@@ -68,17 +71,48 @@ generator supports, out of CANboat's 348.
 
 ## Use cases
 
-Every example below is compiled and run by CI.
+Every `cargo run` example below is compiled and run by CI. Short snippets show
+the relevant API only.
 
 ### Claim an address, then talk
+
+A node must own an address before it may emit. The claim happens under the
+runner, never in a constructor.
+
+#### Embassy on bare metal
+
+Embassy is the primary production path. Channels and the published address are
+static and owned by the application. The library uses no heap.
+
+```rust,ignore
+static COMMANDS: Channel<CriticalSectionRawMutex, SupervisorCommand, 4> =
+    Channel::new();
+static FRAMES: Channel<CriticalSectionRawMutex, CanFrame, 8> = Channel::new();
+static CLAIMED: ClaimedAddress = ClaimedAddress::new();
+
+let manager = AddressManager::new(bus, timer, my_name, strategy)?;
+let parts = AddressService::<_, _, 4, 8>::new(
+    manager,
+    Some(&COMMANDS),
+    Some(&FRAMES),
+    &CLAIMED,
+)
+.into_parts();
+
+let handle = parts.handle.expect("a command channel was provided");
+spawner.spawn(n2k_runner_task(parts.runner))?;
+```
+
+Complete STM32 and ESP32 firmwares live in
+[korri-n2k-examples](https://github.com/fard-draf/korri-n2k-examples).
+
+#### Try the same flow on a host with Tokio
 
 ```sh
 cargo run --example address_claim --features tokio
 ```
 
-A node must own an address before it may emit. The claim happens under the
-runner, never in a constructor. A constructor that waited for an address could
-never return on a saturated bus.
+This executable uses a loopback bus. It needs no CAN hardware.
 
 ```rust,ignore
 // Synchronous. Never touches the bus. Fails only if the NAME and the
@@ -133,12 +167,6 @@ The accessor hangs off the handle, not the service. A node holding several NAMEs
 gets one handle per Controller Application, and reads each address through its
 own.
 
-Under `embassy` the cell is a `static` you own, like the channels:
-
-```rust,ignore
-static CLAIMED: ClaimedAddress = ClaimedAddress::new();
-```
-
 ### Send a PGN
 
 Any task holding an `AddressHandle` can send. Fast Packet fragmentation is
@@ -158,15 +186,17 @@ handle.send_pgn(&pos, 129025, 2, None).await?;
 included, so network discovery can see it too.
 
 ```rust,ignore
-// tokio: the channel can close, so recv() returns an Option
-if let Some(frame) = frames.recv().await {
-    if let Ok(depth) = Pgn128267::from_payload(&frame.data) {
+// Embassy: the static channel never closes.
+let frame = frames.recv().await;
+
+// Tokio alternative: stop when the runner drops the channel.
+// let Some(frame) = frames.recv().await else { return };
+
+if frame.id.pgn() == 128267 {
+    if let Ok(depth) = Pgn128267::from_payload(&frame.data[..frame.len]) {
         println!("{} m", depth.depth);
     }
 }
-
-// embassy: the channel never closes
-let frame = frames.recv().await;
 ```
 
 The application is never allowed to slow the engine down. If you stop draining
@@ -175,7 +205,7 @@ this channel, frames are dropped, not queued.
 ### Reassemble a Fast Packet PGN
 
 ```sh
-cargo run --example fast_packet_rx
+cargo run --example fast_packet_rx --features std
 ```
 
 A PGN over 8 bytes arrives in fragments. Decoding the first one succeeds and
@@ -293,35 +323,33 @@ stopping.
 - **Fast Packet reassembly is not wired into the receive path.** Run
   `FastPacketAssembler` yourself, as above.
 - **The assembler only reassembles the PGNs in its table.** Ask `handles()`.
-- **No ISO Transport Protocol.** PGNs 60160 and 60416 decode as messages. The
-  multi-packet transport itself is not implemented.
-- **No ISO Commanded Address.** PGN 65240 is treated as ordinary traffic, so a
-  tool cannot force this node onto a given address. The PGN carries nine bytes
-  and arrives by BAM, so implementing it needs the transport above first.
-- **No pseudo-random delay before a claim.** J1939-81 asks a node to jitter its
-  first Address Claim. This one emits immediately. Nodes powering up together on
-  the same preferred address therefore collide, and resolve by NAME arbitration
-  instead of by spreading out.
+- **No ISO Transport Protocol.** PGNs 60160 and 60416 decode as individual
+  messages. TP sessions and payload reassembly are not implemented.
+- **No ISO Commanded Address.** PGN 65240 uses ISO TP. It is neither reassembled
+  nor applied. Do not send it with `send_pgn`, which would use Fast Packet.
+- **No pseudo-random delay before a claim.** The first `poll()` emits the claim
+  immediately. Nodes starting together can therefore transmit at the same time.
+  NAME arbitration remains supported.
 - **35 of CANboat's 348 PGNs are not generated.** Listed with their reason in
   `build_core/var/pgn_manifest.full.json`. None are in the default manifest.
-- **Runtime-sized fields are unsupported** (`VARIABLE`, `DYNAMIC_FIELD_VALUE`).
-  That keeps PGN 126208, the Group Functions meta-protocol, out of reach. Next on
-  the roadmap.
-- **A repeating group needs an explicit counter field.** The few PGNs that size
-  their group implicitly are rejected.
-- **A full Fast Packet send holds the loop for about 62 ms**, 32 frames with a
-  2 ms gap. Single-frame PGNs are unaffected.
+- **Runtime-sized fields and multiple repeating groups are unsupported.** Both
+  occur in PGN 126208, so the Group Functions meta-protocol is not generated.
+- **Repeating groups without an explicit counter cannot be decoded.** PGNs
+  126464, 129796 and 129805 are generated, but `from_payload()` rejects them.
+- **A maximum Fast Packet send takes at least 62 ms**, plus 32 CAN send waits. It
+  emits 32 frames with 31 delays of 2 ms. The runner cannot receive during this
+  time. Single-frame PGNs are unaffected.
 - `embassy` and `tokio` cannot be enabled together.
 
 ## Architecture
 
-The core knows nothing about your hardware. It sits on two traits: `CanBus` for
-raw frame I/O, `KorriTimer` for non-blocking delays.
+The synchronous engines know nothing about hardware or runtimes. The async
+manager connects them through two traits: `CanBus` for raw frame I/O and
+`KorriTimer` for non-blocking delays.
 
-Address management is a synchronous, I/O-free engine. It is handed a clock
-reading and an optional frame, and returns an action. It never sleeps and never
-touches the bus, which makes it testable without a runtime and replayable against
-recorded captures.
+Address management is a synchronous, I/O-free engine. It receives a clock
+reading and an optional frame, then returns a `ClaimOutput`. It never sleeps or
+touches the bus. Tests can therefore replay recorded traffic without a runtime.
 
 The runner owns the single `select` above it: wait, poll the engine, execute,
 repeat. No state transition can be cancelled halfway.
@@ -342,12 +370,12 @@ The two runtimes expose the same methods with different signatures. An embassy
 channel never closes and never refuses, so the failures tokio has to report
 simply do not exist there:
 
-| Method | `tokio` | `embassy` |
+| Method | `embassy` | `tokio` |
 |---|---|---|
 | `AddressHandle::send_pgn` | `Result<(), AddressHandleError>` | `Result<(), AddressHandleError>` |
-| `AddressHandle::send_raw_frame` | `Result<(), AddressHandleError>` | `()` |
-| `AddressHandle::send_command` | `Result<(), AddressHandleError>` | `()` |
-| `AddressFrames::recv` | `Option<CanFrame>` | `CanFrame` |
+| `AddressHandle::send_raw_frame` | `()` | `Result<(), AddressHandleError>` |
+| `AddressHandle::send_command` | `()` | `Result<(), AddressHandleError>` |
+| `AddressFrames::recv` | `CanFrame` | `Option<CanFrame>` |
 
 Only `send_pgn` matches, because serialization can fail under both. Code that
 must build for the two runtimes needs a `cfg` at these three call sites.
@@ -362,7 +390,7 @@ task yourself over your concrete types.
 
 ```rust,ignore
 #[embassy_executor::task]
-async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyTimer, 16, 16>) {
+async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyTimer, 4, 8>) {
     // Reached only on a bus error, and there is no coming back from it: the
     // task ends, `claimed_address()` goes to `None`, and no later command can
     // reach the bus. The static channel never closes, so a producer that keeps
