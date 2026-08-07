@@ -3,7 +3,7 @@
 //! It keeps the claiming state-machine alive and optionally offers:
 //!
 //! * a transmission handle (`AddressHandle`) to queue frames/PGNs;
-//! * a frame receiver (`AddressFrames`) to pull application traffic filtered by the manager.
+//! * a frame receiver (`AddressFrames`) to pull incoming traffic, unfiltered.
 //!
 //! This implementation uses `tokio::sync::mpsc` channels.
 
@@ -248,6 +248,25 @@ where
     }
 }
 
+/// Clear the published address when the runner goes away.
+///
+/// The runner is the only thing defending that address. Once it is gone, nobody
+/// answers a competing claim, so a handle still reporting `Some(142)` would
+/// invite the application to emit from an address it no longer holds.
+///
+/// `Drop` rather than a cleanup at the end of `drive`: it also covers the task
+/// being cancelled and the future being dropped, which no `?` can catch.
+impl<'a, C, T> Drop for AddressRunner<'a, C, T>
+where
+    C: CanBus,
+    C::Error: Debug,
+    T: KorriTimer,
+{
+    fn drop(&mut self) {
+        self.claimed.set(None);
+    }
+}
+
 /// Transmission handle (optional).
 pub struct AddressHandle {
     sender: Sender<SupervisorCommand>,
@@ -316,7 +335,11 @@ impl AddressHandle {
     }
 }
 
-/// Optional receiver returning application frames filtered by the supervisor.
+/// Optional receiver returning incoming frames.
+///
+/// Nothing is filtered out. Address-claim traffic is included, so network
+/// discovery can read it too. A frame is dropped rather than queued when this
+/// channel is full: address management is never delayed by a slow consumer.
 pub struct AddressFrames {
     receiver: Receiver<CanFrame>,
 }
