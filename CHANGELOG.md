@@ -14,6 +14,13 @@ The engine takes a clock reading and an optional frame, and returns an action.
 - `AddressClaimEngine::poll(now_ms, rx)`, the single entry point. It never
   sleeps and never reads the bus, so it can be tested and replayed without a
   runtime.
+- `ClaimOutput`, what one `poll` decided along three independent axes. `tx` is
+  the frame to emit, `status` the state reached, `wake_at_ms` the absolute
+  deadline. None of them folds into another. A defence frame handed back on the
+  very poll that acquires the address is no longer lost.
+- `ClaimStatus`, the state the caller sees: `Unclaimed`, `Claiming(addr)`,
+  `Claimed(addr)`, `CannotClaim`. `ClaimStatus::claimed_address()` returns the
+  address only once it is held. `Claiming` is not yours yet.
 - `AddressClaimEngine::claimed_address() -> Option<u8>`. `None` replaces the
   address 254 that used to stand for "no address".
 - Incoming ISO Request (PGN 59904 asking for 60928) is now answered. A node
@@ -29,8 +36,6 @@ The engine takes a clock reading and an optional frame, and returns an action.
 - `SendPgnError::NotClaimed`. Emitting before an address is acquired now
   returns this instead of a silent `Ok(())`.
 - `ClaimFault`, for claim failures decided from frame content alone.
-- `AddressRunner::dropped_frames`, counting frames the application was too slow
-  to take.
 - `AddressHandleError::RunnerGone`, returned when the runner is no longer there
   to execute a queued command.
 - `FastPacketBuilder::with_priority`, setting the priority of a built frame.
@@ -51,9 +56,15 @@ The engine takes a clock reading and an optional frame, and returns an action.
   agree; the claim now happens under the runner.
 - **BREAKING**: `AddressManager::current_address` becomes `claimed_address` and
   returns `Option<u8>`.
-- **BREAKING**: the runner owns the single `select`. It waits, calls the engine
-  synchronously, executes the action, and comes back, so no state transition can
-  be cancelled halfway.
+- **BREAKING**: the runner owns the single `select`. Each round polls the engine
+  synchronously, publishes the status, emits `tx` if there is one, then waits on
+  the bus, the command channel and `wake_at_ms` at once. No state transition can
+  be cancelled halfway, and an emission is never skipped because the status said
+  the machine had moved on.
+- `Clock::now_ms` states its contract: monotonic, free of wall-clock steps, and
+  wrap-free for the life of the engine. Deadlines are built with
+  `saturating_add`, so a reading near `u64::MAX` pins them instead of
+  overflowing.
 - **BREAKING**: `AddressService::claim` becomes `AddressService::with_name` and
   is no longer `async`. It has nothing left to wait for.
 - **BREAKING**: `SupervisorCommand::SendFrame` becomes `SendRawFrame` and is now
@@ -78,9 +89,9 @@ The engine takes a clock reading and an optional frame, and returns an action.
 ### Fixed
 - The application channel could stall address management. The runner forwarded
   each frame with an awaiting send, so a full channel delayed the action the
-  engine had just decided — a lost conflict could move the internal state
-  without the new claim ever reaching the bus. Forwarding is now non-blocking
-  and drops instead, counted by `AddressRunner::dropped_frames`.
+  engine had just decided. A lost conflict could move the internal state without
+  the new claim ever reaching the bus. Forwarding is now non-blocking and drops
+  instead.
 - `SupervisorCommand::SendPayload` panicked on an out-of-range `len`. The field
   is public and the caller owns the channel under embassy; it is now validated.
 - Network discovery sent its ISO Request with source address 255. That is the
