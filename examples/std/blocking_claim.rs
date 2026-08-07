@@ -1,19 +1,25 @@
 //! # Driving the claim engine without a runtime
 //!
 //! `AddressClaimEngine` is synchronous and does no I/O. It takes a millisecond
-//! reading and an optional frame, and returns an action. No executor, no timer
+//! reading and an optional frame, and returns a [`ClaimOutput`]: what to emit,
+//! where the state machine stands, and when to come back. No executor, no timer
 //! trait, no `CanBus` implementation: a bare-metal main loop is enough.
 //!
-//! The one rule is on `Wait(n)`: it is an upper bound, not an order to sleep.
-//! A loop that idles the full `n` without looking at the bus would miss the
-//! conflicts of that window.
+//! The three fields are independent. That is the whole contract.
+//!
+//! * Emit `tx` **before** acting on `status`. Otherwise a defence frame handed
+//!   back on the acquiring poll is lost.
+//! * `wake_at_ms` is an absolute deadline. It is an upper bound, not an order
+//!   to sleep. A loop that idles until it without reading the bus misses the
+//!   conflicts of that window.
+//! * `wake_at_ms: None` means no timer is pending. It never means the engine is
+//!   done. A frame must still be able to wake it.
 //!
 //! ```bash
 //! cargo run --example blocking_claim --features std
 //! ```
 
-use korri_n2k::protocol::constants::address::NULL_ADDR_254;
-use korri_n2k::protocol::management::address_claiming::engine::{AddressClaimEngine, ClaimAction};
+use korri_n2k::protocol::management::address_claiming::engine::{AddressClaimEngine, ClaimStatus};
 use korri_n2k::protocol::management::address_claiming::{
     build_address_claim_frame, AddressClaimStrategy,
 };
@@ -40,8 +46,8 @@ impl ScriptedBus {
     }
 
     /// Non-blocking: `None` when nothing is waiting. This is the shape the
-    /// engine needs — a blocking read with no timeout would hang the loop on a
-    /// silent bus and the claim deadline would never be reached.
+    /// engine needs. A blocking read with no timeout would hang the loop on a
+    /// silent bus, and the claim deadline would never be reached.
     fn try_recv(&mut self, now_ms: u64) -> Option<CanFrame> {
         let index = self.incoming.iter().position(|(at, _)| *at <= now_ms)?;
         Some(self.incoming.remove(index).1)
@@ -57,25 +63,39 @@ impl ScriptedBus {
     }
 }
 
-/// The whole driver: poll, act, advance. Nothing else is required.
+/// The whole driver: poll, emit, act on the status, advance. Nothing else is
+/// required.
 fn run(engine: &mut AddressClaimEngine, bus: &mut ScriptedBus) -> Option<u8> {
     let mut now_ms: u64 = 0;
 
     loop {
         let received = bus.try_recv(now_ms);
+        let output = engine.poll(now_ms, received.as_ref());
 
-        match engine.poll(now_ms, received.as_ref()) {
-            ClaimAction::Send(frame) | ClaimAction::CannotClaim(frame) => {
-                bus.send(now_ms, &frame);
-                if frame.id.source_address() == NULL_ADDR_254 {
-                    return None;
-                }
-            }
-            ClaimAction::Claimed(address) => return Some(address),
-            // Upper bound, not a sleep order: never idle past our own tick,
-            // otherwise a conflict arriving inside the window is missed.
-            ClaimAction::Wait(delay_ms) => now_ms += (delay_ms as u64).min(TICK_MS),
+        // First, always. A `Claimed` handed back with a defence frame still owes
+        // that frame to the bus, and leaving on the status would drop it.
+        if let Some(frame) = output.tx {
+            bus.send(now_ms, &frame);
         }
+
+        match output.status {
+            ClaimStatus::Claimed(address) => return Some(address),
+            // This example gives up here; a long-running node would instead wait
+            // for `wake_at_ms` and let the engine retry the whole campaign.
+            ClaimStatus::CannotClaim => return None,
+            ClaimStatus::Unclaimed | ClaimStatus::Claiming(_) => {}
+        }
+
+        // An absolute deadline, and an upper bound rather than a sleep order:
+        // never idle past our own tick, otherwise a conflict arriving inside the
+        // window is missed. `None` means no timer is pending, so we just tick.
+        //
+        // The lower bound of 1 is what keeps this loop honest: a deadline that
+        // has already passed would otherwise advance the clock by zero forever.
+        now_ms += match output.wake_at_ms {
+            Some(deadline_ms) => deadline_ms.saturating_sub(now_ms).clamp(1, TICK_MS),
+            None => TICK_MS,
+        };
     }
 }
 

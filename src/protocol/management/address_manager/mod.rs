@@ -1,3 +1,5 @@
+use core::future::pending;
+
 use futures_util::{
     future::{select, Either},
     pin_mut,
@@ -12,7 +14,7 @@ use crate::{
     protocol::{
         management::{
             address_claiming::{
-                engine::{AddressClaimEngine, ClaimAction},
+                engine::{AddressClaimEngine, ClaimOutput},
                 AddressClaimStrategy,
             },
             iso_name::IsoName,
@@ -59,7 +61,7 @@ where
     }
 
     /// Poll the engine. Reads the clock itself: the runner never handles time.
-    pub fn poll(&mut self, rx: Option<&CanFrame>) -> ClaimAction {
+    pub fn poll(&mut self, rx: Option<&CanFrame>) -> ClaimOutput {
         self.engine.poll(self.timer.now_ms(), rx)
     }
 
@@ -70,13 +72,32 @@ where
         self.can_bus.send(frame).await
     }
 
-    /// Wait for a frame, or for 'delay_ms' to elapse, whichever comes first.
-    //
-    /// Ok(None) means the delay expired with no frame.
-    pub async fn recv_until(&mut self, delay_ms: u32) -> Result<Option<CanFrame>, C::Error> {
-        let recv = self.can_bus.recv();
+    /// Wait for a frame, or for the absolute deadline `wake_at_ms`, whichever
+    /// comes first. `None` waits on the bus alone.
+    ///
+    /// Ok(None) means the deadline expired with no frame.
+    pub async fn recv_until(
+        &mut self,
+        wake_at_ms: Option<u64>,
+    ) -> Result<Option<CanFrame>, C::Error> {
+        // Split the borrow: the receive future and the delay future hold
+        // different fields of `self` at the same time.
+        let Self { can_bus, timer, .. } = self;
+
+        // A deadline already in the past yields a zero delay, not a negative one.
+        let remaining_ms =
+            wake_at_ms.map(|at| at.saturating_sub(timer.now_ms()).min(u32::MAX as u64) as u32);
+
+        let recv = can_bus.recv();
         pin_mut!(recv);
-        let deadline = self.timer.delay_ms(delay_ms);
+
+        let deadline = async {
+            match remaining_ms {
+                Some(delay_ms) => timer.delay_ms(delay_ms).await,
+                // No deadline: only a frame can end this wait.
+                None => pending::<()>().await,
+            }
+        };
         pin_mut!(deadline);
 
         match select(recv, deadline).await {

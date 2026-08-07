@@ -4,7 +4,7 @@ use crate::{
         constants::{
             addr_mgmt_pgns::{CLAIM_PGN_60928, REQUEST_PGN_59904, REQUEST_PGN_LEN},
             address::{self, GLOBAL, NULL_ADDR_254},
-            iso_delay::{CANNOT_CLAIM_RETRY_DELAY_MS, CLAIM_DELAY_MS, NO_DEADLINE_DELAY_MS},
+            iso_delay::{CANNOT_CLAIM_RETRY_DELAY_MS, CLAIM_DELAY_MS},
         },
         management::{
             address_claiming::{
@@ -17,17 +17,63 @@ use crate::{
     },
 };
 
-#[derive(PartialEq, Eq, Debug)]
-pub enum ClaimAction {
-    CannotClaim(CanFrame),
-    Send(CanFrame),
-    Wait(u32),
+/// What one `poll` decided, along three independent axes.
+///
+/// The three fields answer three different questions. None of them replaces
+/// another. An emission can happen in the same step as a state change, and a
+/// state change does not imply a deadline.
+///
+/// # Contract
+///
+/// * `tx` carries at most one frame to emit.
+/// * `status` is the state **after** `rx` and the deadlines have been handled.
+/// * `wake_at_ms` is an **absolute** deadline. It lives in the same domain as
+///   the `now_ms` passed to [`AddressClaimEngine::poll`].
+/// * `wake_at_ms: None` means no timer is pending. It never means the engine is
+///   done. An incoming frame must still wake it.
+/// * **If `tx` is present, emit it before leaving the loop on `status`.** A
+///   `Claimed` handed back with a defence frame still owes that frame to the
+///   bus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClaimOutput {
+    /// The frame to emit, if any.
+    pub tx: Option<CanFrame>,
+    /// The state the engine is in now.
+    pub status: ClaimStatus,
+    /// Absolute deadline at which `poll` must be called again, if any.
+    pub wake_at_ms: Option<u64>,
+}
+
+/// The engine's state as the caller sees it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClaimStatus {
+    /// No campaign started yet.
+    Unclaimed,
+    /// Emitting for the carried address and waiting out the arbitration window.
+    /// The address is not usable yet.
+    Claiming(u8),
+    /// The carried address is held and may be emitted from.
     Claimed(u8),
+    /// Every candidate address was refused. A retry is pending.
+    CannotClaim,
+}
+
+impl ClaimStatus {
+    /// The address the node may emit from, `None` in every other state.
+    ///
+    /// `Claiming` returns `None` on purpose. The arbitration window is still
+    /// open, so the address is not ours yet.
+    pub fn claimed_address(&self) -> Option<u8> {
+        match self {
+            Self::Claimed(address) => Some(*address),
+            _ => None,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
 enum State {
-    UnClaimed,
+    Unclaimed,
     Claiming { frame: CanFrame, deadline_ms: u64 },
     Claimed { frame: CanFrame },
     CannotClaim { retry_at_ms: u64 },
@@ -49,11 +95,33 @@ impl<'a> AddressClaimEngine<'a> {
             my_name,
             addr_iterator: None,
             strategy,
-            state: State::UnClaimed,
+            state: State::Unclaimed,
         })
     }
 
-    fn start_claim(&mut self, now_ms: u64) -> ClaimAction {
+    /// Build the output from the state, so `status` and `wake_at_ms` are never
+    /// invented at a call site. Only `tx` is a decision. The other two are
+    /// consequences. That is what keeps `Claimed` from ever carrying a claim
+    /// deadline that is still running.
+    fn output(&self, tx: Option<CanFrame>) -> ClaimOutput {
+        let (status, wake_at_ms) = match self.state {
+            State::Unclaimed => (ClaimStatus::Unclaimed, None),
+            State::Claiming { frame, deadline_ms } => (
+                ClaimStatus::Claiming(frame.id.source_address()),
+                Some(deadline_ms),
+            ),
+            State::Claimed { frame } => (ClaimStatus::Claimed(frame.id.source_address()), None),
+            State::CannotClaim { retry_at_ms } => (ClaimStatus::CannotClaim, Some(retry_at_ms)),
+        };
+
+        ClaimOutput {
+            tx,
+            status,
+            wake_at_ms,
+        }
+    }
+
+    fn start_claim(&mut self, now_ms: u64) -> ClaimOutput {
         let iterator = self
             .addr_iterator
             .insert(AddressClaimIterator::new(self.strategy));
@@ -62,16 +130,16 @@ impl<'a> AddressClaimEngine<'a> {
 
         if addr_to_claim == NULL_ADDR_254 {
             self.state = State::CannotClaim {
-                retry_at_ms: now_ms + CANNOT_CLAIM_RETRY_DELAY_MS as u64,
+                retry_at_ms: now_ms.saturating_add(CANNOT_CLAIM_RETRY_DELAY_MS as u64),
             };
-            return ClaimAction::CannotClaim(claim_frame);
+        } else {
+            self.state = State::Claiming {
+                frame: claim_frame,
+                deadline_ms: now_ms.saturating_add(CLAIM_DELAY_MS as u64),
+            };
         }
 
-        self.state = State::Claiming {
-            frame: claim_frame,
-            deadline_ms: now_ms + CLAIM_DELAY_MS as u64,
-        };
-        ClaimAction::Send(claim_frame)
+        self.output(Some(claim_frame))
     }
 
     // Strategy:
@@ -80,82 +148,98 @@ impl<'a> AddressClaimEngine<'a> {
     //    the preferred address over the whole claimable range, wrapping around.
     // 3. After each attempt, listen for competing claims for 250 ms.
     // 4. Defend the address if the local NAME wins, otherwise move to the next one.
-    pub fn poll(&mut self, now_ms: u64, rx: Option<&CanFrame>) -> ClaimAction {
+    pub fn poll(&mut self, now_ms: u64, rx: Option<&CanFrame>) -> ClaimOutput {
         // TODO!: check the pseudo-random delay for claiming
-        // guards
         match self.state {
             // not started | first call
-            State::UnClaimed => match rx {
+            State::Unclaimed => match rx {
                 Some(recv_frame)
                     if is_addressed_claim_request_message(recv_frame, NULL_ADDR_254) =>
                 {
-                    let claim_frame = build_address_claim_frame(self.my_name, NULL_ADDR_254);
-                    ClaimAction::Send(claim_frame)
+                    // Answered, but nothing is claimed and no campaign started.
+                    // The deadline is `now`, not `None`: on a silent bus a
+                    // `None` here would leave the engine waiting for a frame
+                    // that never comes, and the claim would never begin.
+                    ClaimOutput {
+                        tx: Some(build_address_claim_frame(self.my_name, NULL_ADDR_254)),
+                        status: ClaimStatus::Unclaimed,
+                        wake_at_ms: Some(now_ms),
+                    }
                 }
                 _ => self.start_claim(now_ms),
             },
+
             State::Claiming { frame, deadline_ms } => {
-                // The frame comes first: only a conflict changes the state.
                 // TODO!: implement COMMANDED_ADDRESS 65240 0xFED8, today an Unrelated frame.
+                let mut tx = None;
+
                 if let Some(recv_frame) = rx {
                     if is_addressed_claim_request_message(recv_frame, frame.id.source_address()) {
-                        return ClaimAction::Send(frame);
-                    }
-                    match classify_claim(recv_frame, self.my_name, frame.id.source_address()) {
-                        // we win -> re-send the current claim, deadline untouched
-                        ClaimRelation::WeWin => return ClaimAction::Send(frame),
-                        ClaimRelation::WeLose => return self.handle_loosing_conflict(now_ms),
-                        // Unrelated | OwnClaim | PeerCannotClaim: no effect, fall through
-                        // to the deadline so a harmless frame cannot stall the acquisition.
-                        _ => {}
+                        tx = Some(frame);
+                    } else {
+                        match classify_claim(recv_frame, self.my_name, frame.id.source_address()) {
+                            // A loss outranks the deadline, including at the exact
+                            // millisecond it expires: winning the wait does not
+                            // make the address ours if someone better claimed it.
+                            ClaimRelation::WeLose => return self.handle_losing_conflict(now_ms),
+                            // We win: defend, deadline untouched.
+                            ClaimRelation::WeWin => tx = Some(frame),
+                            // Unrelated | OwnClaim | PeerCannotClaim: no effect.
+                            _ => {}
+                        }
                     }
                 }
-                // Then the deadline. Hits 0 once now_ms >= deadline_ms.
-                let remaining_ms = deadline_ms.saturating_sub(now_ms);
-                if remaining_ms == 0 {
+
+                // The deadline is consumed whatever the frame did, so a bus that
+                // requests or loses arbitration on every poll cannot starve the
+                // acquisition.
+                if deadline_ms.saturating_sub(now_ms) == 0 {
                     self.state = State::Claimed { frame };
-                    return ClaimAction::Claimed(frame.id.source_address());
                 }
-                ClaimAction::Wait(remaining_ms as u32)
+
+                self.output(tx)
             }
 
             State::Claimed { frame } => {
-                let Some(recv_frame) = rx else {
-                    return ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32);
-                };
-                if is_addressed_claim_request_message(recv_frame, frame.id.source_address()) {
-                    return ClaimAction::Send(frame);
-                }
-                match classify_claim(recv_frame, self.my_name, frame.id.source_address()) {
-                    ClaimRelation::Unrelated => ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32),
-                    ClaimRelation::OwnClaim => ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32),
-                    ClaimRelation::WeWin => ClaimAction::Send(frame),
-                    ClaimRelation::WeLose => self.handle_loosing_conflict(now_ms),
-                    ClaimRelation::PeerCannotClaim => {
-                        ClaimAction::Wait(NO_DEADLINE_DELAY_MS as u32)
+                let mut tx = None;
+
+                if let Some(recv_frame) = rx {
+                    if is_addressed_claim_request_message(recv_frame, frame.id.source_address()) {
+                        tx = Some(frame);
+                    } else {
+                        match classify_claim(recv_frame, self.my_name, frame.id.source_address()) {
+                            ClaimRelation::WeLose => return self.handle_losing_conflict(now_ms),
+                            ClaimRelation::WeWin => tx = Some(frame),
+                            // Unrelated | OwnClaim | PeerCannotClaim: no effect.
+                            _ => {}
+                        }
                     }
                 }
+
+                self.output(tx)
             }
 
-            State::CannotClaim { retry_at_ms } => match rx {
-                Some(recv_frame)
-                    if is_addressed_claim_request_message(recv_frame, NULL_ADDR_254) =>
-                {
-                    let claim_frame = build_address_claim_frame(self.my_name, NULL_ADDR_254);
-                    ClaimAction::Send(claim_frame)
+            State::CannotClaim { retry_at_ms } => {
+                // The retry comes first: answering requests must not postpone it.
+                if retry_at_ms.saturating_sub(now_ms) == 0 {
+                    return self.start_claim(now_ms);
                 }
-                _ => {
-                    if now_ms < retry_at_ms {
-                        ClaimAction::Wait(retry_at_ms.saturating_sub(now_ms) as u32)
-                    } else {
-                        self.start_claim(now_ms)
+
+                let tx = match rx {
+                    Some(recv_frame)
+                        if is_addressed_claim_request_message(recv_frame, NULL_ADDR_254) =>
+                    {
+                        Some(build_address_claim_frame(self.my_name, NULL_ADDR_254))
                     }
-                }
-            },
+                    _ => None,
+                };
+
+                self.output(tx)
+            }
         }
     }
 
-    fn handle_loosing_conflict(&mut self, now_ms: u64) -> ClaimAction {
+    fn handle_losing_conflict(&mut self, now_ms: u64) -> ClaimOutput {
         let addr_to_claim: u8 = {
             if let Some(addr_it) = &mut self.addr_iterator {
                 addr_it.try_next_addr()
@@ -168,17 +252,16 @@ impl<'a> AddressClaimEngine<'a> {
 
         if addr_to_claim == address::NULL_ADDR_254 {
             self.state = State::CannotClaim {
-                retry_at_ms: now_ms + CANNOT_CLAIM_RETRY_DELAY_MS as u64,
+                retry_at_ms: now_ms.saturating_add(CANNOT_CLAIM_RETRY_DELAY_MS as u64),
             };
-            return ClaimAction::CannotClaim(claim_frame);
+        } else {
+            self.state = State::Claiming {
+                frame: claim_frame,
+                deadline_ms: now_ms.saturating_add(CLAIM_DELAY_MS as u64),
+            };
         }
 
-        self.state = State::Claiming {
-            frame: claim_frame,
-            deadline_ms: now_ms + CLAIM_DELAY_MS as u64,
-        };
-
-        ClaimAction::Send(claim_frame)
+        self.output(Some(claim_frame))
     }
 
     /// return an Option with Some(addr) if claimed address, otherwise None.
