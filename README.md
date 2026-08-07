@@ -136,18 +136,12 @@ tokio::spawn(async move {
 });
 ```
 
-Two `send_pgn` exist. Which one you use is decided by who owns the manager, not
-by preference:
+The runner owns the manager.
+Use `AddressHandle::send_pgn` or `send_raw_frame`.
+These methods only confirm that the command was queued.
 
-| You drive | Emission API | Guarantees |
-|---|---|---|
-| the manager yourself, no runner | `AddressManager::send_pgn` / `send_payload` | refuses with `NotClaimed`, never a silent `Ok(())` |
-| a runner | `AddressHandle::send_pgn` / `send_raw_frame` | confirms queueing only |
-
-`AddressService::into_parts` moves the manager into the `AddressRunner`, so its
-methods become unreachable from then on. The runner does not hand out a
-`&mut AddressManager`: the engine would then be mutated from outside its own
-loop, which is exactly what this design removes.
+`AddressService::into_parts` moves the manager into `AddressRunner`.
+The runner does not expose the manager outside its loop.
 
 The runner may still refuse a queued command, and drops the refusal rather than
 returning it. Ask the handle first:

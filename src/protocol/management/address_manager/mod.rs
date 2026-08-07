@@ -13,10 +13,7 @@ use crate::{
     infra::codec::traits::PgnData,
     protocol::{
         management::{
-            address_claiming::{
-                engine::{AddressClaimEngine, ClaimOutput},
-                AddressClaimStrategy,
-            },
+            address_claiming::{engine::AddressClaimEngine, AddressClaimStrategy},
             iso_name::IsoName,
         },
         transport::{
@@ -27,6 +24,9 @@ use crate::{
         },
     },
 };
+
+#[cfg(any(feature = "embassy", feature = "tokio"))]
+use crate::protocol::management::address_claiming::engine::ClaimOutput;
 
 /// Address manager: the claim engine plus the bus and clock it runs on.
 ///
@@ -69,8 +69,9 @@ where
         self.engine.claimed_address()
     }
 
-    /// Poll the engine. Reads the clock itself: the runner never handles time.
-    pub fn poll(&mut self, rx: Option<&CanFrame>) -> ClaimOutput {
+    /// Poll the claim engine with the current time.
+    #[cfg(any(feature = "embassy", feature = "tokio"))]
+    pub(crate) fn poll(&mut self, rx: Option<&CanFrame>) -> ClaimOutput {
         self.engine.poll(self.timer.now_ms(), rx)
     }
 
