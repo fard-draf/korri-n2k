@@ -4,6 +4,9 @@
 //! transport, messages), and a few prototypes.
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(async_fn_in_trait)]
+// The README's self-contained snippets are compiled and run as doctests, so a
+// signature cannot change without the documentation failing with it.
+#![cfg_attr(doctest, doc = include_str!("../README.md"))]
 //==================================================================================
 // use pgn::Pgn;
 //==================================================================================

@@ -3,7 +3,130 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-08-06
+
+This cycle turns address management into an I/O-free engine driven by a runner.
+The engine takes a clock reading and an optional frame, and returns an action.
+
+### Added
+- `AddressClaimEngine`, the synchronous claim engine. It handles the initial
+  claim, NAME arbitration, defence, loss and reclaim, and Cannot Claim.
+- `AddressClaimEngine::poll(now_ms, rx)`, the single entry point. It never
+  sleeps and never reads the bus, so it can be tested and replayed without a
+  runtime.
+- `ClaimOutput`, what one `poll` decided along three independent axes. `tx` is
+  the frame to emit, `status` the state reached, `wake_at_ms` the absolute
+  deadline. None of them folds into another. A defence frame handed back on the
+  very poll that acquires the address is no longer lost.
+- `ClaimStatus`, the state the caller sees: `Claiming(addr)`, `Claimed(addr)`
+  or `CannotClaim`. `ClaimStatus::claimed_address()` returns the address only
+  once it is held. `Claiming` is not yours yet.
+- `AddressClaimEngine::claimed_address() -> Option<u8>`. `None` replaces the
+  address 254 that used to stand for "no address".
+- Incoming ISO Request (PGN 59904 asking for 60928) is now answered. A node
+  holding an address answers with its claim. A node that exhausted its strategy
+  answers with a Cannot Claim, as J1939-81 requires. A node that has not started
+  yet opens its campaign, and the claim it emits is the answer.
+- `AddressHandle::send_command` under `embassy`. Only `tokio` had it.
+- `classify_claim` and `ClaimRelation`, turning a received frame into one of
+  five relations. A claim with source address 254 never becomes a local
+  conflict.
+- `AddressRequester`, the same I/O-free shape for network discovery, now
+  reachable: its module was private.
+- `ClaimedAddress` and `AddressHandle::claimed_address()`. Best effort: it
+  reports what the engine holds now, and a later conflict can still take the
+  address away.
+- `SendPgnError::NotClaimed`. Emitting before an address is acquired now
+  returns this instead of a silent `Ok(())`.
+- `ClaimFault`, for claim failures decided from frame content alone.
+- `AddressHandleError::RunnerGone`, returned when the runner is no longer there
+  to execute a queued command.
+- `FastPacketBuilder::with_priority`, setting the priority of a built frame.
+- Three runnable examples, `address_claim`, `fast_packet_rx` and
+  `blocking_claim`, all run by CI. The last one drives the engine from a plain
+  loop, with no runtime, no timer trait and no `CanBus` implementation.
+
+### Changed
+- **BREAKING**: the `managment` module is spelled `management`. Replace
+  `protocol::managment::` with `protocol::management::` in your imports; nothing
+  else moves.
+- **BREAKING**: `ClaimError<E>` splits in two, the bus-free faults moving to
+  `ClaimFault`. Migration: `ClaimError::InconsistentStrategy` becomes
+  `ClaimError::Fault(ClaimFault::InconsistentStrategy)`, and likewise for
+  `RequestAddressClaimErr` and `Extraction`.
+- **BREAKING**: `AddressManager::new` is no longer `async` and returns
+  `Result<Self, ClaimFault>`. It only validates that the NAME and the strategy
+  agree; the claim now happens under the runner.
+- **BREAKING**: `AddressManager::current_address` becomes `claimed_address` and
+  returns `Option<u8>`.
+- **BREAKING**: the runner owns the single `select`. Each round polls the engine
+  synchronously, publishes the status, emits `tx` if there is one, then waits on
+  the bus, the command channel and `wake_at_ms` at once. No state transition can
+  be cancelled halfway, and an emission is never skipped because the status said
+  the machine had moved on.
+- `Clock::now_ms` states its contract: monotonic, free of wall-clock steps, and
+  wrap-free for the life of the engine. Deadlines are built with
+  `saturating_add`, so a reading near `u64::MAX` pins them instead of
+  overflowing.
+- **BREAKING**: `AddressService::claim` becomes `AddressService::with_name` and
+  is no longer `async`. It has nothing left to wait for.
+- **BREAKING**: `SupervisorCommand::SendFrame` becomes `SendRawFrame` and is now
+  guarded. A frame whose source address is not the claimed one is refused.
+- **BREAKING**: a refused command no longer stops the runner. Only a bus failure
+  does. A rejected command is dropped, and says so only under `defmt`.
+- **BREAKING**: `AddressSupervisorRunError` keeps `Receive(E)` and `Send(E)`.
+  Bus errors reach the caller unwrapped.
+- **BREAKING**: `default = []`. Pick `embassy` or `tokio` explicitly; neither is
+  enabled by default. docs.rs builds with `embassy`.
+- **BREAKING**: `IsoName` replaces `u64` wherever a NAME is stored or compared.
+  `u64` remains the wire format only.
+- Incoming frames now reach the application unfiltered, PGN 60928 included, so
+  network discovery can see claim traffic too.
+- `TokioTimer::now_ms` returns `u64` instead of a `tokio::time::Instant`, and
+  `TokioTimer::new` is public.
+- Claim delays moved to `constants::iso_delay`. `CANNOT_CLAIM_RETRY_DELAY_MS` is
+  a tuning knob, not a protocol constant.
+- The README is rebuilt around use cases. Its self-contained snippets run as
+  doctests, and the examples are built and run by CI.
+
+### Fixed
+- The application channel could stall address management. The runner forwarded
+  each frame with an awaiting send, so a full channel delayed the action the
+  engine had just decided. A lost conflict could move the internal state without
+  the new claim ever reaching the bus. Forwarding is now non-blocking and drops
+  instead.
+- `AddressHandle::claimed_address` kept reporting an address after the runner
+  had stopped. Nothing defends that address any more, so the reading invited the
+  application to emit from an address it no longer held. `AddressRunner` now
+  clears it on `Drop`, which also covers a cancelled task.
+- `SupervisorCommand::SendPayload` panicked on an out-of-range `len`. The field
+  is public and the caller owns the channel under embassy; it is now validated.
+- Network discovery sent its ISO Request with source address 255. That is the
+  broadcast destination, never a valid source; `AddressRequester::new` now takes
+  the address the node holds.
+- A claim campaign could stall forever. In `Claiming`, any harmless frame
+  arriving on the deadline returned `Wait(0)` and the deadline was never
+  reached again.
+- `Cannot Claim` is no longer terminal. A single-address node that lost its only
+  address stayed dead until reboot, although the conflict is usually transient.
+- `AddressRequester` used a relative deadline, which never expired.
+
+### Removed
+- **BREAKING**: `claim_address()`. It returned `Ok(254)` on Cannot Claim, which
+  no longer means anything now that the state retries. Drive the runner instead.
+- **BREAKING**: `AddressManager::handle_frame`, `recv`, `defend` and `reclaim`.
+  The manager no longer duplicates the claim rules; the engine owns them.
+- **BREAKING**: the `ToPayload` and `FromPayload` traits. Nothing referenced
+  them; the codec goes through `PgnData`.
+- **BREAKING**: `ClaimFault::NoAddressAvailable`, `UnvailableName` and
+  `BuildErr`. An exhausted iterator yields Cannot Claim, and nothing constructed
+  the other two.
+- **BREAKING**: the `CanBusBlocking` trait. It had no implementor and no caller,
+  and its unbounded `recv()` would hang a claim on a quiet bus. See the
+  `blocking_claim` example for the shape a blocking driver actually needs.
+- `ClaimError::NetworkConflict`, `CanBusError`, `InvalidIncomingFrame` and
+  `InvalidDataLen`. None was ever constructed, and the last two duplicated
+  `ExtractionError`.
 
 ## [0.6.0] - 2026-07-26
 ### Added

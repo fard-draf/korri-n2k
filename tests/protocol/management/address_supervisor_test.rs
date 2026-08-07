@@ -5,9 +5,12 @@ mod helpers {
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use helpers::{MockCanBus, MockTimer};
-use korri_n2k::protocol::managment::address_claiming::AddressClaimStrategy;
-use korri_n2k::protocol::managment::address_manager::AddressManager;
-use korri_n2k::protocol::managment::address_supervisor::{AddressService, SupervisorCommand};
+use korri_n2k::protocol::management::address_claiming::AddressClaimStrategy;
+use korri_n2k::protocol::management::address_manager::AddressManager;
+use korri_n2k::protocol::management::address_supervisor::{
+    AddressService, ClaimedAddress, SupervisorCommand,
+};
+use korri_n2k::protocol::management::iso_name::IsoName;
 use korri_n2k::protocol::messages::Pgn129025;
 use korri_n2k::protocol::transport::traits::can_bus::CanBus;
 use static_cell::StaticCell;
@@ -15,22 +18,23 @@ use tokio::time::Duration;
 
 static COMMAND_CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, SupervisorCommand, 4>> =
     StaticCell::new();
+static CLAIMED: ClaimedAddress = ClaimedAddress::new();
 
 #[tokio::test]
 async fn supervisor_queues_and_sends_pgn() {
     let command_channel = COMMAND_CHANNEL.init(Channel::new());
 
     let (dut_bus, mut host_bus) = MockCanBus::create_pair();
-    let timer = MockTimer;
-    let my_name = 0xF234_5678_90AB_CDEF; // AAC enabled
+    let timer = MockTimer::new();
+    let my_name = IsoName::from_raw(0xF234_5678_90AB_CDEF); // AAC enabled
     let preferred = 142u8;
     let strategy = AddressClaimStrategy::Arbitrary { preferred };
 
-    let manager = AddressManager::new(dut_bus, timer, my_name, strategy)
-        .await
-        .expect("claim must succeed");
+    let manager =
+        AddressManager::new(dut_bus, timer, my_name, strategy).expect("strategy matches the NAME");
 
-    let service = AddressService::<_, _, 4, 0>::new(manager, Some(&*command_channel), None);
+    let service =
+        AddressService::<_, _, 4, 0>::new(manager, Some(&*command_channel), None, &CLAIMED);
     let parts = service.into_parts();
     let handle = parts
         .handle
@@ -67,6 +71,9 @@ async fn supervisor_queues_and_sends_pgn() {
                 .expect("PGN frame expected on CAN bus");
             assert_eq!(payload_frame.id.pgn(), 129025);
             assert_eq!(payload_frame.id.source_address(), preferred);
+
+            // The handle reports the address it emits from.
+            assert_eq!(handle.claimed_address(), Some(preferred));
         } => {}
     }
 }

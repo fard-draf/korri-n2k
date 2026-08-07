@@ -156,7 +156,7 @@ fn test_round_trip_multiple_way_pgn() {
     }
     let mocked_pgn = PgnFloatTest {
         value_scaled: 9.12345678,
-        value_f64: 1.23456789123456789,
+        value_f64: 1.234_567_891_234_568,
         value_i16: -2542,
         value_u32_scaled: 429_496.4,
     };
@@ -184,17 +184,9 @@ fn test_round_trip_multiple_way_pgn() {
 
 #[test]
 fn test_string_lz_roundtrip() {
-    #[derive(Debug, PartialEq, Copy, Clone)]
+    #[derive(Debug, PartialEq, Copy, Clone, Default)]
     struct PgnStringLz {
         text: crate::core::PgnBytes,
-    }
-
-    impl Default for PgnStringLz {
-        fn default() -> Self {
-            Self {
-                text: crate::core::PgnBytes::default(),
-            }
-        }
     }
 
     impl FieldAccess for PgnStringLz {
@@ -271,17 +263,9 @@ fn test_string_lz_roundtrip() {
 
 #[test]
 fn test_string_lau_roundtrip() {
-    #[derive(Debug, PartialEq, Copy, Clone)]
+    #[derive(Debug, PartialEq, Copy, Clone, Default)]
     struct PgnStringLau {
         description: crate::core::PgnBytes,
-    }
-
-    impl Default for PgnStringLau {
-        fn default() -> Self {
-            Self {
-                description: crate::core::PgnBytes::default(),
-            }
-        }
     }
 
     impl FieldAccess for PgnStringLau {
@@ -662,6 +646,9 @@ fn test_round_trip_pgn_129029_repetitive_fields() {
 
 #[test]
 /// PGN 129540: verifies serialization of satellites-in-view repeating data.
+// Sample elevations and azimuths in radians; their nearness to pi fractions is
+// a coincidence of the fixture, not an attempt to name a constant.
+#[allow(clippy::approx_constant)]
 fn test_round_trip_pgn_129540_repetitive_fields() {
     let mut pgn = Pgn129540::new();
     pgn.sid = 7;

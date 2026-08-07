@@ -1,7 +1,7 @@
 //! In-memory representation of an SAE J1939 / NMEA 2000 CAN frame.
 use crate::protocol::transport::can_id::CanId;
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// Raw NMEA 2000 frame as read from the CAN bus.
 pub struct CanFrame {
     /// Full 29-bit CAN identifier stored inside a `u32`.

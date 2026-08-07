@@ -1,6 +1,6 @@
 [package]
 name = "korri-n2k"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.96"
 description = "no_std-first NMEA 2000 protocol stack for embedded and Linux systems"
@@ -12,26 +12,33 @@ categories = ["embedded", "no-std", "network-programming"]
 exclude = ["tests/", ".github/", "archives/"]
 
 [features]
-default = ["embassy"]
-embassy = ["dep:embassy-sync"]
-tokio = ["std", "dep:tokio"]
+default = []
+embassy = ["dep:embassy-sync", "dep:portable-atomic"]
+tokio = ["std", "dep:tokio", "dep:portable-atomic"]
 std = []
 defmt = ["dep:defmt"]
 build-download = ["dep:ureq"]
 full-pgns = []
+
+[package.metadata.docs.rs]
+features = ["embassy"]
 
 [dependencies]
 embassy-sync = { version = "0.6", optional = true }
 tokio = { version = "1.47.1", optional = true, default-features = false, features = ["sync", "time"] }
 thiserror-no-std = "2.0"
 futures-util = { version = "0.3", default-features = false }
+# Only the supervisor uses it, and no supervisor is compiled without a runtime.
+# Targets without native atomics (thumbv6m, riscv32imc) need
+# `portable-atomic/critical-section` enabled by the final binary.
+portable-atomic = { version = "1.13", default-features = false, optional = true }
 
 defmt = { version = "0.3", optional = true }
 
 [dev-dependencies]
 critical-section = { version = "1.1", features = ["std"] }
 static_cell = "2.1.1"
-tokio = { version = "1.47.1", features = ["full"] }
+tokio = { version = "1.53", features = ["full", "test-util"] }
 
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -54,3 +61,18 @@ path = "examples/std/lookup_enum_usage.rs"
 [[example]]
 name = "iso_name_usage"
 path = "examples/std/iso_name_usage.rs"
+
+[[example]]
+name = "address_claim"
+path = "examples/std/address_claim.rs"
+required-features = ["tokio"]
+
+[[example]]
+name = "fast_packet_rx"
+path = "examples/std/fast_packet_rx.rs"
+required-features = ["std"]
+
+[[example]]
+name = "blocking_claim"
+path = "examples/std/blocking_claim.rs"
+required-features = ["std"]

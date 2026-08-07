@@ -6,7 +6,7 @@ A slice of a real NMEA 2000 backbone, replayed by `tests/replay_real_capture.rs`
 through the whole stack: CAN identifier, Fast Packet reassembly, then decoding.
 
 Synthetic payloads only exercise the shapes we already thought of. This capture
-is what found the three defects fixed in 0.5.0 — a repeating-group counter read
+is what found the three defects fixed in 0.5.0: a repeating-group counter read
 literally instead of as the "not available" sentinel, a `STRING_LAU` length off
 by one, and a `STRING_FIX` read at its declared capacity rather than at the
 length the frame carries. The `STRING_LAU` one is the telling case: reader and
@@ -30,19 +30,11 @@ Taken from a live bus, so identifying data was neutralised before committing:
 | vessel names, call signs, destinations | `X` |
 | product serial numbers, model and vendor strings | `X` |
 
-The substitution preserves every structural byte — lengths, counters,
-discriminators — so a decoder sees exactly the same message shapes. Verified:
+The substitution preserves every structural byte: lengths, counters and
+discriminators. A decoder sees exactly the same message shapes. Verified:
 replaying the file before and after gives an identical result, down to the
 per-PGN counts.
 
 Autopilot telemetry (`130821`) and alarm text (`130856`) are kept as they are:
 rudder angles and "Steering compass missing" identify nobody, and they make
 realistic string payloads.
-
-### Running against a full capture
-
-    KORRI_N2K_CAPTURE=/path/to/capture.bin cargo test --features full-pgns \
-        --test replay_real_capture -- --nocapture
-
-The test is skipped when the path does not exist, so a missing capture never
-fails a build.

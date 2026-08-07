@@ -1,7 +1,10 @@
 /// Test doubles to simulate the CAN bus and timer during integration tests.
 use korri_n2k::protocol::transport::{
     can_frame::CanFrame,
-    traits::{can_bus::CanBus, korri_timer::KorriTimer},
+    traits::{
+        can_bus::CanBus,
+        korri_timer::{Clock, KorriTimer},
+    },
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -17,6 +20,11 @@ pub struct MockCanBus {
 
 #[allow(dead_code)]
 impl MockCanBus {
+    /// Take a frame if one is already queued, without waiting.
+    pub fn try_recv(&mut self) -> Option<CanFrame> {
+        self.rx.try_lock().ok()?.try_recv().ok()
+    }
+
     /// Construct a pair of interconnected buses (DUT ↔ host).
     pub fn create_pair() -> (Self, Self) {
         let (dut_tx, host_rx) = mpsc::unbounded_channel();
@@ -40,7 +48,7 @@ impl CanBus for MockCanBus {
     type Error = ();
 
     async fn send(&mut self, frame: &CanFrame) -> Result<(), Self::Error> {
-        self.tx.send(frame.clone()).map_err(|_| ())?;
+        self.tx.send(*frame).map_err(|_| ())?;
         Ok(())
     }
 
@@ -52,7 +60,28 @@ impl CanBus for MockCanBus {
 
 #[allow(dead_code)]
 /// Timer based on `tokio::time::sleep` to drive delays in tests.
-pub struct MockTimer;
+#[derive(Debug)]
+pub struct MockTimer {
+    origin: tokio::time::Instant,
+}
+
+impl MockTimer {
+    pub fn new() -> Self {
+        Self {
+            origin: tokio::time::Instant::now(),
+        }
+    }
+}
+
+impl Clock for MockTimer {
+    fn now_ms(&self) -> u64 {
+        self.origin
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
+    }
+}
 
 impl KorriTimer for MockTimer {
     async fn delay_ms(&mut self, millis: u32) {

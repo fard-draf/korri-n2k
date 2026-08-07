@@ -135,11 +135,7 @@ fn generated_artifacts_memory_footprint_is_stable() {
         max_allowed
     );
 
-    let overhead = if frame_size > baseline {
-        frame_size - baseline
-    } else {
-        0
-    };
+    let overhead = frame_size.saturating_sub(baseline);
     let overhead_pct = (overhead as f32 / baseline as f32) * 100.0;
 
     println!(

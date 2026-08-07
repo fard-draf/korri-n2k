@@ -1,0 +1,3 @@
+pub const CLAIM_DELAY_MS: u16 = 250;
+pub const CANNOT_CLAIM_RETRY_DELAY_MS: u32 = 10_000;
+pub const REQUEST_DELAY_MS: u16 = 300;

@@ -47,14 +47,14 @@ fn test_roundtrip_pgn_129029() {
 
     // Build fragmented CAN frames
     let builder = FastPacketBuilder::new(pgn, 42, None, &buffer[..len]);
-    let mut frames = builder.build();
+    let frames = builder.build();
 
     // Reassemble frames with the assembler
     let mut assembler = FastPacketAssembler::new();
     let mut complete = None;
     let mut frame_count = 0;
 
-    while let Some(frame_result) = frames.next() {
+    for frame_result in frames {
         let frame = frame_result.expect("Frame construction should succeed");
         frame_count += 1;
 
@@ -384,8 +384,8 @@ fn test_assembler_max_sessions() {
 #[test]
 /// Stress test: process 100 PGNs in a row to validate stability.
 ///
-/// Confirms the assembler can tolerate continuous traffic without leaks, corruption,
-/// or panics—critical for long-lived embedded systems.
+/// Confirms the assembler can tolerate continuous traffic without leaks,
+/// corruption or panics. This matters for long-lived embedded systems.
 fn test_stress_100_pgns() {
     let mut assembler = FastPacketAssembler::new();
 
@@ -407,9 +407,9 @@ fn test_stress_100_pgns() {
 
         // Build and send the frames
         let builder = FastPacketBuilder::new(pgn_ais, source, None, &buffer[..len]);
-        let mut frames = builder.build();
+        let frames = builder.build();
 
-        while let Some(frame_result) = frames.next() {
+        for frame_result in frames {
             let frame = frame_result.expect("Valid frame");
             let result = assembler.process_frame(fake_timer_ms, pgn_ais, source, &frame.data);
 
