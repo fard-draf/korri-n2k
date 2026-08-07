@@ -28,7 +28,16 @@ use crate::{
     },
 };
 
-/// NMEA2000/J1939-compliant address manager.
+/// Address manager: the claim engine plus the bus and clock it runs on.
+///
+/// It implements the J1939-81 address claiming subset NMEA 2000 needs: the
+/// initial claim, NAME arbitration, defence, loss and reclaim, Cannot Claim with
+/// retry, and answers to ISO Requests for PGN 60928.
+///
+/// Two parts of J1939-81 are **not** implemented. There is no pseudo-random
+/// delay before the first claim, and ISO Commanded Address (PGN 65240) is
+/// treated as ordinary traffic. The latter arrives by BAM and needs the ISO
+/// Transport Protocol, which this crate does not have.
 pub struct AddressManager<'a, C: CanBus, T: KorriTimer> {
     can_bus: C,
     timer: T,

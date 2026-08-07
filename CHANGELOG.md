@@ -24,7 +24,10 @@ The engine takes a clock reading and an optional frame, and returns an action.
 - `AddressClaimEngine::claimed_address() -> Option<u8>`. `None` replaces the
   address 254 that used to stand for "no address".
 - Incoming ISO Request (PGN 59904 asking for 60928) is now answered. A node
-  without an address answers with a Cannot Claim, as J1939-81 requires.
+  holding an address answers with its claim. A node that exhausted its strategy
+  answers with a Cannot Claim, as J1939-81 requires. A node that has not started
+  yet opens its campaign, and the claim it emits is the answer.
+- `AddressHandle::send_command` under `embassy`. Only `tokio` had it.
 - `classify_claim` and `ClaimRelation`, turning a received frame into one of
   five relations. A claim with source address 254 never becomes a local
   conflict.
