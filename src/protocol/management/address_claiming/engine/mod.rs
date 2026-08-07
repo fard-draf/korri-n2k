@@ -45,10 +45,11 @@ pub struct ClaimOutput {
 }
 
 /// The engine's state as the caller sees it.
+///
+/// There is no `Unclaimed` variant. The first `poll` always starts a campaign,
+/// so the engine is never observed before one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClaimStatus {
-    /// No campaign started yet.
-    Unclaimed,
     /// Emitting for the carried address and waiting out the arbitration window.
     /// The address is not usable yet.
     Claiming(u8),
@@ -105,7 +106,9 @@ impl<'a> AddressClaimEngine<'a> {
     /// deadline that is still running.
     fn output(&self, tx: Option<CanFrame>) -> ClaimOutput {
         let (status, wake_at_ms) = match self.state {
-            State::Unclaimed => (ClaimStatus::Unclaimed, None),
+            // Unreachable: `output` only runs after a transition, and every
+            // transition leaves `Unclaimed` behind for good.
+            State::Unclaimed => unreachable!("output() called before the first campaign"),
             State::Claiming { frame, deadline_ms } => (
                 ClaimStatus::Claiming(frame.id.source_address()),
                 Some(deadline_ms),
@@ -151,23 +154,15 @@ impl<'a> AddressClaimEngine<'a> {
     pub fn poll(&mut self, now_ms: u64, rx: Option<&CanFrame>) -> ClaimOutput {
         // TODO!: check the pseudo-random delay for claiming
         match self.state {
-            // not started | first call
-            State::Unclaimed => match rx {
-                Some(recv_frame)
-                    if is_addressed_claim_request_message(recv_frame, NULL_ADDR_254) =>
-                {
-                    // Answered, but nothing is claimed and no campaign started.
-                    // The deadline is `now`, not `None`: on a silent bus a
-                    // `None` here would leave the engine waiting for a frame
-                    // that never comes, and the claim would never begin.
-                    ClaimOutput {
-                        tx: Some(build_address_claim_frame(self.my_name, NULL_ADDR_254)),
-                        status: ClaimStatus::Unclaimed,
-                        wake_at_ms: Some(now_ms),
-                    }
-                }
-                _ => self.start_claim(now_ms),
-            },
+            // Not started. Whatever arrived, the campaign begins now.
+            //
+            // A request is not special-cased here. Answering it with a Cannot
+            // Claim and staying put would leave the node addressless for as long
+            // as requests keep coming: the runner reads the bus before the wake
+            // deadline, so a steady stream always wins the race. The Address
+            // Claim `start_claim` emits is itself the answer to the request, and
+            // a strategy with no claimable address emits the Cannot Claim anyway.
+            State::Unclaimed => self.start_claim(now_ms),
 
             State::Claiming { frame, deadline_ms } => {
                 // TODO!: implement COMMANDED_ADDRESS 65240 0xFED8, today an Unrelated frame.
