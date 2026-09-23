@@ -5,7 +5,9 @@ mod helpers {
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use helpers::{MockCanBus, MockTimer};
-use korri_n2k::protocol::management::address_claiming::AddressClaimStrategy;
+use korri_n2k::protocol::management::address_claiming::{
+    engine::ClaimStatus, AddressClaimStrategy,
+};
 use korri_n2k::protocol::management::address_manager::AddressManager;
 use korri_n2k::protocol::management::address_supervisor::{
     AddressService, ClaimedAddress, SupervisorCommand,
@@ -53,6 +55,7 @@ async fn supervisor_queues_and_sends_pgn() {
                 .expect("supervisor must issue a claim frame");
             assert_eq!(claim_frame.id.pgn(), 60928);
             assert_eq!(claim_frame.id.source_address(), preferred);
+            assert_eq!(handle.claim_status(), Some(ClaimStatus::Claiming(preferred)));
 
             tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -74,6 +77,7 @@ async fn supervisor_queues_and_sends_pgn() {
 
             // The handle reports the address it emits from.
             assert_eq!(handle.claimed_address(), Some(preferred));
+            assert_eq!(handle.claim_status(), Some(ClaimStatus::Claimed(preferred)));
         } => {}
     }
 }

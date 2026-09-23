@@ -6,7 +6,7 @@ mod helpers {
 
 use helpers::{MockCanBus, MockTimer};
 use korri_n2k::protocol::management::address_claiming::{
-    build_address_claim_frame, AddressClaimStrategy,
+    build_address_claim_frame, engine::ClaimStatus, AddressClaimStrategy,
 };
 use korri_n2k::protocol::management::address_manager::AddressManager;
 use korri_n2k::protocol::management::address_supervisor::{
@@ -19,6 +19,7 @@ use korri_n2k::protocol::transport::{can_frame::CanFrame, can_id::CanId, traits:
 use tokio::time::{sleep, Duration};
 
 const AAC_NAME: u64 = 0xF234_5678_90AB_CDEF;
+const FIXED_NAME: u64 = 0x7234_5678_90AB_CDEF;
 const PREFERRED: u8 = 142;
 
 /// Long enough for a 250 ms claim window to close.
@@ -131,6 +132,7 @@ async fn handle_reports_the_address_it_emits_from() {
 
     // Nothing is held before the runner starts.
     assert_eq!(handle.claimed_address(), None);
+    assert_eq!(handle.claim_status(), None);
 
     let runner = parts.runner.drive();
     tokio::pin!(runner);
@@ -143,9 +145,47 @@ async fn handle_reports_the_address_it_emits_from() {
             // Still nothing during the 250 ms claim window: the address is not
             // ours until it closes.
             assert_eq!(handle.claimed_address(), None);
+            assert_eq!(handle.claim_status(), Some(ClaimStatus::Claiming(PREFERRED)));
 
             sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
             assert_eq!(handle.claimed_address(), Some(PREFERRED));
+            assert_eq!(handle.claim_status(), Some(ClaimStatus::Claimed(PREFERRED)));
+        } => {}
+    }
+}
+
+#[tokio::test]
+async fn handle_reports_cannot_claim_after_a_fixed_node_loses() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let manager = AddressManager::new(
+        dut_bus,
+        MockTimer::new(),
+        IsoName::from_raw(FIXED_NAME),
+        AddressClaimStrategy::Fixed {
+            preferred: PREFERRED,
+        },
+    )
+    .expect("fixed strategy must match the NAME");
+    let parts = AddressService::new(manager, 4, 0).into_parts();
+    let handle = parts.handle.expect("command channel requested");
+
+    let runner = parts.runner.drive();
+    tokio::pin!(runner);
+
+    tokio::select! {
+        result = &mut runner => panic!("supervisor ended unexpectedly: {:?}", result),
+        _ = async {
+            host_bus.recv().await.expect("initial claim expected");
+            assert_eq!(handle.claim_status(), Some(ClaimStatus::Claiming(PREFERRED)));
+
+            let stronger_name = IsoName::from_raw(1);
+            let rival = build_address_claim_frame(stronger_name, PREFERRED);
+            host_bus.send(&rival).await.unwrap();
+
+            let cannot_claim = host_bus.recv().await.expect("Cannot Claim expected");
+            assert_eq!(cannot_claim.id.source_address(), 254);
+            assert_eq!(handle.claim_status(), Some(ClaimStatus::CannotClaim));
+            assert_eq!(handle.claimed_address(), None);
         } => {}
     }
 }
@@ -268,6 +308,7 @@ async fn a_dead_bus_clears_the_published_address() {
         None,
         "a dead runner must not keep publishing an address"
     );
+    assert_eq!(handle.claim_status(), None);
 }
 
 /// The same cleanup on cancellation: no error is ever returned here, so only
@@ -287,6 +328,7 @@ async fn a_cancelled_runner_clears_the_published_address() {
     let _ = runner.await;
 
     assert_eq!(handle.claimed_address(), None);
+    assert_eq!(handle.claim_status(), None);
 }
 
 #[tokio::test]

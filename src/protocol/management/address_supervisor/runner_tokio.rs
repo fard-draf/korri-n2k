@@ -16,6 +16,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::error::{ClaimFault, SendPgnError};
 use crate::infra::codec::traits::PgnData;
+use crate::protocol::management::address_claiming::engine::ClaimStatus;
 use crate::protocol::management::address_supervisor::{
     handle_command, AddressHandleError, AddressSupervisorRunError, ClaimedAddress,
     SupervisorCommand,
@@ -146,7 +147,7 @@ where
 
             // Published before the emission below: a lost address must stop
             // producers now, not after an `await` on a possibly slow bus.
-            self.claimed.set(output.status.claimed_address());
+            self.claimed.set(Some(output.status));
 
             // The engine saw it first; the application gets it too, unfiltered.
             // This `take` is also the "rx = None once consumed" the engine expects.
@@ -275,6 +276,13 @@ pub struct AddressHandle {
 }
 
 impl AddressHandle {
+    /// The current claim state, or `None` before the runner starts or after it stops.
+    ///
+    /// Best effort: see [`ClaimedAddress`].
+    pub fn claim_status(&self) -> Option<ClaimStatus> {
+        self.claimed.status()
+    }
+
     /// The address this handle emits from, or `None` while none is held.
     ///
     /// Best effort: see [`ClaimedAddress`].

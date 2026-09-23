@@ -1,12 +1,11 @@
 use core::fmt::Debug;
 
-use portable_atomic::{AtomicU8, Ordering};
+use portable_atomic::{AtomicU16, Ordering};
 
 use crate::{
     error::SendPgnError,
     protocol::{
-        constants::address::NULL_ADDR_254,
-        management::address_manager::AddressManager,
+        management::{address_claiming::engine::ClaimStatus, address_manager::AddressManager},
         transport::{
             can_frame::CanFrame,
             fast_packet::MAX_FAST_PACKET_PAYLOAD,
@@ -64,16 +63,20 @@ pub enum AddressHandleError {
     RunnerGone,
 }
 
-/// The address a handle emits from, shared with the runner that owns the engine.
+/// The address-claim state shared with the runner that owns the engine.
 ///
-/// **Best effort, not a lock.** Reading `Some(42)` then sending races a reclaim
-/// that may happen in between; the command is refused in that case. The runner's
-/// own guard stays the authority. This only lets a caller avoid asking for what
-/// it knows will be refused.
+/// **Best effort, not a lock.** Reading `Claimed(42)` then sending races a
+/// reclaim that may happen in between; the command is refused in that case. The
+/// runner's own guard stays the authority. This only lets a caller observe the
+/// campaign and avoid asking for what it knows will be refused.
 ///
 /// One instance per Controller Application: it hangs off the handle, so a node
 /// holding several NAMEs reads each address through its own handle.
-pub struct ClaimedAddress(AtomicU8);
+pub struct ClaimedAddress(AtomicU16);
+
+const STATUS_CLAIMING: u16 = 0x0100;
+const STATUS_CANNOT_CLAIM: u16 = 0x0200;
+const STATUS_UNAVAILABLE: u16 = u16::MAX;
 
 impl Default for ClaimedAddress {
     fn default() -> Self {
@@ -82,23 +85,35 @@ impl Default for ClaimedAddress {
 }
 
 impl ClaimedAddress {
-    /// Starts addressless. `no_std` friendly: usable as a `static`.
+    /// Starts without a published status. `no_std` friendly: usable as a `static`.
     pub const fn new() -> Self {
-        Self(AtomicU8::new(NULL_ADDR_254))
+        Self(AtomicU16::new(STATUS_UNAVAILABLE))
     }
 
-    /// The current address, or `None` while none is held.
+    /// The address currently held, or `None` in every other state.
     pub fn get(&self) -> Option<u8> {
+        self.status().and_then(|status| status.claimed_address())
+    }
+
+    /// The engine state, or `None` before the runner starts and after it stops.
+    pub fn status(&self) -> Option<ClaimStatus> {
         match self.0.load(Ordering::Relaxed) {
-            NULL_ADDR_254 => None,
-            address => Some(address),
+            STATUS_UNAVAILABLE => None,
+            STATUS_CANNOT_CLAIM => Some(ClaimStatus::CannotClaim),
+            encoded if encoded & STATUS_CLAIMING != 0 => Some(ClaimStatus::Claiming(encoded as u8)),
+            address => Some(ClaimStatus::Claimed(address as u8)),
         }
     }
 
-    /// Published by the runner after every engine step.
-    pub(crate) fn set(&self, address: Option<u8>) {
-        self.0
-            .store(address.unwrap_or(NULL_ADDR_254), Ordering::Relaxed);
+    /// Published by the runner after every engine step and cleared on drop.
+    pub(crate) fn set(&self, status: Option<ClaimStatus>) {
+        let encoded = match status {
+            Some(ClaimStatus::Claiming(address)) => STATUS_CLAIMING | u16::from(address),
+            Some(ClaimStatus::Claimed(address)) => u16::from(address),
+            Some(ClaimStatus::CannotClaim) => STATUS_CANNOT_CLAIM,
+            None => STATUS_UNAVAILABLE,
+        };
+        self.0.store(encoded, Ordering::Relaxed);
     }
 }
 
