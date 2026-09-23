@@ -153,6 +153,10 @@ match handle.claimed_address() {
 }
 ```
 
+When the distinction matters, `claim_status()` reports the complete campaign
+state: `Claiming(address)`, `Claimed(address)`, or `CannotClaim`. It returns
+`None` only before the runner starts or after it stops.
+
 Best effort, not a lock. A conflict can take the address away a microsecond
 later. The library refuses that emission anyway; this only spares you from
 asking.
