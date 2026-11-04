@@ -1507,3 +1507,71 @@ fn test_status_and_claimed_address_never_disagree() {
         timer.tick(CLAIM_DELAY_MS as u64);
     }
 }
+
+//==================================================================================LOOPBACK
+// A node holding several NAMEs feeds each engine the frames its siblings emit.
+
+const AAC_LOW_NAME: u64 = 0x8000_0000_0000_0001;
+const AAC_HIGH_NAME: u64 = 0x8000_0000_0000_0002;
+
+#[test]
+fn test_own_claim_echoed_back_has_no_effect() {
+    let name = IsoName::from_raw(AAC_LOW_NAME);
+    let mut engine =
+        AddressClaimEngine::new(name, AddressClaimStrategy::Arbitrary { preferred: ADDR_3 })
+            .unwrap();
+    let own = build_address_claim_frame(name, ADDR_3);
+    let deadline_ms = STARTING_TIME + CLAIM_DELAY_MS as u64;
+
+    assert_eq!(engine.poll(STARTING_TIME, None).tx, Some(own));
+    engine.tx_sent(STARTING_TIME);
+
+    // Echoed while claiming: no defence, no move, deadline untouched.
+    assert_eq!(
+        engine.poll(STARTING_TIME + 1, Some(&own)),
+        waiting_claim(ADDR_3, deadline_ms)
+    );
+    assert_eq!(engine.poll(deadline_ms, None), claimed(ADDR_3));
+    // Echoed once held: still nothing.
+    assert_eq!(engine.poll(deadline_ms + 1, Some(&own)), claimed(ADDR_3));
+}
+
+/// Two local engines aiming at the same address, each frame delivered to the
+/// other the way the runner does it: they settle on distinct addresses.
+#[test]
+fn test_sibling_engines_converge_through_loopback() {
+    let low = IsoName::from_raw(AAC_LOW_NAME);
+    let high = IsoName::from_raw(AAC_HIGH_NAME);
+    let strategy = AddressClaimStrategy::Arbitrary { preferred: ADDR_3 };
+    let mut engines = [
+        AddressClaimEngine::new(high, strategy).unwrap(),
+        AddressClaimEngine::new(low, strategy).unwrap(),
+    ];
+    let now = STARTING_TIME;
+
+    // Both start at once, each emits and is acknowledged before any delivery.
+    let mut pending: [Option<CanFrame>; 2] = [None, None];
+    for (index, engine) in engines.iter_mut().enumerate() {
+        pending[index] = engine.poll(now, None).tx;
+        engine.tx_sent(now);
+    }
+
+    // Deliver until no engine emits any more; bounded so a ping-pong fails.
+    for _ in 0..8 {
+        let Some(from) = pending.iter().position(Option::is_some) else {
+            break;
+        };
+        let frame = pending[from].take().unwrap();
+        let to = 1 - from;
+        if let Some(tx) = engines[to].poll(now, Some(&frame)).tx {
+            engines[to].tx_sent(now);
+            pending[to] = Some(tx);
+        }
+    }
+    assert_eq!(pending, [None, None], "delivery must settle");
+
+    let after = now + CLAIM_DELAY_MS as u64;
+    // The lower NAME keeps the preferred address, the other one moves on.
+    assert_eq!(engines[1].poll(after, None), claimed(ADDR_3));
+    assert_eq!(engines[0].poll(after, None), claimed(ADDR_3 + 1));
+}

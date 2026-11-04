@@ -53,6 +53,35 @@
 //! });
 //! ```
 //!
+//! # Several addresses on one node
+//!
+//! One bus, one runner, one NAME and one address per Controller Application:
+//!
+//! ```rust,ignore
+//! let manager = AddressManager::with_controllers(
+//!     bus,
+//!     TokioTimer::new(),
+//!     [(gps_name, gps_strategy), (heading_name, heading_strategy)],
+//! )?;
+//! // 4 queued commands per Controller Application, 8 shared incoming frames.
+//! let parts = AddressService::new(manager, 4, 8).into_multi_parts();
+//! let [Some(gps), Some(heading)] = parts.handles else { unreachable!() };
+//! ```
+//!
+//! Under embassy, `AddressService::with_controllers` takes an array of command
+//! channels and an array of [`ClaimedAddress`], one distinct `static` each;
+//! sharing one panics at start-up.
+//!
+//! A CAN controller does not receive its own frames, so the runner loops local
+//! emissions back: two local NAMEs aiming at the same address arbitrate as two
+//! devices would, every Controller Application answers a request a sibling
+//! emits, and each answers its own global Request for Address Claim (J1939-21).
+//! NAMEs must differ (`ClaimFault::DuplicateName` otherwise). With several
+//! Controller Applications, every frame one emits is also forwarded to the
+//! shared `AddressFrames`, Fast Packet fragments included, so each application
+//! sees its siblings' traffic; Fast Packet fragments are not looped back to the
+//! claim engines, which only react to single-frame claims and requests.
+//!
 //! # Receiving
 //!
 //! `AddressFrames` yields every frame, address-claim traffic included. Drain
@@ -102,9 +131,15 @@ pub mod runner_tokio;
 
 // One path whatever the runtime: only one runner is ever compiled in.
 #[cfg(all(feature = "embassy", not(feature = "tokio")))]
-pub use runner_embassy::{AddressFrames, AddressHandle, AddressRunner, AddressService};
+pub use runner_embassy::{
+    AddressFrames, AddressHandle, AddressRunner, AddressService, AddressServiceParts,
+    MultiAddressServiceParts,
+};
 #[cfg(feature = "tokio")]
-pub use runner_tokio::{AddressFrames, AddressHandle, AddressRunner, AddressService};
+pub use runner_tokio::{
+    AddressFrames, AddressHandle, AddressRunner, AddressService, AddressServiceParts,
+    MultiAddressServiceParts,
+};
 
 /// Commands queued by producer tasks.
 ///
@@ -201,37 +236,59 @@ pub enum AddressSupervisorRunError<E: Debug> {
     Send(E),
 }
 
-/// Execute one command. The error is returned to the runner, which decides
-/// whether it is fatal (`Send`, the bus is gone) or merely a rejection.
-async fn handle_command<'a, C: CanBus, T: KorriTimer>(
-    manager: &mut AddressManager<'a, C, T>,
+/// Run one command for Controller Application `index`. Only a bus error stops
+/// the runner: a rejected command is the caller's mistake and must not take
+/// address management down with it. `Ok(Some(frame))` is a single-frame
+/// emission the engines must see; `on_sent` sees every frame that reached the
+/// bus.
+async fn handle_command<'a, C: CanBus, T: KorriTimer, const N: usize>(
+    manager: &mut AddressManager<'a, C, T, N>,
+    index: usize,
     command: SupervisorCommand,
-) -> Result<(), SendPgnError<C::Error>>
+    on_sent: &mut impl FnMut(&CanFrame),
+) -> Result<Option<CanFrame>, AddressSupervisorRunError<C::Error>>
 where
     C::Error: Debug,
 {
-    match command {
-        // The caller supplied the source address: it must still be ours.
-        // A reclaim between build and send would make it someone else's.
-        SupervisorCommand::SendRawFrame(frame) => match manager.claimed_address() {
-            Some(claimed) if frame.id.source_address() == claimed => {
-                manager.emit_claim(&frame).await.map_err(SendPgnError::Send)
+    let result: Result<_, SendPgnError<C::Error>> = async {
+        match command {
+            // The caller supplied the source address: it must still be ours.
+            // A reclaim between build and send would make it someone else's.
+            SupervisorCommand::SendRawFrame(frame) => match manager.claimed_address_at(index) {
+                Some(claimed) if frame.id.source_address() == claimed => {
+                    manager.emit_raw(&frame).await.map_err(SendPgnError::Send)?;
+                    on_sent(&frame);
+                    Ok(Some(frame))
+                }
+                _ => Err(SendPgnError::NotClaimed),
+            },
+            SupervisorCommand::SendPayload {
+                pgn,
+                priority,
+                destination,
+                len,
+                payload,
+            } => {
+                // `len` is a public field of the command, and under embassy the
+                // caller owns the channel: an out-of-range value must not panic.
+                let payload = payload.get(..len).ok_or(SendPgnError::Serialization)?;
+                manager
+                    .send_payload_at(index, pgn, priority, destination, payload, on_sent)
+                    .await
             }
-            _ => Err(SendPgnError::NotClaimed),
-        },
-        SupervisorCommand::SendPayload {
-            pgn,
-            priority,
-            destination,
-            len,
-            payload,
-        } => {
-            // `len` is a public field of the command, and under embassy the
-            // caller owns the channel: an out-of-range value must not panic.
-            let payload = payload.get(..len).ok_or(SendPgnError::Serialization)?;
-            manager
-                .send_payload(pgn, priority, destination, payload)
-                .await
+        }
+    }
+    .await;
+
+    match result {
+        Ok(frame) => Ok(frame),
+        Err(SendPgnError::Send(err)) => Err(AddressSupervisorRunError::Send(err)),
+        Err(_rejected) => {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("supervisor command rejected");
+            // dropped, and only visible under `defmt`. A rejection
+            // channel when a consumer needs programmatic feedback.
+            Ok(None)
         }
     }
 }
