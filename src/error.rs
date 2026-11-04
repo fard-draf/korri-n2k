@@ -55,6 +55,10 @@ pub enum ClaimFault {
     #[error("Inconsistent match between IsoName and Address Claim Strategy")]
     InconsistentStrategy,
 
+    /// Two Controller Applications of the same node share a NAME.
+    #[error("Two Controller Applications share a NAME")]
+    DuplicateName,
+
     /// Failed to gather the information required to claim an address.
     #[error("Request address claim error")]
     RequestAddressClaimErr,

@@ -444,3 +444,285 @@ async fn supervisor_forwards_claim_frames_to_the_application() {
         } => {}
     }
 }
+
+//==================================================================================MULTI_ADDRESS
+// One bus, two Controller Applications aiming at the same address.
+
+/// Lower than `AAC_NAME`: wins the arbitration for `PREFERRED`.
+const AAC_NAME_LOWER: u64 = AAC_NAME - 1;
+
+fn multi_service(bus: MockCanBus) -> AddressService<'static, MockCanBus, MockTimer, 2> {
+    let strategy = AddressClaimStrategy::Arbitrary {
+        preferred: PREFERRED,
+    };
+    let manager = AddressManager::with_controllers(
+        bus,
+        MockTimer::new(),
+        [
+            (IsoName::from_raw(AAC_NAME), strategy),
+            (IsoName::from_raw(AAC_NAME_LOWER), strategy),
+        ],
+    )
+    .expect("strategies must match the NAMEs");
+    AddressService::new(manager, 4, 4)
+}
+
+fn claim_request(source: u8, destination: u8) -> CanFrame {
+    let mut data = [0xFF; 8];
+    data[..3].copy_from_slice(&60928u32.to_le_bytes()[..3]);
+    CanFrame {
+        id: CanId::builder(59904, source)
+            .to_destination(destination)
+            .build()
+            .unwrap(),
+        data,
+        len: 3,
+    }
+}
+
+fn drain(host_bus: &mut MockCanBus) {
+    while host_bus.try_recv().is_some() {}
+}
+
+/// Bounded: a missing frame must fail the test, not hang it.
+async fn next_frame(host_bus: &mut MockCanBus) -> CanFrame {
+    tokio::time::timeout(Duration::from_secs(2), host_bus.recv())
+        .await
+        .expect("frame expected in time")
+        .expect("bus open")
+}
+
+/// Claim sources seen on the bus until `count` of them arrived.
+async fn claim_sources(host_bus: &mut MockCanBus, count: usize) -> Vec<u8> {
+    let mut sources = Vec::new();
+    while sources.len() < count {
+        let frame = next_frame(host_bus).await;
+        if frame.id.pgn() == 60928 {
+            sources.push(frame.id.source_address());
+        }
+    }
+    sources.sort();
+    sources
+}
+
+#[tokio::test]
+async fn sibling_controllers_settle_on_distinct_addresses() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = multi_service(dut_bus).into_multi_parts();
+    let [Some(high), Some(low)] = parts.handles else {
+        panic!("command channels requested");
+    };
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    // The lower NAME keeps the preferred address; its sibling saw the claim
+    // through the loopback and moved on.
+    assert_eq!(low.claimed_address(), Some(PREFERRED));
+    assert_eq!(high.claimed_address(), Some(PREFERRED + 1));
+    drain(&mut host_bus);
+
+    // Each handle emits from its own address.
+    let position = Pgn129025::new();
+    high.send_pgn(&position, 129025, 2, None).await.unwrap();
+    let frame = next_frame(&mut host_bus).await;
+    assert_eq!(frame.id.source_address(), PREFERRED + 1);
+
+    // Dropping one handle closes only its channel; the sibling keeps emitting.
+    drop(high);
+    low.send_pgn(&position, 129025, 2, None).await.unwrap();
+    let frame = next_frame(&mut host_bus).await;
+    assert_eq!(frame.id.source_address(), PREFERRED);
+
+    runner.abort();
+    let _ = runner.await;
+    assert_eq!(low.claimed_address(), None);
+}
+
+#[tokio::test]
+async fn three_sibling_controllers_cascade_to_distinct_addresses() {
+    let (dut_bus, _host_bus) = MockCanBus::create_pair();
+    let strategy = AddressClaimStrategy::Arbitrary {
+        preferred: PREFERRED,
+    };
+    let manager = AddressManager::with_controllers(
+        dut_bus,
+        MockTimer::new(),
+        [
+            (IsoName::from_raw(AAC_NAME), strategy),
+            (IsoName::from_raw(AAC_NAME - 1), strategy),
+            (IsoName::from_raw(AAC_NAME - 2), strategy),
+        ],
+    )
+    .expect("strategies must match the NAMEs");
+    let parts = AddressService::new(manager, 2, 0).into_multi_parts();
+    let [Some(highest), Some(middle), Some(lowest)] = parts.handles else {
+        panic!("command channels requested");
+    };
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    assert_eq!(lowest.claimed_address(), Some(PREFERRED));
+    assert_eq!(middle.claimed_address(), Some(PREFERRED + 1));
+    assert_eq!(highest.claimed_address(), Some(PREFERRED + 2));
+
+    runner.abort();
+    let _ = runner.await;
+    assert_eq!(lowest.claimed_address(), None);
+    assert_eq!(middle.claimed_address(), None);
+    assert_eq!(highest.claimed_address(), None);
+}
+
+#[tokio::test]
+async fn every_controller_answers_a_global_request() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = multi_service(dut_bus).into_multi_parts();
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    drain(&mut host_bus);
+
+    host_bus.send(&claim_request(7, 255)).await.unwrap();
+    assert_eq!(
+        claim_sources(&mut host_bus, 2).await,
+        [PREFERRED, PREFERRED + 1]
+    );
+
+    runner.abort();
+}
+
+/// A request one Controller Application emits reaches its sibling, which the
+/// bus alone would never deliver.
+#[tokio::test]
+async fn a_sibling_answers_a_local_request() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = multi_service(dut_bus).into_multi_parts();
+    let [Some(high), _] = parts.handles else {
+        panic!("command channels requested");
+    };
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    drain(&mut host_bus);
+
+    high.send_raw_frame(&claim_request(PREFERRED + 1, PREFERRED))
+        .await
+        .unwrap();
+
+    let request = next_frame(&mut host_bus).await;
+    assert_eq!(request.id.pgn(), 59904);
+    assert_eq!(claim_sources(&mut host_bus, 1).await, [PREFERRED]);
+
+    runner.abort();
+}
+
+#[tokio::test]
+async fn a_duplicate_name_is_rejected() {
+    let (dut_bus, _host_bus) = MockCanBus::create_pair();
+    let strategy = AddressClaimStrategy::Arbitrary {
+        preferred: PREFERRED,
+    };
+    let name = IsoName::from_raw(AAC_NAME);
+    let result = AddressManager::with_controllers(dut_bus, MockTimer::new(), [(name, strategy); 2]);
+    assert!(matches!(
+        result,
+        Err(korri_n2k::error::ClaimFault::DuplicateName)
+    ));
+}
+
+/// J1939-21: a Controller Application holding an address answers its own
+/// global Request for Address Claim. True for a plain node too.
+#[tokio::test]
+async fn a_single_controller_answers_its_own_global_request() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = service(dut_bus, 4, 0).into_parts();
+    let handle = parts.handle.expect("command channel requested");
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    drain(&mut host_bus);
+
+    handle
+        .send_raw_frame(&claim_request(PREFERRED, 255))
+        .await
+        .unwrap();
+    assert_eq!(next_frame(&mut host_bus).await.id.pgn(), 59904);
+    assert_eq!(claim_sources(&mut host_bus, 1).await, [PREFERRED]);
+
+    runner.abort();
+}
+
+/// The emitter answers its own global request, and so does its sibling.
+#[tokio::test]
+async fn a_local_global_request_is_answered_by_every_controller() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = multi_service(dut_bus).into_multi_parts();
+    let [Some(high), _] = parts.handles else {
+        panic!("command channels requested");
+    };
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    drain(&mut host_bus);
+
+    high.send_raw_frame(&claim_request(PREFERRED + 1, 255))
+        .await
+        .unwrap();
+    assert_eq!(next_frame(&mut host_bus).await.id.pgn(), 59904);
+    assert_eq!(
+        claim_sources(&mut host_bus, 2).await,
+        [PREFERRED, PREFERRED + 1]
+    );
+
+    runner.abort();
+}
+
+/// The applications share `AddressFrames`: each must see what its siblings
+/// emit, Fast Packet fragments included, as on a bus of separate devices. Bus
+/// traffic still arrives exactly once.
+#[tokio::test]
+async fn sibling_emissions_reach_the_shared_frames_channel() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = multi_service(dut_bus).into_multi_parts();
+    let mut frames = parts.frames.expect("frame channel requested");
+    let [Some(high), _] = parts.handles else {
+        panic!("command channels requested");
+    };
+    let runner = tokio::spawn(parts.runner.drive());
+
+    sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(20), frames.recv()).await {}
+
+    high.send_pgn(&Pgn129025::new(), 129025, 2, None)
+        .await
+        .unwrap();
+    high.send_command(SupervisorCommand::SendPayload {
+        pgn: 129029,
+        priority: 3,
+        destination: None,
+        len: 20,
+        payload: [0x55; MAX_FAST_PACKET_PAYLOAD],
+    })
+    .await
+    .unwrap();
+    sleep(Duration::from_millis(50)).await;
+    host_bus.send(&data_frame(130306, 7)).await.unwrap();
+
+    let mut seen = Vec::new();
+    while let Ok(Some(frame)) = tokio::time::timeout(Duration::from_millis(50), frames.recv()).await
+    {
+        seen.push((frame.id.pgn(), frame.id.source_address()));
+    }
+    let from_high = PREFERRED + 1;
+    assert_eq!(
+        seen,
+        [
+            (129025, from_high),
+            (129029, from_high),
+            (129029, from_high),
+            (129029, from_high),
+            (130306, 7),
+        ]
+    );
+
+    runner.abort();
+}

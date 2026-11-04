@@ -21,6 +21,17 @@ instead of rejected.
   and 129793. Below `MinLength`, an absent field is still missing data and
   still an error.
 - `PgnDescriptor::min_length`, carrying that bound.
+- Several logical addresses on one node. `AddressManager::with_controllers`
+  takes one `(IsoName, AddressClaimStrategy)` per Controller Application; a
+  single runner drives them all on one bus. `into_multi_parts()` returns one
+  `AddressHandle` per Controller Application and a shared `AddressFrames`.
+  Under embassy, `AddressService::with_controllers` takes one command channel
+  and one `ClaimedAddress` per Controller Application, and panics if two share
+  one. Local emissions are looped back, so two local NAMEs aiming at the same
+  address arbitrate as two devices would, siblings see each other's traffic on
+  `AddressFrames` (Fast Packet included), and a Controller Application answers
+  its own global Request for Address Claim, as J1939-21 requires.
+  Single-address code is unchanged.
 - The `ADDRESS` field type, new in CANboat 9.1.0 for a one-byte bus address.
   It maps to `Number`. Its 20 fields were plain `NUMBER` in 7.1.0 and would
   otherwise have fallen through to `Unimplemented`. All are `full-pgns` only:
@@ -63,6 +74,9 @@ instead of rejected.
   keeps its 27 bytes: its 15-bit trailing reserved field was 7 reserved bits
   followed by that byte. 129794 grows from 75 to 76 bytes. Its 75-byte form
   still decodes through `MinLength`, with `sequence_id` reading 0xFF.
+- **BREAKING**: `ClaimFault` gains `DuplicateName`, returned when two
+  Controller Applications of one node share a NAME. An exhaustive `match` must
+  handle it.
 - **BREAKING**: `PgnDescriptor` gains `min_length: Option<u16>`. A descriptor
   built by hand must set it; `None` keeps the previous behaviour.
 - **BREAKING**: lookup variants renamed after upstream typo fixes.

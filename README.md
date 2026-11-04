@@ -87,6 +87,8 @@ Guides live in the API docs ([docs.rs](https://docs.rs/korri-n2k)):
 - Features, choosing PGNs (manifest / `full-pgns`), limits: crate root
 - Claim, send, receive (`AddressService`, `AddressHandle`, `AddressFrames`):
   `protocol::management::address_supervisor`
+- Several logical addresses on one node (`AddressManager::with_controllers`,
+  `into_multi_parts`): `protocol::management::address_supervisor`
 - Claim without a runtime (`AddressClaimEngine`):
   `protocol::management::address_claiming::engine`
 - Fast Packet reassembly (`FastPacketAssembler`):
