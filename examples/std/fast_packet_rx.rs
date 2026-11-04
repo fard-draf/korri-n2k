@@ -7,7 +7,7 @@
 //! wrong values. Branch on `handles()`, never on the decode result.
 //!
 //! ```bash
-//! cargo run --example fast_packet_rx
+//! cargo run --example fast_packet_rx --features std
 //! ```
 
 use korri_n2k::infra::codec::traits::PgnData;

@@ -1,36 +1,15 @@
-# korri-n2k Examples
+# Examples
 
-This directory contains examples organized by platform, following the [Embassy](https://github.com/embassy-rs/embassy/tree/main/examples) structure.
+All examples live under `examples/std/` and are compiled and run by CI:
 
-## Structure
+| Example | Command | Purpose |
+|---|---|---|
+| `quickstart` | `cargo run --example quickstart` | Decode a single-frame PGN |
+| `lookup_enum_usage` | `cargo run --example lookup_enum_usage` | Lookup enums |
+| `iso_name_usage` | `cargo run --example iso_name_usage` | ISO NAME fields and strategy |
+| `fast_packet_rx` | `cargo run --example fast_packet_rx --features std` | Reassemble a Fast Packet PGN |
+| `blocking_claim` | `cargo run --example blocking_claim --features std` | Drive `AddressClaimEngine` without a runtime |
+| `address_claim` | `cargo run --example address_claim --features tokio` | Claim an address and send a PGN over a loopback bus |
 
-```
-examples/
-├── std/              # Standard Rust examples (compile on any platform)
-├── esp32-s3/         # ESP32-S3 specific examples
-├── esp32-c3/         # ESP32-C3 specific examples
-└── stm32/            # STM32 specific examples
-```
-
-## Running Examples
-
-### Standard Examples (std/)
-
-These examples compile and run on any platform with `std`:
-
-```bash
-# Run the quickstart example
-cargo run --example quickstart
-
-# Run all std examples
-cargo test --examples
-```
-
-Available examples:
-- `quickstart` - Basic introduction to korri-n2k
-- `lookup_enum_usage` - Working with NMEA 2000 lookup enums
-- `iso_name_usage` - ISO Name manipulation and address claiming
-
-
-## Adding New Examples
-- **std examples**: Add to `examples/std/` - they will automatically compile with `cargo test`
+Hardware firmwares for STM32, ESP32 and SocketCAN live in
+[korri-n2k-examples](https://github.com/fard-draf/korri-n2k-examples).

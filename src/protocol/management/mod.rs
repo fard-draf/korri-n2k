@@ -6,7 +6,6 @@ compile_error!("features `embassy` and `tokio` are mutually exclusive: enable on
 
 pub mod address_claiming;
 pub mod address_manager;
-/// Only a runner drives the manager, and every runner is runtime-gated.
 #[cfg(any(feature = "embassy", feature = "tokio"))]
 pub mod address_supervisor;
 pub mod iso_name;

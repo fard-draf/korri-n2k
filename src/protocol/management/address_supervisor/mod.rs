@@ -1,3 +1,83 @@
+//! Claim an address, then send and receive. Runtime-gated: `embassy` or `tokio`.
+//!
+//! A node must own an address before it may emit. The claim runs under
+//! `AddressRunner`, never in a constructor.
+//!
+//! `AddressService::into_parts` returns three pieces:
+//!
+//! | Piece | Role |
+//! |---|---|
+//! | `AddressHandle` | queue outgoing PGNs, from any task |
+//! | `AddressFrames` | receive raw incoming frames, unfiltered |
+//! | `AddressRunner` | background task owning the event loop |
+//!
+//! ```rust,ignore
+//! static COMMANDS: Channel<CriticalSectionRawMutex, SupervisorCommand, 4> = Channel::new();
+//! static FRAMES: Channel<CriticalSectionRawMutex, CanFrame, 8> = Channel::new();
+//! static CLAIMED: ClaimedAddress = ClaimedAddress::new();
+//!
+//! let manager = AddressManager::new(bus, timer, my_name, strategy)?;
+//! let parts = AddressService::<_, _, 4, 8>::new(manager, Some(&COMMANDS), Some(&FRAMES), &CLAIMED)
+//!     .into_parts();
+//! let handle = parts.handle.expect("a command channel was provided");
+//! spawner.spawn(n2k_runner_task(parts.runner))?;
+//!
+//! // Commands queued before the 250 ms claim completes are dropped by the runner.
+//! if handle.claimed_address().is_some() {
+//!     let mut pos = Pgn129025::new();
+//!     pos.latitude = 47.7223;
+//!     pos.longitude = -4.0022;
+//!     handle.send_pgn(&pos, 129025, 2, None).await?; // Fast Packet is automatic
+//! }
+//!
+//! #[embassy_executor::task]
+//! async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyTimer, 4, 8>) {
+//!     // Terminal on error: reset the board or start a new runner.
+//!     let error = runner.drive().await;
+//! }
+//! ```
+//!
+//! Under embassy, channels and [`ClaimedAddress`] are `static`s owned by the
+//! application, and `#[embassy_executor::task]` cannot be generic: declare the
+//! runner task over your concrete types.
+//!
+//! Under tokio, pass integer capacities (`0` opts out of a channel) and spawn
+//! `parts.runner.drive()` directly:
+//!
+//! ```rust,ignore
+//! let manager = AddressManager::new(bus, TokioTimer::new(), my_name, strategy)?;
+//! let parts = AddressService::new(manager, 4, 8).into_parts();
+//! let handle = parts.handle.expect("a command channel was requested");
+//! tokio::spawn(async move {
+//!     if let Err(e) = parts.runner.drive().await { eprintln!("stopped: {e:?}"); }
+//! });
+//! ```
+//!
+//! # Receiving
+//!
+//! `AddressFrames` yields every frame, address-claim traffic included. Drain
+//! it: if you stop, frames are dropped, not queued. For PGNs over 8 bytes see
+//! [`fast_packet`](crate::protocol::transport::fast_packet).
+//!
+//! # `embassy` vs `tokio`
+//!
+//! An embassy channel never closes and never refuses, so some failures only
+//! exist under tokio. Code built for both needs a `cfg` at the three
+//! differing call sites.
+//!
+//! | Method | `embassy` | `tokio` |
+//! |---|---|---|
+//! | `AddressHandle::send_pgn` | `Result<(), AddressHandleError>` | `Result<(), AddressHandleError>` |
+//! | `AddressHandle::send_raw_frame` | `()` | `Result<(), AddressHandleError>` |
+//! | `AddressHandle::send_command` | `()` | `Result<(), AddressHandleError>` |
+//! | `AddressFrames::recv` | `CanFrame` | `Option<CanFrame>` |
+//!
+//! Under embassy, a stopped runner is not reported: producers block once the
+//! channel fills, and `claimed_address()` returning `None` is the only sign.
+//!
+//! Examples: `cargo run --example address_claim --features tokio`; firmwares
+//! in [korri-n2k-examples](https://github.com/fard-draf/korri-n2k-examples).
+
 use core::fmt::Debug;
 
 use portable_atomic::{AtomicU16, Ordering};
@@ -69,9 +149,6 @@ pub enum AddressHandleError {
 /// reclaim that may happen in between; the command is refused in that case. The
 /// runner's own guard stays the authority. This only lets a caller observe the
 /// campaign and avoid asking for what it knows will be refused.
-///
-/// One instance per Controller Application: it hangs off the handle, so a node
-/// holding several NAMEs reads each address through its own handle.
 pub struct ClaimedAddress(AtomicU16);
 
 const STATUS_CLAIMING: u16 = 0x0100;
