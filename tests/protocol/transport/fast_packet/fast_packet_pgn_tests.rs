@@ -41,12 +41,9 @@ fn test_pgn_129040_fast_packet_roundtrip() {
         let frame = frame_result.expect("frame build");
         frame_count += 1;
 
-        if let ProcessResult::MessageComplete(msg) = assembler.process_frame(
-            fake_timer.now_ms().try_into().unwrap(),
-            pgn,
-            42,
-            &frame.data,
-        ) {
+        if let ProcessResult::MessageComplete(msg) =
+            assembler.process_frame(fake_timer.now_ms(), pgn, 42, &frame.data)
+        {
             complete = Some(msg);
             break;
         }
@@ -73,7 +70,7 @@ fn test_pgn_126996_fast_packet_roundtrip() {
     // PGN 126996 carries several fixed ASCII strings (32 bytes each).
     // Verify serialization preserves size, padding, and metadata ordering.
     let pgn = 126996;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
     let mut product = Pgn126996::new();
     product.nmea2000_version = 2.005; // version 02.005
     product.product_code = 0x42AF;
@@ -158,7 +155,7 @@ fn test_pgn_126998_fast_packet_roundtrip() {
     }
 
     let pgn = 126998;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
     let mut config = Pgn126998::new();
     let mut desc1 = PgnBytes::new();
     let mut desc2 = PgnBytes::new();

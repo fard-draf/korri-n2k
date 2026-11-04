@@ -39,7 +39,7 @@ fn test_roundtrip_15_bytes() {
 fn test_roundtrip_max_payload() {
     let original = [0x42; 223];
     let pgn = 129540;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
 
     // PGN 129540 is PDU2 (broadcast)
     let builder = FastPacketBuilder::new(pgn, 30, None, &original);
@@ -67,7 +67,7 @@ fn test_roundtrip_max_payload() {
 /// Interleaved sessions must remain independent.
 fn test_roundtrip_with_interleaved_frames() {
     let pgn = 129540;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
     let payload_a = [0xAA; 20];
     let payload_b = [
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,

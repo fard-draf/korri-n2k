@@ -21,7 +21,7 @@ impl Eq for ProcessResult {}
 fn test_full_fast_packet_reassembly() {
     let mut assembler = FastPacketAssembler::new();
     let source_address = 42;
-    let fake_timer_ms: u32 = 40;
+    let fake_timer_ms: u64 = 40;
     let pgn = 129540;
     // --- Frame 1 (start) ---
     // Total length = 15 bytes
@@ -58,7 +58,7 @@ fn test_full_fast_packet_reassembly() {
 fn test_out_of_sequence_packet() {
     let mut assembler = FastPacketAssembler::new();
     let source_address = 10;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
     let pgn = 129540;
 
     let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
@@ -78,7 +78,7 @@ fn test_multiple_concurrent_sessions() {
     let mut assembler = FastPacketAssembler::new();
     let source_a = 10;
     let source_b = 20;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
     let pgn = 129540;
     // Start message A
     let frame_a0: [u8; 8] = [0, 10, 1, 2, 3, 4, 5, 6];
@@ -125,7 +125,7 @@ fn test_interleaved_sequences_same_source() {
     let pgn = 129740;
     let mut assembler = FastPacketAssembler::with_pgns(&[129740]);
     let source = 7;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
 
     // Message A: sequence 1 (upper bits = 0b001)
     let frame_a0: [u8; 8] = [0b001_00000, 10, 1, 2, 3, 4, 5, 6];
@@ -261,26 +261,6 @@ fn test_timeout_is_refreshed_by_each_fragment() {
     assert!(2 * step > SESSION_TIMEOUT_MS);
     assert!(matches!(
         assembler.process_frame(2 * step, pgn, source, &frame2),
-        ProcessResult::MessageComplete(_)
-    ));
-}
-
-#[test]
-/// Elapsed time must be computed with wrapping arithmetic, so a session started
-/// just before the `u32` millisecond counter rolls over still completes.
-fn test_timeout_across_u32_wrap() {
-    let mut assembler = FastPacketAssembler::new();
-    let pgn = 129540;
-    let source = 42;
-    let start = u32::MAX - 100;
-
-    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
-    assembler.process_frame(start, pgn, source, &frame0);
-
-    // 151 ms later, on the other side of the wrap.
-    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
-    assert!(matches!(
-        assembler.process_frame(50, pgn, source, &frame1),
         ProcessResult::MessageComplete(_)
     ));
 }

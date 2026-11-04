@@ -36,6 +36,8 @@ instead of rejected.
   generated under `full-pgns` wherever the manifest enables their PGN.
 
 ### Changed
+- **BREAKING**: `FastPacketAssembler::process_frame` now takes `now_ms: u64`
+  instead of `u32`, matching `Clock::now_ms` and `AddressClaimEngine::poll`.
 - **BREAKING**: `canboat.json` is CANboat v9.1.0. Every generated type follows
   it; the entries below are the ones a caller is likely to hit.
 - **BREAKING**: one-bit yes/no fields use `YesNo1bit` instead of `YesNo`. In

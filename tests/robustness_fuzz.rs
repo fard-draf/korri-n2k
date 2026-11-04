@@ -440,7 +440,7 @@ fn sixty_four_bit_values_survive() {
 fn assembler_survives_an_adversarial_stream() {
     let mut assembler = FastPacketAssembler::new();
     let mut rng = Rng(0xDEAD_BEEF_CAFE_F00D);
-    let mut now: u32 = 0;
+    let mut now: u64 = 0;
 
     for i in 0..200_000u32 {
         let mut data = [0u8; 8];
@@ -450,9 +450,9 @@ fn assembler_survives_an_adversarial_stream() {
         let source = rng.next_byte() % 6;
         let pgn = 126_000 + (rng.next_byte() % 3) as u32;
 
-        now = now.wrapping_add((rng.next_byte() % 200) as u32);
+        now = now.saturating_add((rng.next_byte() % 200) as u64);
         if i % 10_000 == 0 {
-            now = now.wrapping_add(u32::MAX / 3); // force expiry and wrap-around
+            now = now.saturating_add(1_000); // force expiry
         }
 
         if let ProcessResult::MessageComplete(message) =
