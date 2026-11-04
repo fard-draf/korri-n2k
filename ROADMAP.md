@@ -1,7 +1,7 @@
 # Roadmap
 
 Features planned before 1.0, by priority within each section.
-`[ ]` to do, `[~]` in progress.
+`[ ]` to do, `[~]` in progress, `[x]` done.
 
 ## 1. Protocol: behave like a certified node
 
@@ -47,5 +47,4 @@ Features planned before 1.0, by priority within each section.
 ## 5. 1.0
 
 - [ ] Public API frozen: breaking changes only in major releases.
-- [ ] A second maintainer, or regular outside contributors.
-- [ ] Track CANboat releases through its release notifications.
+- [x] Track CANboat releases through its release notifications.

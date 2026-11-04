@@ -1,3 +1,34 @@
+//! Claim without a runtime: [`AddressClaimEngine`] is synchronous and does no
+//! I/O. It takes a millisecond reading and an optional frame, and returns a
+//! [`ClaimOutput`]. A bare-metal main loop drives it with no executor or timer.
+//!
+//! ```rust,ignore
+//! loop {
+//!     let received = bus.try_recv(now_ms);
+//!     let mut output = engine.poll(now_ms, received.as_ref());
+//!
+//!     // Emit first: a request on the exact ms the window closes yields a
+//!     // defence frame *and* `Claimed`. Returning on status would drop it.
+//!     if let Some(frame) = output.tx {
+//!         bus.send(&frame);
+//!         output = engine.tx_sent(now_ms); // starts the timer
+//!     }
+//!     if let ClaimStatus::Claimed(address) = output.status {
+//!         return address;
+//!     }
+//!     // `wake_at_ms` is an upper bound, not a sleep order; `None` is not "done".
+//!     now_ms += match output.wake_at_ms {
+//!         Some(d) => d.saturating_sub(now_ms).clamp(1, TICK_MS),
+//!         None => TICK_MS,
+//!     };
+//! }
+//! ```
+//!
+//! The library ships no blocking facade: no trait covers `try_recv`, an
+//! interrupt flag, a FIFO and a scheduler tick honestly.
+//!
+//! Example: `cargo run --example blocking_claim --features std`.
+
 use crate::{
     error::ClaimFault::{self},
     protocol::{
