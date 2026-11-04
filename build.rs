@@ -139,8 +139,9 @@ fn main() -> Result<(), BuildError> {
 
 /// Download canboat.json from the CANboat repository when missing.
 fn download_canboat(dest_path: &PathBuf) -> Result<(), BuildError> {
+    // Pinned to the tag the generator is validated against: `master` drifts.
     const CANBOAT_URL: &str =
-        "https://raw.githubusercontent.com/canboat/canboat/master/docs/canboat.json";
+        "https://raw.githubusercontent.com/canboat/canboat/v9.1.0/docs/canboat.json";
 
     println!(
         "cargo:warning=Downloading canboat.json from {}",

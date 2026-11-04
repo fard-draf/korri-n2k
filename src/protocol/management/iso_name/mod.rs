@@ -187,7 +187,7 @@ impl From<Pgn60928> for IsoName {
             .device_class(u8::from(pgn.device_class))
             .system_instance(pgn.system_instance)
             .industry_group(u8::from(pgn.industry_group))
-            .arbitrary_address_capable(pgn.arbitrary_address_capable != YesNo::No)
+            .arbitrary_address_capable(pgn.arbitrary_address_capable != YesNo1bit::No)
             .build()
     }
 }
@@ -209,9 +209,9 @@ impl From<IsoName> for Pgn60928 {
         pgn.system_instance = name.system_instance();
         pgn.industry_group = IndustryCode::from(name.industry_group());
         pgn.arbitrary_address_capable = if name.is_arbitrary_address_capable() {
-            YesNo::Yes
+            YesNo1bit::Yes
         } else {
-            YesNo::No
+            YesNo1bit::No
         };
         pgn
     }
@@ -513,7 +513,7 @@ mod tests {
         pgn.set_device_function(DeviceFunction::Diagnostic); // 2690 = 0x0A82
         pgn.device_class = DeviceClass::from(25); // InternetworkDevice
         pgn.system_instance = 7;
-        pgn.arbitrary_address_capable = YesNo::Yes;
+        pgn.arbitrary_address_capable = YesNo1bit::Yes;
 
         // Convert to IsoName
         let iso_name: IsoName = pgn.into();
@@ -560,7 +560,7 @@ mod tests {
         assert_eq!(u8::from(pgn.device_class), 20);
         assert_eq!(pgn.system_instance, 10);
         assert_eq!(u8::from(pgn.industry_group), 4);
-        assert_eq!(pgn.arbitrary_address_capable, YesNo::No);
+        assert_eq!(pgn.arbitrary_address_capable, YesNo1bit::No);
     }
 
     #[test]
@@ -575,7 +575,7 @@ mod tests {
         original_pgn.set_device_function(DeviceFunction::AlarmEnunciator5230); // SAE // 5230 = 0x146E
         original_pgn.device_class = DeviceClass::from(30); // SAE //  ElectricalDistribution
         original_pgn.system_instance = 15;
-        original_pgn.arbitrary_address_capable = YesNo::Yes;
+        original_pgn.arbitrary_address_capable = YesNo1bit::Yes;
 
         // Convert to IsoName and back
         let iso_name: IsoName = original_pgn.into();

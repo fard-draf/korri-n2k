@@ -2,7 +2,7 @@
 //! used during the NMEA 2000 address claim procedure.
 
 use korri_n2k::protocol::{
-    lookups::{DeviceClass, IndustryCode, ManufacturerCode, YesNo},
+    lookups::{DeviceClass, IndustryCode, ManufacturerCode, YesNo1bit},
     management::{address_claiming::build_address_claim_frame, iso_name::IsoName},
     messages::Pgn60928,
     transport::can_frame::CanFrame,
@@ -61,7 +61,7 @@ fn main() {
     pgn.device_function = 255;
     pgn.device_class = DeviceClass::InternetworkDevice;
     pgn.industry_group = IndustryCode::MarineIndustry;
-    pgn.arbitrary_address_capable = YesNo::Yes;
+    pgn.arbitrary_address_capable = YesNo1bit::Yes;
 
     println!(
         "  Created Pgn60928 with unique_number: {}",

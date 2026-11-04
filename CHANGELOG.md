@@ -3,6 +3,120 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+This cycle moves the bundled CANboat database from v7.1.0 (schema 2.5.0) to
+v9.1.0 (schema 2.8.0). Most of what follows is the generated code tracking
+upstream: renamed lookups, corrected layouts, new variants. The engine gains
+`MinLength`, so a device built against an older layout of a PGN is decoded
+instead of rejected.
+
+### Added
+- `MinLength` support. A payload shorter than `Length` but at least
+  `MinLength` long now decodes, its missing tail read as 0xFF, the N2K "not
+  available" value. NMEA 2000 keeps appending fields to existing PGNs, devices
+  built against the earlier layout keep sending it, and CANboat 9.1.0 now
+  publishes that shorter form. The default manifest has six such PGNs: 126996,
+  129038, 129039, 129794, 129809 and 129810. `full-pgns` adds 127258, 127506
+  and 129793. Below `MinLength`, an absent field is still missing data and
+  still an error.
+- `PgnDescriptor::min_length`, carrying that bound.
+- The `ADDRESS` field type, new in CANboat 9.1.0 for a one-byte bus address.
+  It maps to `Number`. Its 20 fields were plain `NUMBER` in 7.1.0 and would
+  otherwise have fallen through to `Unimplemented`. All are `full-pgns` only:
+  65240, 65332, 130840, 130845, 130846, 130850 and 130851.
+- INDIRECT_LOOKUP fields wider than 8 bits. `FUSION_SETTING_VALUE`, used by
+  126720 and 130820, is the first: both halves of its key ride in 32-bit
+  fields. Such a field is now typed by its bit length instead of always `u8`,
+  and the encoder writes its raw value instead of the low byte alone. The
+  generated `get_` helper returns `None` when either half does not fit a byte.
+- 23 lookup types, among them `YesNo1bit`, `GnssSystem` and
+  `FusionSettingValue`. CANboat 9.1.0 also defines 48 new PGN variants, mostly
+  Fusion, Furuno, Garmin, Simnet, Sleipner and Navico proprietary messages,
+  generated under `full-pgns` wherever the manifest enables their PGN.
+
+### Changed
+- **BREAKING**: `canboat.json` is CANboat v9.1.0. Every generated type follows
+  it; the entries below are the ones a caller is likely to hit.
+- **BREAKING**: one-bit yes/no fields use `YesNo1bit` instead of `YesNo`. In
+  the default manifest: `Pgn60928::arbitrary_address_capable`, and
+  `integrated_display`, `dsc` and `can_handle_msg22` of `Pgn129039`.
+  `full-pgns` adds fields of 126983, 128520, 129041, 129801 and 65314. The
+  variants are the same (`No`, `Yes`, `Unrecognized`), so replacing the type
+  name is enough. `YesNo` remains for the wider fields.
+- **BREAKING**: `ManufacturerCode` drops legal suffixes and fixes upstream
+  typos. 84 variants are renamed or removed: `ArksEnterprisesInc` becomes
+  `ArksEnterprises`, `HondaMotorCompanyLtd` becomes `HondaMotor`, `Nobletec`
+  becomes `Nobeltec`, `BavariaYacts` becomes `BavariaYachts`.
+- **Behaviour change.** Two `ManufacturerCode` variants keep their name but not
+  their value, so code naming them still compiles and now emits another code.
+  `BepMarine` goes from 116 to 295 and `HumminbirdMarineElectronics` from 467
+  to 476: CANboat folded the duplicate entries `BepMarine2` and
+  `HumminbirdMarineElectronics2` into them. Codes 116, 175, 200, 225, 250,
+  311, 467 and 645 are no longer named and decode as `Unrecognized`.
+- **BREAKING**: in PGN 129540, `PrnInfo::reserved11` becomes
+  `gnss_system: GnssSystem`. The four bits CANboat called reserved now name the
+  constellation the satellite belongs to.
+- **BREAKING**: PGN 129039 and 129794 gain a trailing `sequence_id: u8`. 129039
+  keeps its 27 bytes: its 15-bit trailing reserved field was 7 reserved bits
+  followed by that byte. 129794 grows from 75 to 76 bytes. Its 75-byte form
+  still decodes through `MinLength`, with `sequence_id` reading 0xFF.
+- **BREAKING**: `PgnDescriptor` gains `min_length: Option<u16>`. A descriptor
+  built by hand must set it; `None` keeps the previous behaviour.
+- **BREAKING**: lookup variants renamed after upstream typo fixes.
+  `CzoneAlarmType::ShuntMistmatch` becomes `ShuntMismatch`,
+  `NavicoDataType::GeoidalSeperation` becomes `GeoidalSeparation`, and
+  `Seatalk1Command::DeviceIndentification` becomes `DeviceIdentification`.
+  `FusionMessageId` fixes `DabUpdtateCommand`, `SetLowPassFiler` and
+  `ScanMultirooomDevices`, and drops the `Fapi` prefix of four variants.
+  `BandgKeyValue::PitchAngle` gives way to `YawRate` and `PitchRate`.
+  `SimnetBacklightLevel` loses `DayMode` and `NightMode`.
+- **Behaviour change.** Three `FusionSetting` variants change value:
+  `MaxVolumeStart` goes from 75 to 76, `BtAutoConnect` from 76 to 77 and
+  `NullSetting` from 77 to 1000.
+- `EntertainmentPlayStatus` is `repr(u8)`, down from `u16`, and its
+  `Unrecognized` variant holds a `u8`. CANboat lowered its `MaxValue` from
+  65535 to 255, the width of the field carrying it.
+- **Behaviour change.** PGN 127751 (DC Voltage/Current) is single frame, no
+  longer Fast Packet. It leaves `FAST_PACKET_PGNS_ALL`, which drops from 182 to
+  181 entries, so an assembler built on that table no longer reassembles it.
+  The default manifest does not contain it.
+- `full-pgns` layouts corrected upstream. 129793 grows from 24 to 27 bytes.
+  The Simnet 130850 command variants all declare 12 bytes, instead of 11 or 14.
+  Airmar 130944 becomes a repeating group of test results. Furuno 130842 names
+  its roll, pitch and yaw rates. The reactive power of 65006 and 65009 becomes
+  signed. Garmin 126720 variants type their message identifiers as lookups.
+- The `build-download` feature fetches `canboat.json` from the `v9.1.0` tag
+  instead of `master`, so a build no longer depends on the day it runs.
+- `NOTICE` names the bundled database: schema 2.8.0, CANboat v9.1.0.
+
+### Fixed
+- Five PGNs of the default manifest rejected the shorter payload of a device
+  built against their earlier layout: 126996, 129038, 129039, 129809 and
+  129810. The message failed with `InvalidDataLength` and was lost whole. They
+  now decode through `MinLength`.
+- Simnet 130850 decodes every message of the replay capture. Four of its ten
+  failed against the 14-byte length CANboat 7.1.0 declared, while the autopilot
+  sends 12.
+
+### Removed
+- **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
+  lookup types, dropped by CANboat.
+- **BREAKING**: `Pgn126720MaretronSlaveResponse` and `Pgn130817NavicoUnknown`,
+  and the matching variants of their dispatch enums. Both were `full-pgns`
+  only.
+
+### Internal
+- `tests/replay_real_capture.rs` requires zero decode failures. The exception
+  it kept for 130850 has no reason left.
+- `tests/test_min_length.rs` pins the three cases of 129794: 76 bytes read the
+  trailing field, 75 bytes read it as 0xFF, 74 bytes are rejected.
+- `tests/test_indirect_lookup_32bit.rs` round-trips a 32-bit indirect value
+  above 255 through 126720, which the low-byte encoder used to truncate.
+- The generator reads the `MaxValue` of an indirect lookup as `u32`.
+  `FUSION_SETTING_VALUE` declares 4294967295, and the `u8` it was read into
+  skipped the whole lookup with a mere build warning.
+
 ## [0.7.1] - 2026-09-23
 
 ### Added
