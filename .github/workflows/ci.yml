@@ -33,6 +33,7 @@ jobs:
           cargo run --example fast_packet_rx --features std
           cargo run --example blocking_claim --features std
           cargo run --example address_claim --features tokio
+          cargo run --example monitor --features std
 
   check-embedded-cortex-m4:
     name: Check (no_std / cortex-m4)

@@ -7,11 +7,14 @@ use super::type_helpers::*;
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Write};
 
 /// Iterate over lookup categories and emit the corresponding Rust code.
-pub(crate) fn run_lookup_gen(canboat_value: &Value) -> Result<String, BuildError> {
+pub(crate) fn run_lookup_gen(
+    canboat_value: &Value,
+    pgns_to_generate: &[u32],
+) -> Result<String, BuildError> {
     let mut buffer_lookup_code = String::new();
     writeln!(&mut buffer_lookup_code, "#[allow(clippy::all)]")?;
 
@@ -36,7 +39,122 @@ pub(crate) fn run_lookup_gen(canboat_value: &Value) -> Result<String, BuildError
         &mut buffer_lookup_code,
     )?;
 
+    generate_lookup_name_helpers(canboat_value, pgns_to_generate, &mut buffer_lookup_code)?;
+
     Ok(buffer_lookup_code)
+}
+
+/// Emit `lookup_name` and `lookup_name_indirect` for the lookups referenced by the active manifest.
+fn generate_lookup_name_helpers(
+    canboat_value: &Value,
+    pgns_to_generate: &[u32],
+    buffer: &mut String,
+) -> Result<(), BuildError> {
+    let mut used_direct = HashSet::new();
+    let mut used_indirect = HashSet::new();
+
+    if let Some(pgn_array) = canboat_value["PGNs"].as_array() {
+        for pgn_value in pgn_array {
+            if let Ok(pgn_def) = serde_json::from_value::<PgnInstructions>(pgn_value.clone()) {
+                if !pgns_to_generate.contains(&pgn_def.pgn_id)
+                    || pgn_def.repeating_field_set_2_size.is_some()
+                {
+                    continue;
+                }
+                for field in &pgn_def.fields {
+                    if let Some(ref name) = field.enum_direct_name {
+                        used_direct
+                            .insert(to_pascal_case(&name.to_lowercase(), PascalCaseMode::Hard));
+                    }
+                    if let Some(ref name) = field.enum_indirect_name {
+                        used_indirect
+                            .insert(to_pascal_case(&name.to_lowercase(), PascalCaseMode::Hard));
+                    }
+                }
+            }
+        }
+    }
+
+    writeln!(buffer)?;
+    writeln!(
+        buffer,
+        "/// CANboat label of a direct lookup value; `enum_name` is"
+    )?;
+    writeln!(
+        buffer,
+        "/// `FieldDescriptor::enum_direct_name` (PascalCase, e.g. \"ManufacturerCode\")."
+    )?;
+    writeln!(
+        buffer,
+        "pub fn lookup_name(enum_name: &str, raw: u32) -> Option<&'static str> {{"
+    )?;
+    writeln!(buffer, "\tlet _ = raw;")?;
+    writeln!(buffer, "\tmatch enum_name {{")?;
+    if let Some(array) = canboat_value["LookupEnumerations"].as_array() {
+        for value in array {
+            if let Ok(lookup_def) = serde_json::from_value::<LookupEnum>(value.clone()) {
+                let pascal = to_pascal_case(&lookup_def.name.to_lowercase(), PascalCaseMode::Hard);
+                if !used_direct.contains(&pascal) {
+                    continue;
+                }
+                writeln!(buffer, "\t\t{:?} => match raw {{", pascal)?;
+                for ev in &lookup_def.enum_values {
+                    writeln!(buffer, "\t\t\t{} => Some({:?}),", ev.value, ev.name)?;
+                }
+                writeln!(buffer, "\t\t\t_ => None,")?;
+                writeln!(buffer, "\t\t}},")?;
+            }
+        }
+    }
+    writeln!(buffer, "\t\t_ => None,")?;
+    writeln!(buffer, "\t}}")?;
+    writeln!(buffer, "}}")?;
+
+    writeln!(buffer)?;
+    writeln!(
+        buffer,
+        "/// CANboat label of an indirect lookup value; `primary` is the value of the"
+    )?;
+    writeln!(
+        buffer,
+        "/// field at `enum_indirect_field_order` (1-based CANboat order, so index"
+    )?;
+    writeln!(
+        buffer,
+        "/// `order - 1` in `descriptor.fields`), `secondary` the field's own value."
+    )?;
+    writeln!(
+        buffer,
+        "pub fn lookup_name_indirect(enum_name: &str, primary: u8, secondary: u8) -> Option<&'static str> {{"
+    )?;
+    writeln!(
+        buffer,
+        "\tlet key = (primary as u16) << 8 | (secondary as u16);"
+    )?;
+    writeln!(buffer, "\tlet _ = key;")?;
+    writeln!(buffer, "\tmatch enum_name {{")?;
+    if let Some(array) = canboat_value["LookupIndirectEnumerations"].as_array() {
+        for value in array {
+            if let Ok(lookup_def) = serde_json::from_value::<LookupIndirEnum>(value.clone()) {
+                let pascal = to_pascal_case(&lookup_def.name.to_lowercase(), PascalCaseMode::Hard);
+                if !used_indirect.contains(&pascal) {
+                    continue;
+                }
+                writeln!(buffer, "\t\t{:?} => match key {{", pascal)?;
+                for ev in &lookup_def.indir_enum_values {
+                    let combined = ((ev.value1 as u16) << 8) | (ev.value2 as u16);
+                    writeln!(buffer, "\t\t\t{} => Some({:?}),", combined, ev.name)?;
+                }
+                writeln!(buffer, "\t\t\t_ => None,")?;
+                writeln!(buffer, "\t\t}},")?;
+            }
+        }
+    }
+    writeln!(buffer, "\t\t_ => None,")?;
+    writeln!(buffer, "\t}}")?;
+    writeln!(buffer, "}}")?;
+
+    Ok(())
 }
 
 /// Process a CANboat lookup category and append the generated code.

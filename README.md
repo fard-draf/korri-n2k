@@ -80,6 +80,50 @@ Only the PGNs listed in a manifest are compiled in:
 | Custom or minimal set (`{"pgns": [{"id": 128267, "name": "..."}]}`) | `KORRI_N2K_MANIFEST_PATH=/abs/path/manifest.json` |
 | Every supported PGN | `features = ["full-pgns"]` |
 
+## Passive monitoring
+
+A bus monitor or logger can decode any received PGN without knowing its Rust
+type at compile time, and without ever transmitting on the bus:
+
+- `protocol::messages::descriptor(pgn)` and `descriptor_for(pgn, payload)`
+  resolve the static `PgnDescriptor` at runtime (including proprietary
+  multi-variant PGNs, with the same discriminators and order as `from_payload`).
+- `infra::codec::engine::for_each_field(desc, payload, |field, reading| …)`
+  visits every non-reserved field in wire order (`no_std`, zero allocation),
+  yielding its scaled `PgnValue`, raw wire integer, repeating-group index, and
+  `Availability` (`Available`, `NotAvailable`, `OutOfRange`, `Reserved`) matched
+  directly against the per-field sentinels in `canboat.json` (`string_fix_trimmed`
+  handles fixed-length ASCII padding).
+- `protocol::lookups::lookup_name` and `lookup_name_indirect` return the
+  original CANboat human-readable labels for the active manifest.
+
+```rust
+use korri_n2k::core::Availability;
+use korri_n2k::infra::codec::engine::for_each_field;
+use korri_n2k::protocol::messages::descriptor_for;
+
+let payload = [0x01, 0x08, 0x02, 0x00, 0x00, 0xD4, 0xFE, 0xFF];
+let desc = descriptor_for(128267, &payload).expect("Water Depth in manifest");
+
+let mut range_na = false;
+for_each_field(desc, &payload, |field, reading| {
+    if field.id == "Range" {
+        range_na = reading.availability == Availability::NotAvailable;
+    }
+})
+.expect("valid payload");
+assert!(range_na);
+```
+
+**Flash footprint (`thumbv7em-none-eabihf`, `opt-level = "s"`, LTO):** zero
+overhead when unreferenced (the linker strips unused descriptors and tables).
+Calling `descriptor_for` + `for_each_field` + `lookup_name` pulls in the
+descriptors of the active manifest (~1.1–1.4 KB of `.rodata` per descriptor,
+until `FieldDescriptor` is compacted in a future release): ~79 KB `.rodata` /
++13 KB `.text` with the default manifest (49 descriptors), and ~573 KB `.rodata`
+/ +48 KB `.text` with `full-pgns` (474 descriptors). On a microcontroller, use a
+custom `KORRI_N2K_MANIFEST_PATH` listing only the PGNs you monitor.
+
 ## Documentation
 
 Guides live in the API docs ([docs.rs](https://docs.rs/korri-n2k)):
@@ -97,7 +141,8 @@ Guides live in the API docs ([docs.rs](https://docs.rs/korri-n2k)):
 
 Runnable examples (CI runs them): `quickstart`, `lookup_enum_usage`,
 `iso_name_usage`, `fast_packet_rx --features std`,
-`blocking_claim --features std`, `address_claim --features tokio`. Firmwares for
+`blocking_claim --features std`, `monitor --features std`,
+`address_claim --features tokio`. Firmwares for
 STM32, ESP32 and SocketCAN: [korri-n2k-examples](https://github.com/fard-draf/korri-n2k-examples).
 
 Known gaps (Fast Packet reassembly is manual on RX; no ISO Transport Protocol or

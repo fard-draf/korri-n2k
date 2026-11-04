@@ -45,8 +45,26 @@ instead of rejected.
   `FusionSettingValue`. CANboat 9.1.0 also defines 48 new PGN variants, mostly
   Fusion, Furuno, Garmin, Simnet, Sleipner and Navico proprietary messages,
   generated under `full-pgns` wherever the manifest enables their PGN.
+- Passive monitoring APIs (`no_std`, zero allocation, zero transmission):
+  - `protocol::messages::descriptor(pgn)` and `descriptor_for(pgn, payload)` to
+    resolve a static `PgnDescriptor` at runtime, including multi-variant
+    proprietary PGNs with the same discriminators and order as `from_payload`.
+  - `Availability` (`Available`, `NotAvailable`, `OutOfRange`, `Reserved`),
+    `FieldDescriptor::availability(raw)` comparing against the exact per-field
+    CANboat sentinels (`UnknownValue`, `OutOfRangeValue`, `ReservedValue`, plus
+    `MMSI == 0`), and `infra::codec::engine::string_fix_trimmed` for fixed-width
+    ASCII fields.
+  - `infra::codec::engine::for_each_field` and `FieldReading`, visiting every
+    non-reserved field of a payload (repeating groups and `MinLength` padding
+    included) and exposing both the scaled `PgnValue` and the raw wire integer.
+  - `protocol::lookups::lookup_name` and `lookup_name_indirect`, returning the
+    original CANboat labels for the lookups referenced by the active manifest.
+  - Runnable example `monitor` (`cargo run --example monitor --features std`).
 
 ### Changed
+- **BREAKING**: `FieldDescriptor` gains `unknown_value: Option<i64>`,
+  `out_of_range_value: Option<i64>` and `reserved_value: Option<i64>`. A
+  descriptor built by hand must set them (`None` disables sentinel matching).
 - **BREAKING**: `FastPacketAssembler::process_frame` now takes `now_ms: u64`
   instead of `u32`, matching `Clock::now_ms` and `AddressClaimEngine::poll`.
 - **BREAKING**: `canboat.json` is CANboat v9.1.0. Every generated type follows

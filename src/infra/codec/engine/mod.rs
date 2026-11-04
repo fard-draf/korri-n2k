@@ -3,8 +3,182 @@
 //! strongly typed domain structures.
 use super::bits::{BitReader, BitWriter};
 use super::traits::FieldAccess;
-use crate::core::{FieldDescriptor, FieldKind, PgnBytes, PgnDescriptor, PgnValue, MAX_PGN_BYTES};
+use crate::core::{
+    Availability, FieldDescriptor, FieldKind, PgnBytes, PgnDescriptor, PgnValue, RepeatingFieldSet,
+    MAX_PGN_BYTES,
+};
 use crate::error::{CodecError, DeserializationError, SerializationError};
+
+/// One field reading emitted by [`for_each_field`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldReading {
+    /// Scaled value, identical to what `FieldAccess::field` returns.
+    pub value: PgnValue,
+    /// Raw unsigned bit pattern on the wire (`None` for strings and byte-aligned binary).
+    pub raw: Option<u64>,
+    /// Availability determined from CANboat sentinels (or trimmed `STRING_FIX`).
+    pub availability: Availability,
+    /// `(array_id, index)` when the field belongs to a repeating group.
+    pub repetition: Option<(&'static str, usize)>,
+}
+
+/// Pads a payload between `min_length` and `length` with `0xFF` ("not available").
+fn pad_to_min_length<'a>(
+    payload: &'a [u8],
+    descriptor: &'static PgnDescriptor,
+    padded: &'a mut [u8; MAX_PGN_BYTES],
+) -> &'a [u8] {
+    match (descriptor.min_length, descriptor.length) {
+        (Some(min), Some(len))
+            if payload.len() >= min as usize
+                && payload.len() < len as usize
+                && len as usize <= MAX_PGN_BYTES =>
+        {
+            padded[..payload.len()].copy_from_slice(payload);
+            &padded[..len as usize]
+        }
+        _ => payload,
+    }
+}
+
+/// Returns `true` when `field_idx` falls inside one of `descriptor`'s repeating groups.
+fn is_repetitive_field(descriptor: &'static PgnDescriptor, field_idx: usize) -> bool {
+    descriptor.repeating_field_sets.iter().any(|rfs| {
+        field_idx >= rfs.start_field_index && field_idx < rfs.start_field_index + rfs.size
+    })
+}
+
+/// Computes the clamped repetition count for `rfs` from its raw counter reading.
+fn repeating_group_count(
+    descriptor: &'static PgnDescriptor,
+    rfs: &'static RepeatingFieldSet,
+    counter_raw: Option<usize>,
+    bits_remaining: usize,
+) -> Result<usize, DeserializationError> {
+    let count = if let Some(counter_idx) = rfs.count_field_index {
+        let counter_field = descriptor
+            .fields
+            .get(counter_idx)
+            .ok_or(DeserializationError::InvalidDataLength)?;
+        let raw = counter_raw.ok_or(DeserializationError::InvalidDataLength)?;
+        let counter_bits = counter_field.bits_length.unwrap_or(8).min(64);
+        let unavailable = (u64::MAX >> (64 - counter_bits)) as usize;
+        if raw == unavailable {
+            0
+        } else {
+            raw
+        }
+    } else {
+        return Err(DeserializationError::UnsupportedFieldKind {
+            field_kind: crate::core::FieldKind::Unimplemented,
+        });
+    };
+
+    let group_bits: usize = descriptor
+        .fields
+        .iter()
+        .skip(rfs.start_field_index)
+        .take(rfs.size)
+        .map(|f| f.bits_length.unwrap_or(0) as usize)
+        .sum();
+    let fits = bits_remaining.checked_div(group_bits).unwrap_or(0);
+    Ok(count.min(rfs.max_repetitions).min(fits))
+}
+
+/// Visits every non-reserved field of `payload` according to `desc`, in wire order.
+///
+/// `Reserved` and `Spare` fields are skipped. Repeating groups follow the same
+/// counter sentinel (`all-ones` = 0) and clamping rules as [`deserialize_into`],
+/// reporting `repetition = Some((array_id, index))`. If an unsupported field kind
+/// or truncated tail is encountered mid-message, the error is returned after any
+/// earlier fields have already been passed to `f`.
+///
+/// Note: `BitLookup` flag names are not resolved because `FieldDescriptor` does
+/// not carry `enum_bit_name`.
+pub fn for_each_field(
+    desc: &'static PgnDescriptor,
+    payload: &[u8],
+    mut f: impl FnMut(&'static FieldDescriptor, FieldReading),
+) -> Result<(), DeserializationError> {
+    let mut padded = [0xFF; MAX_PGN_BYTES];
+    let payload = pad_to_min_length(payload, desc, &mut padded);
+    let mut reader = BitReader::new(payload);
+
+    let mut counters = [None::<usize>; 4];
+
+    for (field_idx, field_desc) in desc.fields.iter().enumerate() {
+        if is_repetitive_field(desc, field_idx) {
+            continue;
+        }
+
+        if let Some((raw, value)) = read_field_raw_and_value(&mut reader, field_desc)? {
+            for (rfs_idx, rfs) in desc.repeating_field_sets.iter().enumerate().take(4) {
+                if rfs.count_field_index == Some(field_idx) {
+                    counters[rfs_idx] = raw.map(|v| v as usize);
+                }
+            }
+            let availability = field_availability(field_desc, raw, &value);
+            f(
+                field_desc,
+                FieldReading {
+                    value,
+                    raw,
+                    availability,
+                    repetition: None,
+                },
+            );
+        }
+    }
+
+    for (rfs_idx, rfs) in desc.repeating_field_sets.iter().enumerate() {
+        let counter_raw = counters.get(rfs_idx).copied().flatten();
+        let count = repeating_group_count(desc, rfs, counter_raw, reader.bits_remaining())?;
+
+        for elem_idx in 0..count {
+            for field_offset in 0..rfs.size {
+                let field_idx = rfs.start_field_index + field_offset;
+                let field_desc = desc
+                    .fields
+                    .get(field_idx)
+                    .ok_or(DeserializationError::InvalidDataLength)?;
+
+                if let Some((raw, value)) = read_field_raw_and_value(&mut reader, field_desc)? {
+                    let availability = field_availability(field_desc, raw, &value);
+                    f(
+                        field_desc,
+                        FieldReading {
+                            value,
+                            raw,
+                            availability,
+                            repetition: Some((rfs.array_id, elem_idx)),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn field_availability(
+    field_desc: &'static FieldDescriptor,
+    raw: Option<u64>,
+    value: &PgnValue,
+) -> Availability {
+    if field_desc.kind == FieldKind::StringFix {
+        if let PgnValue::Bytes(ref b) = value {
+            if string_fix_trimmed(b.as_slice()).is_empty() {
+                return Availability::NotAvailable;
+            }
+        }
+        return Availability::Available;
+    }
+    match raw {
+        Some(raw_val) => field_desc.availability(raw_val),
+        None => Availability::Available,
+    }
+}
 
 /// Deserializes a payload into a generic PGN struct `T`.
 // WARNING: tightly coupled with the `map_type()` function in build.rs.
@@ -25,33 +199,12 @@ pub fn deserialize_into<T: FieldAccess>(
     // A payload between `MinLength` and `Length` comes from a device built against
     // an older layout. Its missing tail reads as 0xFF, the N2K "not available".
     let mut padded = [0xFF; MAX_PGN_BYTES];
-    let payload = match (descriptor.min_length, descriptor.length) {
-        (Some(min), Some(len))
-            if payload.len() >= min as usize
-                && payload.len() < len as usize
-                && len as usize <= MAX_PGN_BYTES =>
-        {
-            padded[..payload.len()].copy_from_slice(payload);
-            &padded[..len as usize]
-        }
-        _ => payload,
-    };
+    let payload = pad_to_min_length(payload, descriptor, &mut padded);
     let mut reader = BitReader::new(payload);
-
-    // Helper to detect whether a field belongs to a repeating group
-    let is_repetitive_field = |field_idx: usize| -> bool {
-        for rfs in descriptor.repeating_field_sets {
-            if field_idx >= rfs.start_field_index && field_idx < (rfs.start_field_index + rfs.size)
-            {
-                return true;
-            }
-        }
-        false
-    };
 
     for (field_idx, field_desc) in descriptor.fields.iter().enumerate() {
         // Skip fields that belong to repeating groups; they are handled later
-        if is_repetitive_field(field_idx) {
+        if is_repetitive_field(descriptor, field_idx) {
             continue;
         }
 
@@ -67,52 +220,21 @@ pub fn deserialize_into<T: FieldAccess>(
     // ==================== Repeating field handling ====================
     // After processing all regular fields, handle repeating groups
     for rfs in descriptor.repeating_field_sets {
-        // 1. Read the counter field to know how many elements to expect
-        let count = if let Some(counter_idx) = rfs.count_field_index {
-            // The counter is a regular field already parsed; retrieve it via the descriptor
+        let counter_raw = if let Some(counter_idx) = rfs.count_field_index {
             let counter_field = descriptor
                 .fields
                 .get(counter_idx)
                 .ok_or(DeserializationError::InvalidDataLength)?;
-
-            // Fetch the counter value from the instance
-            let raw = match instance.field(counter_field.id) {
-                Some(PgnValue::U8(v)) => v as usize,
-                Some(PgnValue::U16(v)) => v as usize,
-                Some(PgnValue::U32(v)) => v as usize,
+            match instance.field(counter_field.id) {
+                Some(PgnValue::U8(v)) => Some(v as usize),
+                Some(PgnValue::U16(v)) => Some(v as usize),
+                Some(PgnValue::U32(v)) => Some(v as usize),
                 _ => return Err(DeserializationError::InvalidDataLength),
-            };
-
-            // An all-ones counter is the N2K "not available" sentinel, not a
-            // count. A GNSS receiver with no DGNSS station sends 0xFF here, and
-            // reading it literally rejected every real 129029 on the bus.
-            let counter_bits = counter_field.bits_length.unwrap_or(8).min(64);
-            let unavailable = (u64::MAX >> (64 - counter_bits)) as usize;
-            if raw == unavailable {
-                0
-            } else {
-                raw
             }
         } else {
-            // No explicit counter: would require computing the length on the fly.
-            // This branch is not supported yet because the scenario is uncommon.
-            return Err(DeserializationError::UnsupportedFieldKind {
-                field_kind: crate::core::FieldKind::Unimplemented,
-            });
+            None
         };
-
-        // Clamp against the storage available, then against the payload itself:
-        // a group announcing more repetitions than the frame carries should yield
-        // the ones that are there, not discard the scalar fields already parsed.
-        let group_bits: usize = descriptor
-            .fields
-            .iter()
-            .skip(rfs.start_field_index)
-            .take(rfs.size)
-            .map(|f| f.bits_length.unwrap_or(0) as usize)
-            .sum();
-        let fits = reader.bits_remaining().checked_div(group_bits).unwrap_or(0);
-        let count = count.min(rfs.max_repetitions).min(fits);
+        let count = repeating_group_count(descriptor, rfs, counter_raw, reader.bits_remaining())?;
 
         // 2. Set the number of valid elements through the FieldAccess trait
         instance
@@ -229,39 +351,37 @@ pub fn serialize<T: FieldAccess>(
     Ok(bits_written.div_ceil(8))
 }
 
+/// Trims a `STRING_FIX` slice at the first CANboat padding/termination byte
+/// (`0xFF`, `b'@'`, or `0x00`). An empty result means the string is not available.
+pub fn string_fix_trimmed(bytes: &[u8]) -> &[u8] {
+    let end = bytes
+        .iter()
+        .position(|&b| b == 0xFF || b == b'@' || b == 0x00)
+        .unwrap_or(bytes.len());
+    &bytes[..end]
+}
+
 /// Shared helper to read a single field, applying business logic (signedness,
 /// resolutions, special formats, etc.).
 fn read_field_value(
     reader: &mut BitReader,
     field_desc: &'static FieldDescriptor,
 ) -> Result<Option<PgnValue>, DeserializationError> {
+    read_field_raw_and_value(reader, field_desc).map(|opt| opt.map(|(_, val)| val))
+}
+
+/// Read the raw on-wire value (`Some(u64)` for bit/scalar fields, `None` for byte
+/// slices and strings) and scale it into a [`PgnValue`].
+fn read_field_raw_and_value(
+    reader: &mut BitReader,
+    field_desc: &'static FieldDescriptor,
+) -> Result<Option<(Option<u64>, PgnValue)>, DeserializationError> {
     match field_desc.kind {
         // BitLookup: bitfield where each bit has its own meaning (bitmask).
         // Always treated as an unsigned integer without resolution regardless of descriptor.
         // Multiple bits may be set simultaneously (unlike Lookup, which is exclusive).
-        FieldKind::BitLookup => {
-            let raw_val = if let Some(bits) = field_desc.bits_length {
-                match reader.read_u64(bits as u8) {
-                    Ok(val) => val,
-                    Err(_) => return Err(DeserializationError::InvalidDataLength),
-                }
-            } else {
-                return Err(DeserializationError::InvalidDataLength);
-            };
-
-            // Map the raw value to the appropriate type based on bit length
-            // (always unsigned and without resolution)
-            let value = match field_desc.bits_length {
-                Some(1..=8) => PgnValue::U8(raw_val as u8),
-                Some(9..=16) => PgnValue::U16(raw_val as u16),
-                Some(17..=32) => PgnValue::U32(raw_val as u32),
-                _ => PgnValue::U64(raw_val),
-            };
-
-            Ok(Some(value))
-        }
-
-        FieldKind::Number
+        FieldKind::BitLookup
+        | FieldKind::Number
         | FieldKind::Lookup
         | FieldKind::IndirectLookup
         | FieldKind::Pgn
@@ -274,7 +394,162 @@ fn read_field_value(
             } else {
                 return Err(DeserializationError::InvalidDataLength);
             };
+            let value = scale_raw_field(raw_val, field_desc)?;
+            Ok(Some((Some(raw_val), value)))
+        }
 
+        // IEEE-754 single precision, carried as raw bits. No resolution applies.
+        FieldKind::Float => {
+            let raw_val = reader
+                .read_u64(32)
+                .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+            Ok(Some((Some(raw_val), scale_raw_field(raw_val, field_desc)?)))
+        }
+
+        FieldKind::Reserved | FieldKind::Spare => {
+            if let Some(val) = field_desc.bits_length {
+                reader
+                    .advance(val as u8)
+                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+            }
+            Ok(None)
+        }
+
+        FieldKind::StringFix => {
+            let num_bits = field_desc
+                .bits_length
+                .ok_or(DeserializationError::InvalidDataLength)?;
+            // The declared size is the field's capacity, not the bytes on the wire:
+            // Navico 130821 reserves 230 for its text and sends about 155, the real
+            // length being carried by the Fast Packet header. Read what is there.
+            let num_bytes = ((num_bits / 8) as usize).min(reader.bits_remaining() / 8);
+            let slice = reader
+                .read_slice(num_bytes)
+                .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+            let mut pgn_bytes = PgnBytes {
+                len: num_bytes,
+                ..Default::default()
+            };
+            pgn_bytes.data[..num_bytes].copy_from_slice(slice);
+            Ok(Some((None, PgnValue::Bytes(pgn_bytes))))
+        }
+
+        FieldKind::StringLz => {
+            let strlen = reader
+                .read_u8(8)
+                .map_err(|e| DeserializationError::BitReaderError { err: e })?
+                as usize;
+            if strlen > MAX_PGN_BYTES {
+                return Err(DeserializationError::InvalidDataLength);
+            }
+            let mut pgn_bytes = PgnBytes::default();
+            if strlen > 0 {
+                let slice = reader
+                    .read_slice(strlen)
+                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+                pgn_bytes.copy_from_slice(slice);
+            }
+            pgn_bytes.len = strlen;
+            Ok(Some((None, PgnValue::Bytes(pgn_bytes))))
+        }
+
+        FieldKind::StringLau => {
+            let total_len = reader
+                .read_u8(8)
+                .map_err(|e| DeserializationError::BitReaderError { err: e })?
+                as usize;
+            if total_len > MAX_PGN_BYTES {
+                return Err(DeserializationError::InvalidDataLength);
+            }
+            let mut pgn_bytes = PgnBytes::default();
+            // Below two bytes there is no room for the encoding byte: the field is
+            // empty and nothing follows the length itself.
+            if total_len >= 2 {
+                let encoding = reader
+                    .read_u8(8)
+                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+                pgn_bytes.data[0] = encoding;
+                // The declared length counts itself and the encoding byte, so the
+                // text is two bytes shorter. Reading one byte too many swallowed
+                // the following field and derailed the rest of the message.
+                let payload_len = total_len.saturating_sub(2);
+                if payload_len > 0 {
+                    let slice = reader
+                        .read_slice(payload_len)
+                        .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+                    pgn_bytes.data[1..1 + payload_len].copy_from_slice(slice);
+                }
+                pgn_bytes.len = 1 + payload_len;
+            }
+            Ok(Some((None, PgnValue::Bytes(pgn_bytes))))
+        }
+
+        FieldKind::Binary => {
+            let num_bits =
+                field_desc
+                    .bits_length
+                    .ok_or(DeserializationError::InvalidFieldBits {
+                        field_name: field_desc.id,
+                    })?;
+            // A BINARY field that does not fill whole bytes is a scalar, not a
+            // buffer — that is how the generator types it too. AIS 129038/129039
+            // carry a 19-bit `CommunicationState` this way.
+            if num_bits % 8 != 0 {
+                let raw_val = reader
+                    .read_u64(num_bits as u8)
+                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+                return Ok(Some((Some(raw_val), scale_raw_field(raw_val, field_desc)?)));
+            }
+            let num_bytes = (num_bits / 8) as usize;
+            let slice = reader
+                .read_slice(num_bytes)
+                .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+            let mut pgn_bytes = PgnBytes {
+                len: num_bytes,
+                ..Default::default()
+            };
+            pgn_bytes.data[..num_bytes].copy_from_slice(slice);
+            Ok(Some((None, PgnValue::Bytes(pgn_bytes))))
+        }
+
+        FieldKind::Date | FieldKind::Mmsi | FieldKind::Duration | FieldKind::Time => {
+            let raw_val = if let Some(value) = field_desc.bits_length {
+                reader
+                    .read_u64(value as u8)
+                    .map_err(|e| DeserializationError::BitReaderError { err: e })?
+            } else {
+                return Err(DeserializationError::InvalidFieldBits {
+                    field_name: field_desc.id,
+                });
+            };
+            Ok(Some((Some(raw_val), scale_raw_field(raw_val, field_desc)?)))
+        }
+
+        // Other kinds are not supported yet
+        _ => Err(DeserializationError::UnsupportedFieldKind {
+            field_kind: field_desc.kind,
+        }),
+    }
+}
+
+/// Convert a raw bit pattern into its scaled [`PgnValue`] according to `field_desc`.
+fn scale_raw_field(
+    raw_val: u64,
+    field_desc: &'static FieldDescriptor,
+) -> Result<PgnValue, DeserializationError> {
+    match field_desc.kind {
+        FieldKind::BitLookup | FieldKind::Binary => Ok(match field_desc.bits_length {
+            Some(1..=8) => PgnValue::U8(raw_val as u8),
+            Some(9..=16) => PgnValue::U16(raw_val as u16),
+            Some(17..=32) => PgnValue::U32(raw_val as u32),
+            _ => PgnValue::U64(raw_val),
+        }),
+
+        FieldKind::Number
+        | FieldKind::Lookup
+        | FieldKind::IndirectLookup
+        | FieldKind::Pgn
+        | FieldKind::IsoName => {
             let value = if field_desc.is_signed.is_some_and(|s| s) {
                 let signed_val = sign_extend(raw_val, field_desc.bits_length.unwrap_or(0) as u8);
                 if let Some(res) = field_desc.resolution {
@@ -309,139 +584,12 @@ fn read_field_value(
                     _ => PgnValue::U64(raw_val),
                 }
             };
-
-            Ok(Some(value))
+            Ok(value)
         }
 
-        // IEEE-754 single precision, carried as raw bits. No resolution applies.
-        FieldKind::Float => {
-            let raw_val = reader
-                .read_u64(32)
-                .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-            Ok(Some(PgnValue::F32(f32::from_bits(raw_val as u32))))
-        }
-
-        FieldKind::Reserved | FieldKind::Spare => {
-            if let Some(val) = field_desc.bits_length {
-                reader
-                    .advance(val as u8)
-                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-            }
-            Ok(None)
-        }
-
-        FieldKind::StringFix => {
-            let num_bits = field_desc
-                .bits_length
-                .ok_or(DeserializationError::InvalidDataLength)?;
-            // The declared size is the field's capacity, not the bytes on the wire:
-            // Navico 130821 reserves 230 for its text and sends about 155, the real
-            // length being carried by the Fast Packet header. Read what is there.
-            let num_bytes = ((num_bits / 8) as usize).min(reader.bits_remaining() / 8);
-            let slice = reader
-                .read_slice(num_bytes)
-                .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-            let mut pgn_bytes = PgnBytes {
-                len: num_bytes,
-                ..Default::default()
-            };
-            pgn_bytes.data[..num_bytes].copy_from_slice(slice);
-            Ok(Some(PgnValue::Bytes(pgn_bytes)))
-        }
-
-        FieldKind::StringLz => {
-            let strlen = reader
-                .read_u8(8)
-                .map_err(|e| DeserializationError::BitReaderError { err: e })?
-                as usize;
-            if strlen > MAX_PGN_BYTES {
-                return Err(DeserializationError::InvalidDataLength);
-            }
-            let mut pgn_bytes = PgnBytes::default();
-            if strlen > 0 {
-                let slice = reader
-                    .read_slice(strlen)
-                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-                pgn_bytes.copy_from_slice(slice);
-            }
-            pgn_bytes.len = strlen;
-            Ok(Some(PgnValue::Bytes(pgn_bytes)))
-        }
-
-        FieldKind::StringLau => {
-            let total_len = reader
-                .read_u8(8)
-                .map_err(|e| DeserializationError::BitReaderError { err: e })?
-                as usize;
-            if total_len > MAX_PGN_BYTES {
-                return Err(DeserializationError::InvalidDataLength);
-            }
-            let mut pgn_bytes = PgnBytes::default();
-            // Below two bytes there is no room for the encoding byte: the field is
-            // empty and nothing follows the length itself.
-            if total_len >= 2 {
-                let encoding = reader
-                    .read_u8(8)
-                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-                pgn_bytes.data[0] = encoding;
-                // The declared length counts itself and the encoding byte, so the
-                // text is two bytes shorter. Reading one byte too many swallowed
-                // the following field and derailed the rest of the message.
-                let payload_len = total_len.saturating_sub(2);
-                if payload_len > 0 {
-                    let slice = reader
-                        .read_slice(payload_len)
-                        .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-                    pgn_bytes.data[1..1 + payload_len].copy_from_slice(slice);
-                }
-                pgn_bytes.len = 1 + payload_len;
-            }
-            Ok(Some(PgnValue::Bytes(pgn_bytes)))
-        }
-
-        FieldKind::Binary => {
-            let num_bits =
-                field_desc
-                    .bits_length
-                    .ok_or(DeserializationError::InvalidFieldBits {
-                        field_name: field_desc.id,
-                    })?;
-            // A BINARY field that does not fill whole bytes is a scalar, not a
-            // buffer — that is how the generator types it too. AIS 129038/129039
-            // carry a 19-bit `CommunicationState` this way.
-            if num_bits % 8 != 0 {
-                let raw_val = reader
-                    .read_u64(num_bits as u8)
-                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-                return Ok(Some(match num_bits {
-                    1..=8 => PgnValue::U8(raw_val as u8),
-                    9..=16 => PgnValue::U16(raw_val as u16),
-                    17..=32 => PgnValue::U32(raw_val as u32),
-                    _ => PgnValue::U64(raw_val),
-                }));
-            }
-            let num_bytes = (num_bits / 8) as usize;
-            let slice = reader
-                .read_slice(num_bytes)
-                .map_err(|e| DeserializationError::BitReaderError { err: e })?;
-            let mut pgn_bytes = PgnBytes {
-                len: num_bytes,
-                ..Default::default()
-            };
-            pgn_bytes.data[..num_bytes].copy_from_slice(slice);
-            Ok(Some(PgnValue::Bytes(pgn_bytes)))
-        }
+        FieldKind::Float => Ok(PgnValue::F32(f32::from_bits(raw_val as u32))),
 
         FieldKind::Date | FieldKind::Mmsi => {
-            let raw_val = if let Some(value) = field_desc.bits_length {
-                reader
-                    .read_u64(value as u8)
-                    .map_err(|e| DeserializationError::BitReaderError { err: e })?
-            } else {
-                return Err(DeserializationError::InvalidFieldBits {
-                    field_name: field_desc.id,
-                });
-            };
             let value = if let Some(res) = field_desc.resolution {
                 let scaled = raw_val as f64 * res as f64;
                 match field_desc.bits_length.unwrap() {
@@ -459,20 +607,10 @@ fn read_field_value(
                     }
                 }
             };
-            Ok(Some(value))
+            Ok(value)
         }
 
         FieldKind::Duration => {
-            let raw_val = if let Some(value) = field_desc.bits_length {
-                reader
-                    .read_u64(value as u8)
-                    .map_err(|e| DeserializationError::BitReaderError { err: e })?
-            } else {
-                return Err(DeserializationError::InvalidFieldBits {
-                    field_name: field_desc.id,
-                });
-            };
-
             let value = if let Some(res) = field_desc.resolution {
                 let scaled = raw_val as f64 * res as f64;
                 match field_desc.bits_length.unwrap() {
@@ -486,30 +624,19 @@ fn read_field_value(
                     _ => PgnValue::U64(raw_val),
                 }
             };
-            Ok(Some(value))
+            Ok(value)
         }
 
         FieldKind::Time => {
-            let raw_val = if let Some(value) = field_desc.bits_length {
-                reader
-                    .read_u64(value as u8)
-                    .map_err(|e| DeserializationError::BitReaderError { err: e })?
-            } else {
-                return Err(DeserializationError::InvalidFieldBits {
-                    field_name: field_desc.id,
-                });
-            };
-
             let value = if let Some(res) = field_desc.resolution {
                 let scaled = raw_val as f64 * res as f64;
                 PgnValue::F64(scaled)
             } else {
                 PgnValue::U64(raw_val)
             };
-            Ok(Some(value))
+            Ok(value)
         }
 
-        // Other kinds are not supported yet
         _ => Err(DeserializationError::UnsupportedFieldKind {
             field_kind: field_desc.kind,
         }),

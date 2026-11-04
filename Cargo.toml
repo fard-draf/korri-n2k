@@ -76,3 +76,8 @@ required-features = ["std"]
 name = "blocking_claim"
 path = "examples/std/blocking_claim.rs"
 required-features = ["std"]
+
+[[example]]
+name = "monitor"
+path = "examples/std/monitor.rs"
+required-features = ["std"]

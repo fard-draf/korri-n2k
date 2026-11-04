@@ -89,6 +89,55 @@ pub struct FieldDescriptor {
     pub physical_unit: Option<&'static str>,
     /// 13. Physical quantity (e.g. "GEOGRAPHICAL_LATITUDE", "SPEED").
     pub physical_qtity: Option<&'static str>,
+    /// Raw value meaning "data not available" (CANboat `UnknownValue`).
+    pub unknown_value: Option<i64>,
+    /// Raw value meaning "out of range" (CANboat `OutOfRangeValue`).
+    pub out_of_range_value: Option<i64>,
+    /// Raw value meaning "reserved" (CANboat `ReservedValue`).
+    pub reserved_value: Option<i64>,
+}
+
+/// Availability of a decoded field value according to its CANboat sentinels.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Availability {
+    Available,
+    NotAvailable,
+    OutOfRange,
+    Reserved,
+}
+
+impl FieldDescriptor {
+    /// Compares the raw on-wire value against this field's CANboat sentinels.
+    /// `raw` is the unsigned bit pattern as read; signed fields are
+    /// sign-extended before the comparison when a negative sentinel is used.
+    pub fn availability(&self, raw: u64) -> Availability {
+        if self.kind == FieldKind::Mmsi && raw == 0 {
+            return Availability::NotAvailable;
+        }
+        let raw_i64 = raw as i64;
+        let matches = |sentinel: Option<i64>| match sentinel {
+            Some(s) if s == raw_i64 => true,
+            Some(s) if s < 0 && self.is_signed == Some(true) => {
+                let bits = self.bits_length.unwrap_or(0) as u8;
+                let signed = if bits > 0 && bits < 64 && (raw & (1u64 << (bits - 1))) != 0 {
+                    (raw | (u64::MAX << bits)) as i64
+                } else {
+                    raw_i64
+                };
+                s == signed
+            }
+            _ => false,
+        };
+        if matches(self.unknown_value) {
+            Availability::NotAvailable
+        } else if matches(self.out_of_range_value) {
+            Availability::OutOfRange
+        } else if matches(self.reserved_value) {
+            Availability::Reserved
+        } else {
+            Availability::Available
+        }
+    }
 }
 
 /// Describes a repeating field set within a PGN.
