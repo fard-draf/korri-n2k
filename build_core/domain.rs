@@ -380,6 +380,15 @@ pub(crate) struct Fields {
     /// field carrying a `Match`, not by the first one alone.
     #[serde(rename = "Match")]
     pub match_value: Option<u32>,
+    /// 17. Raw value meaning "data not available".
+    #[serde(rename = "UnknownValue")]
+    pub unknown_value: Option<i64>,
+    /// 18. Raw value meaning "out of range".
+    #[serde(rename = "OutOfRangeValue")]
+    pub out_of_range_value: Option<i64>,
+    /// 19. Raw value meaning "reserved".
+    #[serde(rename = "ReservedValue")]
+    pub reserved_value: Option<i64>,
 }
 
 #[derive(Debug, Hash)]

@@ -28,7 +28,7 @@ pub(crate) fn run_pgns_gen(
     let lookup_indir_map = set_lookup_indir_map(canboat_value)?;
     let lookup_bit_map = set_lookup_bit_map(canboat_value)?;
     let pgns_set = set_pgns_set(canboat_value)?;
-    let mut poly_pgns_map = set_poly_pgns_map(canboat_value, pgns_set)?;
+    let poly_pgns_map = set_poly_pgns_map(canboat_value, pgns_set)?;
 
     let mut buffer_pgn_code = String::new();
     writeln!(&mut buffer_pgn_code, "#[allow(clippy::all)]")?;
@@ -43,6 +43,7 @@ pub(crate) fn run_pgns_gen(
     // generate must still be reassembled, so the tables cannot depend on it.
     let mut all_flags: Vec<(u32, bool)> = Vec::new();
     let mut manifest_flags: Vec<(u32, bool)> = Vec::new();
+    let mut generated_pgns: Vec<(u32, bool)> = Vec::new();
 
     if let Some(pgn_array) = canboat_value["PGNs"].as_array() {
         let mut poly_pgns_id_vec = Vec::new();
@@ -61,10 +62,18 @@ pub(crate) fn run_pgns_gen(
                         &lookup_enum_map,
                         &lookup_indir_map,
                         &lookup_bit_map,
-                        &mut poly_pgns_map,
+                        &poly_pgns_map,
                         &mut poly_pgns_id_vec,
                     ) {
-                        Ok(pgn_code) => buffer_pgn_code.push_str(&pgn_code),
+                        Ok(pgn_code) => {
+                            if !pgn_code.is_empty() {
+                                buffer_pgn_code.push_str(&pgn_code);
+                                let is_poly = poly_pgns_map.contains_key(&pgn_def.pgn_id);
+                                if !generated_pgns.iter().any(|&(id, _)| id == pgn_def.pgn_id) {
+                                    generated_pgns.push((pgn_def.pgn_id, is_poly));
+                                }
+                            }
+                        }
                         Err(e) => {
                             println!(
                                 "cargo:warning=[PGN {}] Failed to generate code: {}",
@@ -104,6 +113,11 @@ pub(crate) fn run_pgns_gen(
         "pub const FAST_PACKET_PGNS_ALL: &[u32] = &{:?};",
         fast_packet_table(all_flags)
     )?;
+    writeln!(&mut buffer_pgn_code)?;
+    buffer_pgn_code.push_str(&generate_descriptor_dispatch(
+        &generated_pgns,
+        &poly_pgns_map,
+    )?);
 
     Ok(buffer_pgn_code)
 }
@@ -149,7 +163,7 @@ fn generate_pgn_code(
     lookup_enum_map: &HashMap<String, LookupEnum>,
     lookup_indir_map: &HashMap<String, LookupIndirEnum>,
     lookup_bit_map: &HashMap<String, LookupBitEnum>,
-    poly_pgns_map: &mut HashMap<u32, Vec<PolyPgn>>,
+    poly_pgns_map: &HashMap<u32, Vec<PolyPgn>>,
     poly_pgns_id_vec: &mut Vec<u32>,
 ) -> Result<String, BuildError> {
     // Guard: skip PGNs with multiple repeating groups (not supported yet).
@@ -174,10 +188,9 @@ fn generate_pgn_code(
     }
 
     // Generate the polymorphic enumeration when applicable
-    if poly_pgns_map.contains_key(&pgn.pgn_id) {
+    if poly_pgns_map.contains_key(&pgn.pgn_id) && !poly_pgns_id_vec.contains(&pgn.pgn_id) {
         buffer.push_str(&generate_enum_definition(pgn, poly_pgns_map)?);
         buffer.push_str(&generate_enum_trait_impl(pgn, poly_pgns_map)?);
-        poly_pgns_map.remove(&pgn.pgn_id);
         poly_pgns_id_vec.push(pgn.pgn_id);
     }
 
@@ -325,24 +338,16 @@ fn generate_struct_definition(
     Ok(buffer)
 }
 //==================================================================================GENERATE_ENUM_IMPL
-/// Generate trait implementations (`PgnData`, `FieldAccess`) for polymorphic PGNs.
-fn generate_enum_trait_impl(
-    pgn: &PgnInstructions,
-    poly_pgns_map: &mut HashMap<u32, Vec<PolyPgn>>,
-) -> Result<String, BuildError> {
-    let mut buffer = String::new();
-
-    //==========================================impl PgnData
-    writeln!(buffer, "impl PgnData for Pgn{} {{", pgn.pgn_id)?;
-    //======================fn from_payload
-    writeln!(
-        buffer,
-        "\tfn from_payload(payload: &[u8]) -> Result<Self, DeserializationError> {{"
-    )?;
+/// Emit the unique bit-position probes used to discriminate polymorphic variants of `pgn_id`.
+fn write_probes<W: Write>(
+    buffer: &mut W,
+    pgn_id: u32,
+    poly_pgns_map: &HashMap<u32, Vec<PolyPgn>>,
+) -> Result<(), std::fmt::Error> {
     // Read every discriminator position this PGN uses, once. A field the payload
     // is too short to hold stays `None` and simply matches no variant.
     let mut probes: Vec<(u32, u8)> = poly_pgns_map
-        .get(&pgn.pgn_id)
+        .get(&pgn_id)
         .into_iter()
         .flatten()
         .flat_map(|v| v.discriminators.iter())
@@ -363,15 +368,139 @@ fn generate_enum_trait_impl(
             offset, bits, bits
         )?;
     }
+    writeln!(buffer)
+}
+
+/// Build the boolean expression matching `poly_pgn`'s discriminator probes.
+fn discriminator_condition(poly_pgn: &PolyPgn) -> String {
+    poly_pgn
+        .discriminators
+        .iter()
+        .map(|d| format!("d_{}_{} == Some({})", d.bits_offset, d.bits_length, d.value))
+        .collect::<Vec<_>>()
+        .join(" && ")
+}
+
+/// Emit `descriptor`, `descriptor_for`, and per-PGN polymorphic dispatch helpers.
+fn generate_descriptor_dispatch(
+    generated_pgns: &[(u32, bool)],
+    poly_pgns_map: &HashMap<u32, Vec<PolyPgn>>,
+) -> Result<String, BuildError> {
+    let mut buffer = String::new();
+
+    writeln!(
+        buffer,
+        "/// Descriptor of a single-layout PGN of the active manifest."
+    )?;
+    writeln!(
+        buffer,
+        "/// `None` for proprietary multi-variant PGNs (see `descriptor_for`) and for"
+    )?;
+    writeln!(buffer, "/// PGNs outside the manifest.")?;
+    writeln!(
+        buffer,
+        "pub fn descriptor(pgn: u32) -> Option<&'static PgnDescriptor> {{"
+    )?;
+    writeln!(buffer, "\tmatch pgn {{")?;
+    for &(id, is_poly) in generated_pgns {
+        if !is_poly {
+            writeln!(
+                buffer,
+                "\t\t{} => Some(&Pgn{}::PGN_{}_DESCRIPTOR),",
+                id, id, id
+            )?;
+        }
+    }
+    writeln!(buffer, "\t\t_ => None,")?;
+    writeln!(buffer, "\t}}")?;
+    writeln!(buffer, "}}")?;
     writeln!(buffer)?;
 
+    writeln!(
+        buffer,
+        "/// Descriptor matching this payload: resolves proprietary variants with the"
+    )?;
+    writeln!(
+        buffer,
+        "/// same discriminators, in the same order, as `from_payload`. `None` if no"
+    )?;
+    writeln!(
+        buffer,
+        "/// variant matches or the PGN is outside the manifest."
+    )?;
+    writeln!(
+        buffer,
+        "pub fn descriptor_for(pgn: u32, payload: &[u8]) -> Option<&'static PgnDescriptor> {{"
+    )?;
+    writeln!(buffer, "\tlet _ = payload;")?;
+    writeln!(buffer, "\tmatch pgn {{")?;
+    for &(id, is_poly) in generated_pgns {
+        if is_poly {
+            writeln!(buffer, "\t\t{} => descriptor_for_{}(payload),", id, id)?;
+        } else {
+            writeln!(
+                buffer,
+                "\t\t{} => Some(&Pgn{}::PGN_{}_DESCRIPTOR),",
+                id, id, id
+            )?;
+        }
+    }
+    writeln!(buffer, "\t\t_ => None,")?;
+    writeln!(buffer, "\t}}")?;
+    writeln!(buffer, "}}")?;
+
+    for &(id, is_poly) in generated_pgns {
+        if !is_poly {
+            continue;
+        }
+        writeln!(buffer)?;
+        writeln!(
+            buffer,
+            "fn descriptor_for_{}(payload: &[u8]) -> Option<&'static PgnDescriptor> {{",
+            id
+        )?;
+        write_probes(&mut buffer, id, poly_pgns_map)?;
+        if let Some(poly_pgn_vec) = poly_pgns_map.get(&id) {
+            for poly_pgn in poly_pgn_vec {
+                let condition = discriminator_condition(poly_pgn);
+                writeln!(buffer, "\t\tif {} {{", condition)?;
+                writeln!(
+                    buffer,
+                    "\t\t\treturn Some(&Pgn{}{}::PGN_{}_{}_DESCRIPTOR);",
+                    id,
+                    poly_pgn.name,
+                    id,
+                    to_snake_case(&poly_pgn.name, "POLY").to_uppercase()
+                )?;
+                writeln!(buffer, "\t\t}}")?;
+                writeln!(buffer)?;
+            }
+        }
+        writeln!(buffer, "\t\tNone")?;
+        writeln!(buffer, "\t}}")?;
+    }
+
+    Ok(buffer)
+}
+
+/// Generate trait implementations (`PgnData`, `FieldAccess`) for polymorphic PGNs.
+fn generate_enum_trait_impl(
+    pgn: &PgnInstructions,
+    poly_pgns_map: &HashMap<u32, Vec<PolyPgn>>,
+) -> Result<String, BuildError> {
+    let mut buffer = String::new();
+
+    //==========================================impl PgnData
+    writeln!(buffer, "impl PgnData for Pgn{} {{", pgn.pgn_id)?;
+    //======================fn from_payload
+    writeln!(
+        buffer,
+        "\tfn from_payload(payload: &[u8]) -> Result<Self, DeserializationError> {{"
+    )?;
+    write_probes(&mut buffer, pgn.pgn_id, poly_pgns_map)?;
+
     generate_enum_impl_helper(&mut buffer, pgn, poly_pgns_map, |writer, poly_pgn| {
-        let condition = poly_pgn
-            .discriminators
-            .iter()
-            .map(|d| format!("d_{}_{} == Some({})", d.bits_offset, d.bits_length, d.value))
-            .collect::<Vec<_>>()
-            .join(" && ");
+        let condition = discriminator_condition(poly_pgn);
 
         writeln!(writer, "\t\tif {} {{", condition)?;
         writeln!(
@@ -598,6 +727,37 @@ fn generate_impl_bloc_with_descriptor(
         )?;
         writeln!(buffer, "\t\t\t\tphysical_unit: {:?},", field.physical_unit)?;
         writeln!(buffer, "\t\t\t\tphysical_qtity: {:?},", field.physical_qty)?;
+        if let Some(bits) = field.bits_length.filter(|&b| (1..64).contains(&b)) {
+            let max_raw = (1i64 << bits) - 1;
+            let min_raw = if is_signed == Some(true) {
+                -(1i64 << (bits - 1))
+            } else {
+                0
+            };
+            for (label, sentinel) in [
+                ("UnknownValue", field.unknown_value),
+                ("OutOfRangeValue", field.out_of_range_value),
+                ("ReservedValue", field.reserved_value),
+            ] {
+                if let Some(val) = sentinel.filter(|&v| v < min_raw || v > max_raw) {
+                    println!(
+                        "cargo:warning=[PGN {}] field '{}' sentinel {}={} exceeds {}-bit range",
+                        pgn.pgn_id, field.id, label, val, bits
+                    );
+                }
+            }
+        }
+        writeln!(buffer, "\t\t\t\tunknown_value: {:?},", field.unknown_value)?;
+        writeln!(
+            buffer,
+            "\t\t\t\tout_of_range_value: {:?},",
+            field.out_of_range_value
+        )?;
+        writeln!(
+            buffer,
+            "\t\t\t\treserved_value: {:?},",
+            field.reserved_value
+        )?;
         writeln!(buffer, "\t\t\t}},")?;
     }
     writeln!(buffer, "\t\t],")?;

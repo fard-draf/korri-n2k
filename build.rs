@@ -114,8 +114,8 @@ fn main() -> Result<(), BuildError> {
     let canboat_value: serde_json::Value = serde_json::from_str(&canboat_doc_string)?;
 
     // 3. Iterate over the manifest and generate code for every lookup table and requested PGN.
-    let buffer_pgn_code: String = run_pgns_gen(&canboat_value, pgns_to_generate)?;
-    let buffer_lookup_code = run_lookup_gen(&canboat_value)?;
+    let buffer_pgn_code: String = run_pgns_gen(&canboat_value, pgns_to_generate.clone())?;
+    let buffer_lookup_code = run_lookup_gen(&canboat_value, &pgns_to_generate)?;
 
     // 4. Write the generated code into `OUT_DIR`.
     // The `include!` macro in `src/pgn/generated.rs` will pull it in at compile time.

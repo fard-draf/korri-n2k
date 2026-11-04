@@ -3,7 +3,7 @@
 //! dispatching on field #1 silently decoded every message as the first variant.
 #![cfg(feature = "full-pgns")]
 use korri_n2k::infra::codec::traits::PgnData;
-use korri_n2k::protocol::messages::Pgn65305;
+use korri_n2k::protocol::messages::{descriptor_for, Pgn65305};
 
 /// Simnet 65305 header: manufacturer 1857 (11b), reserved (2b), industry 4 (3b),
 /// model (8b), then `Report` (8b) — the field that actually discriminates.
@@ -27,10 +27,19 @@ fn report_field_selects_the_variant() {
         matches!(request, Pgn65305::SimnetDeviceStatusRequest(_)),
         "Report=3 decoded as the wrong variant: {request:?}"
     );
+    assert_eq!(
+        descriptor_for(65305, &payload(2)).map(|d| d.name),
+        Some("SimnetDeviceStatus")
+    );
+    assert_eq!(
+        descriptor_for(65305, &payload(3)).map(|d| d.name),
+        Some("SimnetDeviceStatusRequest")
+    );
 }
 
 #[test]
 fn unknown_discriminator_is_rejected() {
     // Report=200 matches no variant: must fail, not fall back on the first one.
     assert!(Pgn65305::from_payload(&payload(200)).is_err());
+    assert!(descriptor_for(65305, &payload(200)).is_none());
 }
