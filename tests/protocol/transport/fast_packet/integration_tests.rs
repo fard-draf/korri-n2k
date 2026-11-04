@@ -26,7 +26,7 @@ use korri_n2k::protocol::transport::fast_packet::{
 /// fragmented and reassembled.
 fn test_roundtrip_pgn_129029() {
     let pgn = 129029;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
     // Create a GNSS message with realistic coordinates (Paris, France)
     let mut gnss = Pgn129029::new();
     gnss.latitude = 48.8566; // Latitude for Paris
@@ -135,7 +135,7 @@ fn test_interleaved_multiple_pgns() {
     let pgn_ais = 129040;
     let pgn_gnss = 129029;
 
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
 
     // Build frame iterators for two different sources
     let builder_ais = FastPacketBuilder::new(pgn_ais, 10, None, &buffer_ais[..len_ais]);
@@ -220,7 +220,7 @@ fn test_assembler_sequence_wrap() {
     let mut assembler = FastPacketAssembler::new();
     let source = 42;
     let pgn = 129540;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
 
     // Complete message using sequence identifier 7 (upper bits)
     let frame_seq7: [u8; 8] = [0b111_00000, 15, 1, 2, 3, 4, 5, 6];
@@ -264,7 +264,7 @@ fn test_assembler_out_of_order() {
     let mut assembler = FastPacketAssembler::new();
     let source = 50;
     let pgn = 129540;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
 
     // First frame: start of session (sequence 0)
     let frame0: [u8; 8] = [0b000_00000, 20, 1, 2, 3, 4, 5, 6];
@@ -300,7 +300,7 @@ fn test_assembler_partial_message() {
     let mut assembler = FastPacketAssembler::new();
     let source = 60;
     let pgn = 129540;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
 
     // Start of message: three frames required
     let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
@@ -327,7 +327,7 @@ fn test_assembler_duplicate_frame() {
     let mut assembler = FastPacketAssembler::new();
     let source = 70;
     let pgn = 129540;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
 
     // First frame
     let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
@@ -355,7 +355,7 @@ fn test_assembler_duplicate_frame() {
 fn test_assembler_max_sessions() {
     let mut assembler = FastPacketAssembler::new();
     let pgn = 129540;
-    let fake_timer_ms: u32 = 10;
+    let fake_timer_ms: u64 = 10;
 
     // Start four concurrent sessions (current limit = 4)
     for source_addr in 1..=4 {
@@ -393,7 +393,7 @@ fn test_stress_100_pgns() {
         let source = (i % 4) as u8; // Rotate across four sources
         let pgn_ais = 129040;
 
-        let fake_timer_ms: u32 = 10;
+        let fake_timer_ms: u64 = 10;
 
         // Create an AIS message with varying data
         let mut ais = Pgn129040::new();

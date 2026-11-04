@@ -1007,7 +1007,7 @@ fn replay_real_backbone_capture() {
             }
             let mut buf = [0u8; 8];
             buf.copy_from_slice(data);
-            match assembler.process_frame((ts_us / 1000) as u32, pgn, src, &buf) {
+            match assembler.process_frame(ts_us / 1000, pgn, src, &buf) {
                 ProcessResult::MessageComplete(m) => {
                     completed += 1;
                     payload = m.payload[..m.len].to_vec();
