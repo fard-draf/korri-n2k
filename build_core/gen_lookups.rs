@@ -302,6 +302,7 @@ pub(super) fn generate_indirect_lookup_helpers(
     slave_field_id: &str,
     enum_name: &str,
     master_field_type: &str,
+    master_repr: &str,
 ) -> Result<String, BuildError> {
     let mut buffer = String::new();
     let master_field_snake = to_snake_case(master_field_id, "field");
@@ -317,10 +318,15 @@ pub(super) fn generate_indirect_lookup_helpers(
         "\tpub fn {}(&self) -> Option<{}> {{",
         getter_name, enum_name_pascal
     )?;
-    writeln!(buffer, "\t\tlet slave_val = self.{};", slave_field_snake)?;
+    // Both halves of the key are bytes, whatever the width of the fields carrying them.
     writeln!(
         buffer,
-        "\t\tlet master_val = u8::from(self.{});",
+        "\t\tlet slave_val = u8::try_from(self.{}).ok()?;",
+        slave_field_snake
+    )?;
+    writeln!(
+        buffer,
+        "\t\tlet master_val = u8::try_from(self.{}.raw()).ok()?;",
         master_field_snake
     )?;
     writeln!(
@@ -344,10 +350,10 @@ pub(super) fn generate_indirect_lookup_helpers(
     writeln!(buffer, "\t\tlet val2 = value.value2();")?;
     writeln!(
         buffer,
-        "\t\tself.{} = {}::from(val1);",
-        master_field_snake, master_field_type
+        "\t\tself.{} = {}::from(val1 as {});",
+        master_field_snake, master_field_type, master_repr
     )?;
-    writeln!(buffer, "\t\tself.{} = val2;", slave_field_snake)?;
+    writeln!(buffer, "\t\tself.{} = val2.into();", slave_field_snake)?;
 
     writeln!(buffer, "\t}}")?;
     writeln!(buffer)?;

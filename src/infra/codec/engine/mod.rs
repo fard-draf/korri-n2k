@@ -22,6 +22,20 @@ pub fn deserialize_into<T: FieldAccess>(
     payload: &[u8],
     descriptor: &'static PgnDescriptor,
 ) -> Result<(), DeserializationError> {
+    // A payload between `MinLength` and `Length` comes from a device built against
+    // an older layout. Its missing tail reads as 0xFF, the N2K "not available".
+    let mut padded = [0xFF; MAX_PGN_BYTES];
+    let payload = match (descriptor.min_length, descriptor.length) {
+        (Some(min), Some(len))
+            if payload.len() >= min as usize
+                && payload.len() < len as usize
+                && len as usize <= MAX_PGN_BYTES =>
+        {
+            padded[..payload.len()].copy_from_slice(payload);
+            &padded[..len as usize]
+        }
+        _ => payload,
+    };
     let mut reader = BitReader::new(payload);
 
     // Helper to detect whether a field belongs to a repeating group
@@ -615,12 +629,9 @@ fn write_field(
                 .map_err(|e| SerializationError::BitWriteError { err: e })?;
         }
         FieldKind::IndirectLookup => {
-            // Value is received as a combined u16 (high + low byte).
-            let combined_value = pgn_value_to_u64(value)
-                .map_err(|e| SerializationError::CodecError { source: e })?
-                as u16;
-            // Only the low byte belongs to this field; the master field writes the high byte.
-            let value_to_write = (combined_value & 0x00FF) as u64;
+            // The field holds its own raw value; the master field is written separately.
+            let value_to_write = pgn_value_to_u64(value)
+                .map_err(|e| SerializationError::CodecError { source: e })?;
 
             if let Some(bit_len) = field_desc.bits_length {
                 writer

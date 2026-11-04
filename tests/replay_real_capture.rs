@@ -1063,13 +1063,9 @@ fn replay_real_backbone_capture() {
         "only {total_ok} decoded out of {frames} frames"
     );
 
-    // The only accepted residual is Simnet 130850, whose variant declares 14 bytes
-    // while the autopilot sends 12. Absent trailing numbers are missing data, not
-    // padding, so they stay an error rather than being defaulted silently.
-    let unexpected: u64 = errs
-        .iter()
-        .filter(|(pgn, _)| **pgn != 130850)
-        .flat_map(|(_, kinds)| kinds.values())
-        .sum();
-    assert_eq!(unexpected, 0, "unexpected decode failures: {errs:#?}");
+    // Every message of the capture must decode. A payload shorter than `Length`
+    // is accepted only down to CANboat's `MinLength`; below it, absent trailing
+    // fields are missing data and stay an error. (Simnet 130850, once tolerated
+    // here, was declared 14 bytes long until CANboat 9.1.0 fixed it to 12.)
+    assert_eq!(total_err, 0, "unexpected decode failures: {errs:#?}");
 }

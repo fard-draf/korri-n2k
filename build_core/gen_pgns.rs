@@ -542,6 +542,7 @@ fn generate_impl_bloc_with_descriptor(
     writeln!(buffer, "\t\tpriority: {:?},", pgn.priority)?;
     writeln!(buffer, "\t\tfastpacket: {},", is_fastpacket)?;
     writeln!(buffer, "\t\tlength: {:?},", pgn.length)?;
+    writeln!(buffer, "\t\tmin_length: {:?},", pgn.min_length)?;
     writeln!(buffer, "\t\tfield_count: {:?},", pgn.field_count)?;
     writeln!(buffer, "\t\ttrans_interval: {:?},", pgn.trans_interval)?;
     writeln!(buffer, "\t\ttrans_irregular: {:?},", pgn.trans_irregular)?;
@@ -644,11 +645,15 @@ fn generate_impl_bloc_with_descriptor(
                 // Find the master field that provides the high byte
                 if let Some(master_field) = pgn.fields.iter().find(|f| f.order == field_order) {
                     let master_type = map_type(master_field, lookup_enum_map, lookup_indir_map)?;
+                    let master_repr =
+                        lookup_repr_from_field(master_field, lookup_enum_map, lookup_indir_map)
+                            .unwrap_or("u8");
                     buffer.push_str(&generate_indirect_lookup_helpers(
                         &master_field.id,
                         &field.id,
                         enum_name,
                         &master_type,
+                        master_repr,
                     )?);
                 }
             }
@@ -843,10 +848,12 @@ fn generate_trait_impl(
                 }
                 // INDIRECT_LOOKUP: keep raw u8 fields without conversion
                 FieldKind::IndirectLookup => {
+                    let variant =
+                        get_pgn_value_variant_from_type(wire_type_from_bits(field), field)?;
                     writeln!(
                         buffer,
-                        "\t\t\t\"{}\" => Some(PgnValue::U8(self.{})),",
-                        field_name_pascal, field_name_snake
+                        "\t\t\t\"{}\" => Some({}(self.{})),",
+                        field_name_pascal, variant, field_name_snake
                     )?;
                 }
                 FieldKind::StringFix => {
@@ -1005,7 +1012,8 @@ fn generate_trait_impl(
             }
             // INDIRECT_LOOKUP: les champs restent u8, pas de conversion
             FieldKind::IndirectLookup => {
-                writeln!(buffer, "\t\t\t\tif let PgnValue::U8(val) = value {{")?;
+                let variant = get_pgn_value_variant_from_type(wire_type_from_bits(field), field)?;
+                writeln!(buffer, "\t\t\t\tif let {}(val) = value {{", variant)?;
                 writeln!(buffer, "\t\t\t\t\tself.{} = val;", field_name_snake)?;
                 writeln!(buffer, "\t\t\t\t\tSome(())")?;
                 writeln!(buffer, "\t\t\t\t}} else {{")?;

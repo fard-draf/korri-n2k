@@ -160,6 +160,9 @@ pub struct PgnDescriptor {
     pub fastpacket: bool,
     /// 6. Payload length in bytes (if fixed).
     pub length: Option<u16>,
+    /// 6b. Shortest payload accepted: devices built against an older layout
+    /// stop before the trailing fields CANboat added since.
+    pub min_length: Option<u16>,
     /// 7. Number of field descriptors.
     pub field_count: Option<u8>,
     /// 8. Transmission interval.

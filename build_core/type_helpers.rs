@@ -197,7 +197,7 @@ pub(crate) fn map_type(
             // IMPORTANT: keep INDIRECT_LOOKUP fields as u8 in the struct because they
             // carry only 8 bits of the combined value. Another u8 will be joined to form
             // the u16 enumeration. Helper accessors are generated to work with the full enum.
-            Ok("u8".to_string())
+            Ok(wire_type_from_bits(field).to_string())
         }
         // FLOAT is a raw IEEE-754 number, not a scaled integer: its resolution of 1
         // would otherwise land it on the signed-integer path below.
@@ -368,7 +368,9 @@ pub(crate) fn map_to_fieldkind(field: &Fields) -> FieldKind {
         "ISO_NAME" => FieldKind::IsoName,
         // Fixed-width unsigned integers despite the "dynamic" naming: they carry a
         // key, an index or a length, and it is the *following* field they size.
-        "DYNAMIC_FIELD_KEY" | "DYNAMIC_FIELD_LENGTH" | "FIELD_INDEX" => FieldKind::Number,
+        "DYNAMIC_FIELD_KEY" | "DYNAMIC_FIELD_LENGTH" | "FIELD_INDEX" | "ADDRESS" => {
+            FieldKind::Number
+        }
         // DYNAMIC_FIELD_VALUE and VARIABLE have no BitLength: their width is only
         // known at runtime, which the engine cannot express yet.
         _ => FieldKind::Unimplemented,

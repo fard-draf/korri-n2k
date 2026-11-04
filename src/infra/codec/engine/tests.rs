@@ -8,8 +8,8 @@ use crate::{
     },
     protocol::{
         lookups::{
-            AcLine, Acceptability, DeviceClass, DeviceFunction, IndustryCode, ManufacturerCode,
-            RangeResidualMode, SatelliteStatus, YesNo,
+            AcLine, Acceptability, DeviceClass, DeviceFunction, GnssSystem, IndustryCode,
+            ManufacturerCode, RangeResidualMode, SatelliteStatus, YesNo1bit,
         },
         messages::{
             LineInfo, Pgn127503, Pgn129025, Pgn129029, Pgn129040, Pgn129044, Pgn129540,
@@ -86,6 +86,7 @@ fn test_round_trip_multiple_way_pgn() {
             priority: Some(2),
             fastpacket: false,
             length: Some(18),
+            min_length: None,
             field_count: Some(4),
             trans_interval: None,
             trans_irregular: None,
@@ -216,6 +217,7 @@ fn test_string_lz_roundtrip() {
             priority: Some(6),
             fastpacket: false,
             length: None,
+            min_length: None,
             field_count: Some(1),
             trans_interval: None,
             trans_irregular: Some(true),
@@ -295,6 +297,7 @@ fn test_string_lau_roundtrip() {
             priority: Some(6),
             fastpacket: false,
             length: None,
+            min_length: None,
             field_count: Some(1),
             trans_interval: None,
             trans_irregular: Some(true),
@@ -388,7 +391,7 @@ fn test_round_trip_pgn_60928() {
     // Use helper to assign the full DeviceFunction value
     pgn.set_device_function(DeviceFunction::Diagnostic);
     pgn.system_instance = 4;
-    pgn.arbitrary_address_capable = YesNo::Yes;
+    pgn.arbitrary_address_capable = YesNo1bit::Yes;
 
     let mut pgn_rounded = Pgn60928::new();
     let mut buffer = [0xFF; Pgn60928::PGN_60928_DESCRIPTOR.length.unwrap() as usize];
@@ -437,7 +440,7 @@ fn test_round_trip_pgn_59904() {
 /// Proprietary ASCII PGN: fixed-length string field with padding.
 fn test_round_trip_stringfixe_pgn_130821() {
     let mut pgn = Pgn130821NavicoAsciiData::new();
-    pgn.manufacturer_code = ManufacturerCode::ArksEnterprisesInc;
+    pgn.manufacturer_code = ManufacturerCode::ArksEnterprises;
     pgn.industry_code = IndustryCode::MarineIndustry;
 
     pgn.a = 150;
@@ -689,7 +692,7 @@ fn test_round_trip_pgn_129540_repetitive_fields() {
         pgn.prns[idx].range_residuals = sample.4 as f64;
         pgn.prns[idx].status = SatelliteStatus::NotTracked;
 
-        pgn.prns[idx].reserved11 = sample.6;
+        pgn.prns[idx].gnss_system = GnssSystem::from(sample.6);
     }
 
     let mut buffer = [0xFF; 223];
@@ -775,6 +778,7 @@ fn test_bitlookup_u8_roundtrip() {
             priority: Some(6),
             fastpacket: false,
             length: Some(1),
+            min_length: None,
             field_count: Some(1),
             trans_interval: None,
             trans_irregular: Some(true),
@@ -853,6 +857,7 @@ fn test_bitlookup_u16_roundtrip() {
             priority: Some(6),
             fastpacket: false,
             length: Some(2),
+            min_length: None,
             field_count: Some(1),
             trans_interval: None,
             trans_irregular: Some(true),
@@ -941,6 +946,7 @@ fn test_bitlookup_u32_roundtrip() {
             priority: Some(6),
             fastpacket: false,
             length: Some(4),
+            min_length: None,
             field_count: Some(1),
             trans_interval: None,
             trans_irregular: Some(true),
@@ -1020,6 +1026,7 @@ fn test_bitlookup_edge_cases() {
             priority: Some(6),
             fastpacket: false,
             length: Some(2),
+            min_length: None,
             field_count: Some(1),
             trans_interval: None,
             trans_irregular: Some(true),

@@ -25,10 +25,10 @@ fn main() {
     let mut address_claim = Pgn60928::new();
 
     // Direct LOOKUP – assign using the enum
-    address_claim.manufacturer_code = ManufacturerCode::ArksEnterprisesInc;
+    address_claim.manufacturer_code = ManufacturerCode::ArksEnterprises;
     address_claim.device_class = DeviceClass::SteeringAndControlSurfaces;
     address_claim.industry_group = IndustryCode::MarineIndustry;
-    address_claim.arbitrary_address_capable = YesNo::Yes;
+    address_claim.arbitrary_address_capable = YesNo1bit::Yes;
 
     println!("manufacturer_code: {:?}", address_claim.manufacturer_code);
     println!("device_class: {:?}", address_claim.device_class);

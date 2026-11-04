@@ -166,7 +166,7 @@ pub(crate) struct LookupIndirEnum {
     #[serde(rename = "Name")]
     pub(crate) name: String,
     #[serde(rename = "MaxValue")]
-    pub(crate) max_value: u8,
+    pub(crate) max_value: u32,
     #[serde(rename = "EnumValues")]
     pub(crate) indir_enum_values: Vec<IndirEnumValues>,
 }
@@ -185,7 +185,7 @@ impl LookupGenerator for LookupIndirEnum {
         &self.name
     }
     fn max_value(&self) -> u32 {
-        self.max_value as u32
+        self.max_value
     }
     fn variants(&self) -> Vec<VariantData> {
         self.indir_enum_values
@@ -271,6 +271,9 @@ pub(crate) struct PgnInstructions {
     /// 7. Payload length in bytes.
     #[serde(rename = "Length")]
     pub length: Option<u8>,
+    /// 7b. Shortest payload a device may legitimately send (older layout).
+    #[serde(rename = "MinLength")]
+    pub min_length: Option<u8>,
     /// 8. Number of fields.
     #[serde(rename = "FieldCount")]
     pub field_count: Option<u8>,
