@@ -49,7 +49,7 @@ fn main() {
 
 /// A millisecond clock. On a real node this is your `Clock` implementation;
 /// the assembler only uses it to expire incomplete sessions.
-fn now_ms() -> u32 {
+fn now_ms() -> u64 {
     0
 }
 

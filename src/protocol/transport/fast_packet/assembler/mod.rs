@@ -8,7 +8,7 @@ use super::{FAST_PACKET_PGNS, MAX_FAST_PACKET_PAYLOAD};
 const MAX_CONCURRENT_SESSIONS: usize = 4;
 
 /// Maximum time without addressed message for a fast packet session.
-const SESSION_TIMEOUT_MS: u32 = 500;
+const SESSION_TIMEOUT_MS: u64 = 500;
 
 /// Useful bytes a first frame carries, after the sequence and size header.
 const FIRST_FRAME_PAYLOAD: usize = 6;
@@ -60,7 +60,7 @@ struct FastPacketSession {
     expected_size: usize,
     current_size: usize,
     last_frame_index: u8,
-    last_seen_ms: u32,
+    last_seen_ms: u64,
 }
 
 impl FastPacketSession {
@@ -89,14 +89,14 @@ impl FastPacketSession {
         self.last_frame_index = 0;
     }
 
-    fn is_free(&self, now_ms: u32) -> bool {
+    fn is_free(&self, now_ms: u64) -> bool {
         self.state == SessionState::Inactive
-            || now_ms.wrapping_sub(self.last_seen_ms) > SESSION_TIMEOUT_MS
+            || now_ms.saturating_sub(self.last_seen_ms) > SESSION_TIMEOUT_MS
     }
 
-    fn is_expired(&self, now_ms: u32) -> bool {
+    fn is_expired(&self, now_ms: u64) -> bool {
         self.state == SessionState::InProgress
-            && now_ms.wrapping_sub(self.last_seen_ms) > SESSION_TIMEOUT_MS
+            && now_ms.saturating_sub(self.last_seen_ms) > SESSION_TIMEOUT_MS
     }
 }
 
@@ -197,7 +197,7 @@ impl FastPacketAssembler {
     /// consumed, or completed the message. A PGN outside the table is ignored.
     pub fn process_frame(
         &mut self,
-        now_ms: u32,
+        now_ms: u64,
         pgn: u32,
         source_address: u8,
         data: &[u8; 8],
