@@ -22,13 +22,15 @@
 //! let handle = parts.handle.expect("a command channel was provided");
 //! spawner.spawn(n2k_runner_task(parts.runner))?;
 //!
-//! // Commands queued before the 250 ms claim completes are dropped by the runner.
-//! if handle.claimed_address().is_some() {
-//!     let mut pos = Pgn129025::new();
-//!     pos.latitude = 47.7223;
-//!     pos.longitude = -4.0022;
-//!     handle.send_pgn(&pos, 129025, 2, None).await?; // Fast Packet is automatic
+//! // The claim takes at least 250 ms, and the runner drops commands queued before it.
+//! while handle.claimed_address().is_none() {
+//!     Timer::after_millis(10).await;
 //! }
+//!
+//! let mut pos = Pgn129025::new();
+//! pos.latitude = 47.7223;
+//! pos.longitude = -4.0022;
+//! handle.send_pgn(&pos, 129025, 2, None).await?; // one frame; longer PGNs go out as Fast Packet
 //!
 //! #[embassy_executor::task]
 //! async fn n2k_runner_task(runner: AddressRunner<'static, MyCanBus, MyTimer, 4, 8>) {

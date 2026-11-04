@@ -11,20 +11,37 @@
 </p>
 
 An embedded-first NMEA 2000 / ISO 11783 stack for Rust. It sends and receives
-PGNs on a marine CAN bus. The `embassy` feature is `no_std` and uses no heap.
-The `tokio` feature provides the same protocol logic on Linux (other OSes are
-untested).
+PGNs on a marine CAN bus. Decoding alone and the `embassy` runtime are `no_std`
+and use no heap. The `tokio` runtime provides the same protocol logic on Linux
+(other OSes are untested).
 
 PGN types are generated at build time from [CANboat](https://github.com/canboat/canboat),
 the reference catalogue of NMEA 2000 messages. You never hand-write a parser.
 You choose how many get compiled in.
 
-## Quickstart
+## Install
+
+Minimum Rust 1.96, edition 2021. Pick **at most one** runtime: `embassy` and
+`tokio` are mutually exclusive and enabling both fails to compile.
 
 ```sh
-cargo add korri-n2k --features embassy   # bare metal
-cargo add korri-n2k --features tokio     # Linux
+cargo add korri-n2k                      # decode / encode only
+cargo add korri-n2k --features embassy   # or: bare metal runtime
+cargo add korri-n2k --features tokio     # or: Linux runtime
 ```
+
+| Feature | Purpose | `no_std` | Heap |
+|---|---|---|---|
+| *(none)* | decode and encode PGNs | yes | none |
+| `embassy` | claim, send, receive on bare metal | yes | none |
+| `tokio` | claim, send, receive on Linux (implies `std`) | no | channel buffers only |
+| `std` | host without a runtime (blocking claim, examples) | no | none |
+
+Optional: `full-pgns` (see below), `defmt` (logging through `defmt`),
+`build-download` (if `build_core/var/canboat.json` is missing, fetch it with
+`ureq` instead of `curl`/`wget`).
+
+## Quickstart
 
 Decoding needs no runtime feature: the snippet below runs as the `quickstart`
 example without any.
@@ -41,8 +58,7 @@ let depth = Pgn128267::from_payload(&payload).expect("valid Water Depth");
 assert!((depth.depth - 1.0).abs() < 1e-6);
 ```
 
-Claim an address and emit (`embassy`, zero heap; `tokio` uses the same flow with
-channel capacities):
+Claim an address and emit (`embassy`, zero heap):
 
 ```rust,ignore
 static COMMANDS: Channel<CriticalSectionRawMutex, SupervisorCommand, 4> = Channel::new();
@@ -54,21 +70,22 @@ let parts = AddressService::<_, _, 4, 8>::new(manager, Some(&COMMANDS), Some(&FR
     .into_parts();
 let handle = parts.handle.expect("a command channel was provided");
 
-spawner.spawn(n2k_runner_task(parts.runner))?; // claims (250 ms), defends, emits
+spawner.spawn(n2k_runner_task(parts.runner))?; // claims, defends, emits
 
-// Commands queued before the claim completes are dropped by the runner.
-if handle.claimed_address().is_some() {
-    let mut pos = Pgn129025::new();
-    pos.latitude = 47.7223;
-    pos.longitude = -4.0022;
-    handle.send_pgn(&pos, 129025, 2, None).await?; // Fast Packet is automatic
+// The claim takes at least 250 ms, and the runner drops commands queued before it.
+while handle.claimed_address().is_none() {
+    Timer::after_millis(10).await;
 }
+
+let mut pos = Pgn129025::new();
+pos.latitude = 47.7223;
+pos.longitude = -4.0022;
+handle.send_pgn(&pos, 129025, 2, None).await?; // one frame; longer PGNs go out as Fast Packet
 ```
 
-## Install
-
-`embassy` and `tokio` are mutually exclusive: pick one, or none to only decode.
-Minimum Rust 1.96, edition 2021.
+Under `tokio` there are no `static`s: `AddressService::new(manager, 4, 8)` takes
+channel capacities (`0` opts out of a channel), and `parts.runner.drive()` is
+spawned with `tokio::spawn`. See the `address_claim` example.
 
 ## Choosing your PGNs
 
@@ -79,6 +96,9 @@ Only the PGNs listed in a manifest are compiled in:
 | Common PGNs (position, heading, AIS, depth, wind) | default |
 | Custom or minimal set (`{"pgns": [{"id": 128267, "name": "..."}]}`) | `KORRI_N2K_MANIFEST_PATH=/abs/path/manifest.json` |
 | Every supported PGN | `features = ["full-pgns"]` |
+
+`KORRI_N2K_MANIFEST_PATH` wins over `full-pgns`. If the file does not exist, the
+build falls back to the default manifest and prints a warning.
 
 ## Passive monitoring
 
@@ -117,16 +137,22 @@ assert!(range_na);
 
 **Flash footprint (`thumbv7em-none-eabihf`, `opt-level = "s"`, LTO):** zero
 overhead when unreferenced (the linker strips unused descriptors and tables).
-Calling `descriptor_for` + `for_each_field` + `lookup_name` pulls in the
-descriptors of the active manifest (~1.1–1.4 KB of `.rodata` per descriptor,
-until `FieldDescriptor` is compacted in a future release): ~79 KB `.rodata` /
-+13 KB `.text` with the default manifest (49 descriptors), and ~573 KB `.rodata`
-/ +48 KB `.text` with `full-pgns` (474 descriptors). On a microcontroller, use a
-custom `KORRI_N2K_MANIFEST_PATH` listing only the PGNs you monitor.
+Calling `descriptor_for` + `for_each_field` + `lookup_name` pulls in every
+descriptor of the active manifest, one per PGN variant (~1.1–1.4 KB of `.rodata`
+each):
+
+| Manifest | PGNs | Descriptors | `.rodata` | `.text` |
+|---|---|---|---|---|
+| default | 42 | 49 | ~79 KB | +13 KB |
+| `full-pgns` | 313 | 474 | ~573 KB | +48 KB |
+
+On a microcontroller, use a custom `KORRI_N2K_MANIFEST_PATH` listing only the
+PGNs you monitor.
 
 ## Documentation
 
-Guides live in the API docs ([docs.rs](https://docs.rs/korri-n2k)):
+Guides live in the API docs ([docs.rs](https://docs.rs/korri-n2k), built with
+`embassy`; for the `tokio` API, run `cargo doc --features tokio --open`):
 
 - Features, choosing PGNs (manifest / `full-pgns`), limits: crate root
 - Claim, send, receive (`AddressService`, `AddressHandle`, `AddressFrames`):
@@ -145,9 +171,9 @@ Runnable examples (CI runs them): `quickstart`, `lookup_enum_usage`,
 `address_claim --features tokio`. Firmwares for
 STM32, ESP32 and SocketCAN: [korri-n2k-examples](https://github.com/fard-draf/korri-n2k-examples).
 
-Known gaps (Fast Packet reassembly is manual on RX; no ISO Transport Protocol or
-Commanded Address; no random pre-claim delay): see *Limits* in the crate root
-docs and [ROADMAP.md](ROADMAP.md). History: [CHANGELOG.md](CHANGELOG.md).
+Known gaps: Fast Packet is split automatically on TX but reassembled manually on
+RX (`FastPacketAssembler`); no ISO Transport Protocol or ISO Commanded Address;
+no random delay before a claim. See *Limits* in the crate root docs and [ROADMAP.md](ROADMAP.md). History: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
