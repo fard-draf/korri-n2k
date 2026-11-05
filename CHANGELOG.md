@@ -171,6 +171,13 @@ instead of rejected.
   and a driver slicing `data[..len]` would panic and end the runner. The
   supervisor now drops such a frame, as it already does for a `SendPayload`
   with a bad length.
+- The generator copied CANboat's multi-line `Explanation` into a single `///`
+  line, so every following line was bare text and the generated code did not
+  compile: 127233 (Man Overboard Notification) failed that way with a custom
+  manifest. Each line now gets its own `///`, and the descriptor `description`
+  and field `name` strings are escaped. The generated code of the default,
+  `full-pgns` and `{60928, 129033}` builds differs only by the two blank lines
+  that followed the doc of 65332.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`

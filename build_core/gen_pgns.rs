@@ -296,9 +296,15 @@ fn generate_struct_definition(
 
     writeln!(buffer, "#[derive(Debug, PartialEq, Copy, Clone)]")?;
 
-    writeln!(buffer, "/// {}", pgn.pgn_description)?;
+    // One `///` per line: a CANboat text may span several, and a line left bare
+    // is not a comment (127233).
+    for line in pgn.pgn_description.lines() {
+        writeln!(buffer, "/// {}", line)?;
+    }
     if let Some(explanation) = &pgn.explanation {
-        writeln!(buffer, "/// {}", explanation)?;
+        for line in explanation.lines() {
+            writeln!(buffer, "/// {}", line)?;
+        }
     }
     writeln!(buffer, "pub struct {} {{", struct_name)?;
 
@@ -691,7 +697,7 @@ fn generate_impl_bloc_with_descriptor(
         "\t\tname: \"{}\",",
         to_pascal_case(&pgn.pgn_name, PascalCaseMode::Soft)
     )?;
-    writeln!(buffer, "\t\tdescription: \"{}\",", pgn.pgn_description)?;
+    writeln!(buffer, "\t\tdescription: {:?},", pgn.pgn_description)?;
     writeln!(buffer, "\t\tpriority: {:?},", pgn.priority)?;
     writeln!(buffer, "\t\tfastpacket: {},", is_fastpacket)?;
     writeln!(buffer, "\t\tlength: {:?},", pgn.length)?;
@@ -718,7 +724,7 @@ fn generate_impl_bloc_with_descriptor(
             "\t\t\t\tid: \"{}\",",
             to_pascal_case(&field.id, PascalCaseMode::Soft)
         )?;
-        writeln!(buffer, "\t\t\t\tname: \"{}\",", field.name)?;
+        writeln!(buffer, "\t\t\t\tname: {:?},", field.name)?;
         writeln!(
             buffer,
             "\t\t\t\tkind: FieldKind::{:?},",
