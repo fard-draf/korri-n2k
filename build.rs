@@ -59,9 +59,8 @@ fn main() -> Result<(), BuildError> {
         None
     };
 
-    let user_manifest_path = std::env::var("KORRI_N2K_MANIFEST_PATH")
-        .ok()
-        .map(PathBuf::from);
+    // `var_os`: a non-UTF-8 path is still a path, `var().ok()` silently dropped it.
+    let user_manifest_path = std::env::var_os("KORRI_N2K_MANIFEST_PATH").map(PathBuf::from);
 
     let manifest_path = if let Some(path) = user_manifest_path {
         if path.exists() {
@@ -97,6 +96,12 @@ fn main() -> Result<(), BuildError> {
         })?;
     let manifest: Manifest = serde_json::from_str(&manifest_string)?;
     let pgns_to_generate: Vec<u32> = manifest.pgns.iter().map(|p| p.id).collect();
+
+    // `protocol::management::iso_name` imports `Pgn60928` unconditionally: without it
+    // the crate fails with an `unresolved import` that never mentions the manifest.
+    if !pgns_to_generate.contains(&REQUIRED_PGN) {
+        return Err(BuildError::RequiredPgnMissing { pgn: REQUIRED_PGN });
+    }
 
     // 2. Load the PGN database (download if missing).
     let canboat_doc_path =

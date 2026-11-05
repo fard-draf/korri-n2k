@@ -125,6 +125,13 @@ instead of rejected.
 - The `build-download` feature fetches `canboat.json` from the `v9.1.0` tag
   instead of `master`, so a build no longer depends on the day it runs.
 - `NOTICE` names the bundled database: schema 2.8.0, CANboat v9.1.0.
+- **BREAKING (build)**: a manifest that cannot be honoured now fails the build
+  instead of compiling with fewer PGNs. A manifest without 60928 stopped on an
+  `unresolved import` of `Pgn60928` that never mentioned the manifest, and the
+  `README` example was one of them. A manifest id that is unknown to CANboat or
+  refused by the generator (e.g. 129792) was only a `cargo:warning`. Polymorphic
+  PGNs with some variants refused (126208, 130820) still stop in rustc, not in
+  the build script. A non-UTF-8 `KORRI_N2K_MANIFEST_PATH` is no longer ignored.
 
 ### Fixed
 - The generator treated CANboat's `Fallback` entries as real messages. A

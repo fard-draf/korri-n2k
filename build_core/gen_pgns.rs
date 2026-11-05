@@ -102,6 +102,23 @@ pub(crate) fn run_pgns_gen(
         }
     }
 
+    // A PGN that fails to generate only logs a `cargo:warning`: without this the
+    // build succeeds with fewer PGNs than the manifest asked for.
+    let mut missing: Vec<u32> = pgns_to_generate
+        .iter()
+        .copied()
+        .filter(|id| {
+            !generated_pgns
+                .iter()
+                .any(|&(generated, _)| generated == *id)
+        })
+        .collect();
+    missing.sort_unstable();
+    missing.dedup();
+    if !missing.is_empty() {
+        return Err(BuildError::PgnsNotGenerated { pgns: missing });
+    }
+
     writeln!(
         &mut buffer_pgn_code,
         "/// Fast Packet PGNs from the active manifest, sorted ascending."
