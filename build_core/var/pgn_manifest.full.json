@@ -2,6 +2,10 @@
   "description": "Every PGN defined in canboat.json. `pgns` is the set verified to compile together; `unsupported` is ignored by build.rs (it only reads `pgns`) and records why each PGN was rejected. Move an entry up into `pgns` once the generator handles it. Note: JSON has no comments, and build.rs deserializes with serde_json, so disabled PGNs live in a separate key rather than being commented out. Enabling ALL of `pgns` compiles but is far larger than any device needs — trim it to what you actually consume.",
   "pgns": [
     {
+      "id": 59392,
+      "name": "ISO Acknowledgement"
+    },
+    {
       "id": 59904,
       "name": "ISO Request"
     },
@@ -1255,11 +1259,6 @@
     }
   ],
   "unsupported": [
-    {
-      "id": 59392,
-      "name": "0xE800-0xEE00: Standardized single-frame addressed (+1 variants)",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 36 previous errors; 64 warnings emitted"
-    },
     {
       "id": 61184,
       "name": "0xEF00: Manufacturer Proprietary single-frame addressed (+4 variants)",

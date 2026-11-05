@@ -47,6 +47,7 @@ pub(crate) fn run_pgns_gen(
 
     if let Some(pgn_array) = canboat_value["PGNs"].as_array() {
         let mut poly_pgns_id_vec = Vec::new();
+        let precise_ids = set_non_fallback_ids(canboat_value);
         for pgn_value in pgn_array {
             match serde_json::from_value::<PgnInstructions>(pgn_value.clone()) {
                 Ok(pgn_def) => {
@@ -56,6 +57,12 @@ pub(crate) fn run_pgns_gen(
                         continue;
                     }
                     manifest_flags.push((pgn_def.pgn_id, is_fastpacket(&pgn_def)));
+
+                    // Same number as a real PGN: generating both would define
+                    // `Pgn{id}` twice. A fallback alone keeps being generated.
+                    if pgn_def.fallback == Some(true) && precise_ids.contains(&pgn_def.pgn_id) {
+                        continue;
+                    }
 
                     match generate_pgn_code(
                         &pgn_def,
@@ -1419,6 +1426,18 @@ fn set_pgns_set(canboat_value: &Value) -> Result<HashSet<u32>, BuildError> {
         }
     }
     Ok(pgns_set)
+}
+
+/// Numbers carried by at least one entry that is not a CANboat `Fallback`.
+fn set_non_fallback_ids(canboat_value: &Value) -> HashSet<u32> {
+    canboat_value["PGNs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| serde_json::from_value::<PgnInstructions>(v.clone()).ok())
+        .filter(|p| p.fallback != Some(true))
+        .map(|p| p.pgn_id)
+        .collect()
 }
 
 //==================================================================================SET_POLY_PGNS_MAP

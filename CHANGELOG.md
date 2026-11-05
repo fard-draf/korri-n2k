@@ -12,6 +12,8 @@ upstream: renamed lookups, corrected layouts, new variants. The engine gains
 instead of rejected.
 
 ### Added
+- PGN 59392, ISO Acknowledgement, in the default and full manifests. Nothing
+  sends it yet: answering a Request with a NAK is not part of this change.
 - `MinLength` support. A payload shorter than `Length` but at least
   `MinLength` long now decodes, its missing tail read as 0xFF, the N2K "not
   available" value. NMEA 2000 keeps appending fields to existing PGNs, devices
@@ -125,6 +127,11 @@ instead of rejected.
 - `NOTICE` names the bundled database: schema 2.8.0, CANboat v9.1.0.
 
 ### Fixed
+- The generator treated CANboat's `Fallback` entries as real messages. A
+  fallback is a catch-all for a whole PGN range and takes the number of the
+  first PGN of that range, so 59392 (ISO Acknowledgement) was generated twice
+  and a manifest listing 59392 did not compile. A fallback is now skipped when
+  a real entry has the same number, and kept when it is alone (61440, 126976).
 - Five PGNs of the default manifest rejected the shorter payload of a device
   built against their earlier layout: 126996, 129038, 129039, 129809 and
   129810. The message failed with `InvalidDataLength` and was lost whole. They
@@ -139,6 +146,11 @@ instead of rejected.
 - **BREAKING**: `Pgn126720MaretronSlaveResponse` and `Pgn130817NavicoUnknown`,
   and the matching variants of their dispatch enums. Both were `full-pgns`
   only.
+- **BREAKING**: `Pgn1267200x1Ef00ManufacturerProprietaryFastPacketAddressed`,
+  the struct generated from CANboat's 126720 fallback. No dispatch enum
+  referenced it. `full-pgns` only. A custom manifest listing 65280, 61184,
+  126208 or 130816 loses the struct of that PGN's fallback too, e.g.
+  `Pgn652800xff000XffffManufacturerProprietarySingleFrameNonAddressed`.
 
 ### Internal
 - `tests/replay_real_capture.rs` requires zero decode failures. The exception
