@@ -132,6 +132,9 @@ instead of rejected.
   first PGN of that range, so 59392 (ISO Acknowledgement) was generated twice
   and a manifest listing 59392 did not compile. A fallback is now skipped when
   a real entry has the same number, and kept when it is alone (61440, 126976).
+- Changing `KORRI_N2K_MANIFEST_PATH` did not invalidate the generated code: the
+  build kept the code of the previous manifest. The build script now reruns
+  when the variable changes.
 - Five PGNs of the default manifest rejected the shorter payload of a device
   built against their earlier layout: 126996, 129038, 129039, 129809 and
   129810. The message failed with `InvalidDataLength` and was lost whole. They
