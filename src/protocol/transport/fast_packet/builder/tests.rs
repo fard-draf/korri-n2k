@@ -162,3 +162,16 @@ fn test_builder_unlisted_pgn_above_eight_bytes_is_fast_packet() {
     assert_eq!(frame.data[1], 20);
     assert_eq!(frame.len, 8);
 }
+
+#[test]
+/// An identifier error ends the iteration: `for f in it { if let Ok(f) = f {..} }` must not spin.
+fn test_builder_identifier_error_is_yielded_once() {
+    // PGN 59904 is destination-specific: no destination is an error.
+    let mut iter = FastPacketBuilder::new(59904, 42, None, &[1u8; 20]).build();
+
+    assert!(matches!(
+        iter.next(),
+        Some(Err(CanIdBuildError::InvalidForBroadcast))
+    ));
+    assert!(iter.next().is_none());
+}

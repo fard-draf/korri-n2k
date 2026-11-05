@@ -72,7 +72,10 @@ impl<'a> Iterator for FrameIterator<'a> {
 
         let id = match id_builder.build() {
             Ok(id) => id,
-            Err(e) => return Some(Err(e)),
+            Err(e) => {
+                self.bytes_sent = self.builder.payload.len();
+                return Some(Err(e));
+            }
         };
         let total_len = self.builder.payload.len();
 

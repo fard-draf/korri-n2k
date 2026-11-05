@@ -153,6 +153,10 @@ instead of rejected.
   Packet frames, and any other payload over 8 bytes still does. The inter-frame
   delay follows the frame count instead of the payload length. No receiver has
   seen these frames yet, so interoperability is not proven.
+- `FrameIterator` returned the same identifier error on every call: a
+  destination-specific PGN built without a destination yielded `Err` forever,
+  so a loop that skips errors never ended. It now yields the error once, then
+  `None`.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
