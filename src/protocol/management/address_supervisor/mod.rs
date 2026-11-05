@@ -257,6 +257,8 @@ where
             // The caller supplied the source address: it must still be ours.
             // A reclaim between build and send would make it someone else's.
             SupervisorCommand::SendRawFrame(frame) => match manager.claimed_address_at(index) {
+                // `len` is a public field too: a driver slicing `data[..len]` would panic.
+                Some(_) if frame.len > frame.data.len() => Err(SendPgnError::Serialization),
                 Some(claimed) if frame.id.source_address() == claimed => {
                     manager.emit_raw(&frame).await.map_err(SendPgnError::Send)?;
                     on_sent(&frame);

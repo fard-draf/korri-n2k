@@ -264,6 +264,42 @@ async fn an_out_of_range_payload_length_is_rejected() {
     }
 }
 
+/// `CanFrame.len` is a public `usize`; a classic CAN frame holds 8 bytes, and a
+/// driver slicing `data[..len]` would panic on 9.
+#[tokio::test]
+async fn raw_frame_longer_than_eight_bytes_is_rejected() {
+    let (dut_bus, mut host_bus) = MockCanBus::create_pair();
+    let parts = service(dut_bus, 4, 0).into_parts();
+    let handle = parts.handle.expect("command channel requested");
+
+    let runner = parts.runner.drive();
+    tokio::pin!(runner);
+
+    tokio::select! {
+        result = &mut runner => panic!("a bad frame must not stop the runner: {:?}", result),
+        _ = async {
+            host_bus.recv().await.expect("initial claim expected");
+            sleep(Duration::from_millis(CLAIM_SETTLED_MS)).await;
+
+            // Source address held, so only the length is wrong.
+            let oversized = CanFrame {
+                id: CanId::builder(129026, PREFERRED).with_priority(2).build().unwrap(),
+                data: [0xEE; 8],
+                len: 9,
+            };
+            handle.send_raw_frame(&oversized).await.expect("queueing must succeed");
+
+            // Still alive, and the oversized frame never reached the bus.
+            let mut position = Pgn129025::new();
+            position.latitude = 47.6;
+            handle.send_pgn(&position, 129025, 2, None).await.unwrap();
+
+            let frame = host_bus.recv().await.expect("the runner must still emit");
+            assert_eq!(frame.id.pgn(), 129025, "the oversized frame must not be emitted");
+        } => {}
+    }
+}
+
 #[tokio::test]
 async fn supervisor_exits_on_can_bus_error() {
     let (dut_bus, host_bus) = MockCanBus::create_pair();

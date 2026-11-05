@@ -160,6 +160,10 @@ instead of rejected.
 - Network discovery listed addresses 254 and 255: a node in Cannot Claim and
   the invalid source. Neither can be sent to, and they used up the caller's
   buffer. A claim from an address above 251 is now ignored.
+- `SendRawFrame` accepted a `CanFrame` whose `len` exceeded its 8 data bytes,
+  and a driver slicing `data[..len]` would panic and end the runner. The
+  supervisor now drops such a frame, as it already does for a `SendPayload`
+  with a bad length.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
