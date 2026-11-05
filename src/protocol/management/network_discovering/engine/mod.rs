@@ -102,6 +102,9 @@ impl<'a> AddressRequester<'a> {
                     return Ok(RequestAction::Wait(remaining_ms as u32));
                 };
                 let address = frame.id.source_address();
+                if !address::is_claimable(address) {
+                    return Ok(RequestAction::Wait(remaining_ms as u32));
+                }
                 if device_count < self.discovered_devices.len() {
                     if !self.discovered_devices[0..device_count]
                         .iter()
@@ -163,5 +166,33 @@ mod tests {
                 Err(ClaimFault::RequestAddressClaimErr)
             ));
         }
+    }
+
+    #[test]
+    fn claims_from_unclaimable_addresses_are_not_listed() {
+        use crate::protocol::management::address_claiming::build_address_claim_frame;
+
+        let mut devices = [(0u8, IsoName::from_raw(0)); 4];
+        let mut requester = AddressRequester::new(17, &mut devices);
+        assert!(matches!(
+            requester.poll(0, None),
+            Ok(RequestAction::Send(_))
+        ));
+        requester.tx_sent(0);
+
+        // 254 is a node in Cannot Claim, 255 is never a valid source.
+        for source in [254, 255, 42] {
+            let claim =
+                build_address_claim_frame(IsoName::from_raw(0xAB00 + source as u64), source);
+            assert!(matches!(
+                requester.poll(10, Some(&claim)),
+                Ok(RequestAction::Wait(_))
+            ));
+        }
+        assert!(matches!(
+            requester.poll(10_000, None),
+            Ok(RequestAction::Done(1))
+        ));
+        assert_eq!(devices[0], (42, IsoName::from_raw(0xAB00 + 42)));
     }
 }

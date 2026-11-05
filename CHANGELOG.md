@@ -157,6 +157,9 @@ instead of rejected.
   destination-specific PGN built without a destination yielded `Err` forever,
   so a loop that skips errors never ended. It now yields the error once, then
   `None`.
+- Network discovery listed addresses 254 and 255: a node in Cannot Claim and
+  the invalid source. Neither can be sent to, and they used up the caller's
+  buffer. A claim from an address above 251 is now ignored.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
