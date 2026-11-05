@@ -25,8 +25,9 @@ pub trait PgnSender: CanBus {
     /// Serialize, segment, and send a PGN over the CAN bus.
     ///
     /// Transparently handles:
-    /// - **Single-frame PGNs** (≤ 8 bytes): sent as a single CAN frame.
-    /// - **Fast Packet PGNs** (> 8 bytes): automatically segmented into multiple frames.
+    /// - **Listed Fast Packet PGNs**, and any payload over 8 bytes: Fast Packet framing
+    ///   (sequence and length header), even when a short payload fits in one frame.
+    /// - **Other PGNs** (≤ 8 bytes): sent as a single raw CAN frame.
     ///
     /// # Inter-frame delay
     ///
@@ -106,7 +107,7 @@ where
 
             // For multi-frame Fast Packets insert a delay between frames
             // (skip before the first frame to minimize latency).
-            if !is_first_frame && payload_slice.len() > 8 {
+            if !is_first_frame {
                 // Recommended inter-frame delay to avoid TX buffer saturation
                 timer.delay_ms(FAST_PACKET_INTER_FRAME_DELAY_MS).await;
             }

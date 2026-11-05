@@ -142,6 +142,28 @@ instead of rejected.
 - Simnet 130850 decodes every message of the replay capture. Four of its ten
   failed against the 14-byte length CANboat 7.1.0 declared, while the autopilot
   sends 12.
+- A signed `DURATION` field was read as unsigned, so a negative value came back
+  huge: UTC-5 in `Pgn129033.local_offset` (raw `D4 FE`) decoded as 3914160 s
+  instead of -18000 s. Encoding was already right. The 24 signed `DURATION`
+  fields are all outside the default manifest (`full-pgns` or a custom one).
+- A Fast Packet PGN whose payload fits in 8 bytes was sent as a bare CAN frame,
+  without the sequence and length header, so every receiver misread it: PGN
+  129540 (GNSS Satellites in View) with no satellite is 3 bytes. Framing now
+  follows the PGN: any Fast Packet PGN, whatever its length, goes out as Fast
+  Packet frames, and any other payload over 8 bytes still does. The inter-frame
+  delay follows the frame count instead of the payload length. No receiver has
+  seen these frames yet, so interoperability is not proven.
+- `FrameIterator` returned the same identifier error on every call: a
+  destination-specific PGN built without a destination yielded `Err` forever,
+  so a loop that skips errors never ended. It now yields the error once, then
+  `None`.
+- Network discovery listed addresses 254 and 255: a node in Cannot Claim and
+  the invalid source. Neither can be sent to, and they used up the caller's
+  buffer. A claim from an address above 251 is now ignored.
+- `SendRawFrame` accepted a `CanFrame` whose `len` exceeded its 8 data bytes,
+  and a driver slicing `data[..len]` would panic and end the runner. The
+  supervisor now drops such a frame, as it already does for a `SendPayload`
+  with a bad length.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`

@@ -103,3 +103,75 @@ fn test_builder_sequence_id_progresses_between_messages() {
     assert_eq!(second_header & 0x1F, 0);
     assert_ne!(first_header & 0xE0, second_header & 0xE0);
 }
+
+#[test]
+/// A Fast Packet PGN keeps its header however short its payload is.
+fn test_builder_short_fast_packet_pgn_keeps_header() {
+    let payload = [0xA1, 0xA2, 0xA3];
+    let mut iter = FastPacketBuilder::new(129540, 42, None, &payload)
+        .with_sequence_id(0)
+        .build();
+
+    let frame = iter.next().unwrap().unwrap();
+    assert_eq!(frame.data[0], 0); // sequence 0, frame 0
+    assert_eq!(frame.data[1], 3); // total length
+    assert_eq!(&frame.data[2..5], &payload);
+    assert!(iter.next().is_none());
+}
+
+#[test]
+/// A 7-byte Fast Packet PGN is 6 bytes in the first frame and 1 in the second.
+fn test_builder_seven_byte_fast_packet_pgn_takes_two_frames() {
+    let payload = [1, 2, 3, 4, 5, 6, 7];
+    let mut iter = FastPacketBuilder::new(129540, 42, None, &payload)
+        .with_sequence_id(0)
+        .build();
+
+    let frame0 = iter.next().unwrap().unwrap();
+    assert_eq!(frame0.data[1], 7);
+    assert_eq!(&frame0.data[2..8], &payload[..6]);
+
+    let frame1 = iter.next().unwrap().unwrap();
+    assert_eq!(frame1.data[0], 1); // sequence 0, frame 1
+    assert_eq!(frame1.data[1], 7);
+
+    assert!(iter.next().is_none());
+}
+
+#[test]
+/// A PGN outside the Fast Packet table stays a raw frame up to 8 bytes.
+fn test_builder_non_fast_packet_pgn_stays_single_frame_at_eight_bytes() {
+    let payload = [1, 2, 3, 4, 5, 6, 7, 8];
+    let mut iter = FastPacketBuilder::new(129025, 42, None, &payload).build();
+
+    let frame = iter.next().unwrap().unwrap();
+    assert_eq!(frame.len, 8);
+    assert_eq!(frame.data, payload);
+    assert!(iter.next().is_none());
+}
+
+#[test]
+/// A PGN outside the table still falls back to Fast Packet above 8 bytes.
+fn test_builder_unlisted_pgn_above_eight_bytes_is_fast_packet() {
+    let payload = [0x33; 20];
+    let mut iter = FastPacketBuilder::new(129025, 42, None, &payload)
+        .with_sequence_id(0)
+        .build();
+
+    let frame = iter.next().unwrap().unwrap();
+    assert_eq!(frame.data[1], 20);
+    assert_eq!(frame.len, 8);
+}
+
+#[test]
+/// An identifier error ends the iteration: `for f in it { if let Ok(f) = f {..} }` must not spin.
+fn test_builder_identifier_error_is_yielded_once() {
+    // PGN 59904 is destination-specific: no destination is an error.
+    let mut iter = FastPacketBuilder::new(59904, 42, None, &[1u8; 20]).build();
+
+    assert!(matches!(
+        iter.next(),
+        Some(Err(CanIdBuildError::InvalidForBroadcast))
+    ));
+    assert!(iter.next().is_none());
+}

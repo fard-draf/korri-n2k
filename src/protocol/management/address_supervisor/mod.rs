@@ -81,8 +81,9 @@
 //! NAMEs must differ (`ClaimFault::DuplicateName` otherwise). With several
 //! Controller Applications, every frame one emits is also forwarded to the
 //! shared `AddressFrames`, Fast Packet fragments included, so each application
-//! sees its siblings' traffic; Fast Packet fragments are not looped back to the
-//! claim engines, which only react to single-frame claims and requests.
+//! sees its siblings' traffic. Only a payload sent as a single frame is looped
+//! back to the claim engines, a short Fast Packet included; a multi-frame Fast
+//! Packet is not. The engines ignore every PGN but claims and requests.
 //!
 //! # Receiving
 //!
@@ -257,6 +258,8 @@ where
             // The caller supplied the source address: it must still be ours.
             // A reclaim between build and send would make it someone else's.
             SupervisorCommand::SendRawFrame(frame) => match manager.claimed_address_at(index) {
+                // `len` is a public field too: a driver slicing `data[..len]` would panic.
+                Some(_) if frame.len > frame.data.len() => Err(SendPgnError::Serialization),
                 Some(claimed) if frame.id.source_address() == claimed => {
                     manager.emit_raw(&frame).await.map_err(SendPgnError::Send)?;
                     on_sent(&frame);

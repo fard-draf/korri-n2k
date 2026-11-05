@@ -1221,3 +1221,92 @@ fn test_round_trip_pgn_127503_repetitive_fields() {
         );
     }
 }
+
+#[test]
+fn test_signed_duration_with_resolution_is_sign_extended() {
+    #[derive(Debug, PartialEq, Copy, Clone, Default)]
+    struct PgnDuration {
+        offset: f64,
+    }
+
+    impl FieldAccess for PgnDuration {
+        fn field(&self, id: &'static str) -> Option<PgnValue> {
+            match id {
+                "Offset" => Some(PgnValue::F64(self.offset)),
+                _ => None,
+            }
+        }
+
+        fn field_mut(&mut self, id: &'static str, value: PgnValue) -> Option<()> {
+            match (id, value) {
+                ("Offset", PgnValue::F32(v)) => {
+                    self.offset = v as f64;
+                    Some(())
+                }
+                ("Offset", PgnValue::F64(v)) => {
+                    self.offset = v;
+                    Some(())
+                }
+                _ => None,
+            }
+        }
+    }
+
+    const fn field(bits: u32) -> FieldDescriptor {
+        FieldDescriptor {
+            id: "Offset",
+            name: "Offset",
+            kind: FieldKind::Duration,
+            bits_length: Some(bits),
+            bits_length_var: None,
+            bits_offset: Some(0),
+            is_signed: Some(true),
+            resolution: Some(60.0),
+            enum_direct_name: None,
+            enum_indirect_name: None,
+            enum_indirect_field_order: None,
+            physical_unit: None,
+            physical_qtity: None,
+            unknown_value: None,
+            out_of_range_value: None,
+            reserved_value: None,
+        }
+    }
+
+    const fn descriptor(fields: &'static [FieldDescriptor]) -> PgnDescriptor {
+        PgnDescriptor {
+            id: 42422,
+            name: "MockSignedDuration",
+            description: "Mocked signed DURATION field",
+            priority: Some(6),
+            fastpacket: false,
+            length: None,
+            min_length: None,
+            field_count: Some(1),
+            trans_interval: None,
+            trans_irregular: Some(true),
+            fields,
+            repeating_field_sets: &[],
+        }
+    }
+
+    static FIELDS_16: [FieldDescriptor; 1] = [field(16)];
+    static FIELDS_32: [FieldDescriptor; 1] = [field(32)];
+    static DESCRIPTOR_16: PgnDescriptor = descriptor(&FIELDS_16);
+    static DESCRIPTOR_32: PgnDescriptor = descriptor(&FIELDS_32);
+    let cases: [(&'static PgnDescriptor, &[u8]); 2] = [
+        (&DESCRIPTOR_16, &[0xD4, 0xFE]),
+        (&DESCRIPTOR_32, &[0xD4, 0xFE, 0xFF, 0xFF]),
+    ];
+
+    // UTC-5 is -300 minutes: raw -300 at a resolution of 60 s.
+    for (descriptor, bytes) in cases {
+        let mut decoded = PgnDuration::default();
+        deserialize_into(&mut decoded, bytes, descriptor).unwrap();
+        assert_eq!(decoded.offset, -18000.0, "{} bytes", bytes.len());
+
+        let mut buffer = [0u8; 8];
+        let written = serialize(&decoded, &mut buffer, descriptor).unwrap();
+        assert_eq!(&buffer[..written], bytes);
+    }
+}

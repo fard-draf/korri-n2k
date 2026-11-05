@@ -486,3 +486,18 @@ fn wide_scaled_duration_decodes() {
         pgn.trip_run_time
     );
 }
+
+/// DURATION fields can be signed: UTC-5 is -300 minutes, raw `D4 FE` at a
+/// resolution of 60 s. It was read as an unsigned 65236.
+#[cfg(feature = "full-pgns")]
+#[test]
+fn local_offset_negative_decodes_and_round_trips() {
+    let payload = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xD4, 0xFE];
+
+    let pgn = Pgn129033::from_payload(&payload).expect("decode 129033");
+    assert_eq!(pgn.local_offset, -18000.0);
+
+    let mut buffer = [0u8; MAX_PGN_BYTES];
+    let written = pgn.to_payload(&mut buffer).expect("encode 129033");
+    assert_eq!(&buffer[..written], &payload);
+}
