@@ -231,7 +231,8 @@ where
     }
 
     /// Send a payload from Controller Application `index`. Returns the frame
-    /// when the payload fit in one, so the runner can loop it back. `on_sent`
+    /// when the payload went out as exactly one frame, a short Fast Packet
+    /// included, so the runner can loop it back; `None` for several frames. `on_sent`
     /// sees every frame once it reached the bus, Fast Packet fragments included.
     pub(crate) async fn send_payload_at(
         &mut self,

@@ -81,8 +81,9 @@
 //! NAMEs must differ (`ClaimFault::DuplicateName` otherwise). With several
 //! Controller Applications, every frame one emits is also forwarded to the
 //! shared `AddressFrames`, Fast Packet fragments included, so each application
-//! sees its siblings' traffic; Fast Packet fragments are not looped back to the
-//! claim engines, which only react to single-frame claims and requests.
+//! sees its siblings' traffic. Only a payload sent as a single frame is looped
+//! back to the claim engines, a short Fast Packet included; a multi-frame Fast
+//! Packet is not. The engines ignore every PGN but claims and requests.
 //!
 //! # Receiving
 //!

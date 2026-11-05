@@ -144,7 +144,11 @@ impl<'a> Iterator for FrameIterator<'a> {
 }
 
 impl<'a> FastPacketBuilder<'a> {
-    /// Create a Fast Packet encoder (or single-frame builder) depending on payload size.
+    /// Create a Fast Packet encoder (or single-frame builder).
+    ///
+    /// Fast Packet framing applies when `pgn` is a listed Fast Packet PGN, whatever the
+    /// payload length, or when the payload exceeds 8 bytes. Any other payload of up to
+    /// 8 bytes is a single raw frame.
     ///
     /// # Concurrency
     /// On platforms without 8-bit atomics, the sequence identifier relies on a `static mut`.
