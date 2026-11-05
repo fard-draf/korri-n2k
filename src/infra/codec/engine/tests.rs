@@ -9,11 +9,11 @@ use crate::{
     protocol::{
         lookups::{
             AcLine, Acceptability, DeviceClass, DeviceFunction, GnssSystem, IndustryCode,
-            ManufacturerCode, RangeResidualMode, SatelliteStatus, YesNo1bit,
+            IsoControl, ManufacturerCode, RangeResidualMode, SatelliteStatus, YesNo1bit,
         },
         messages::{
             LineInfo, Pgn127503, Pgn129025, Pgn129029, Pgn129040, Pgn129044, Pgn129540,
-            Pgn130821NavicoAsciiData, Pgn59904, Pgn60160, Pgn60928,
+            Pgn130821NavicoAsciiData, Pgn59392, Pgn59904, Pgn60160, Pgn60928,
         },
     },
 };
@@ -452,6 +452,24 @@ fn test_round_trip_pgn_59904() {
     )
     .unwrap();
     assert_eq!(pgn, pgn_rounded)
+}
+
+#[test]
+/// PGN 59392 : ISO Acknowledgement. CANboat also lists a `Fallback` entry under
+/// this number; the generator must emit one `Pgn59392`, laid out like the real one.
+fn test_round_trip_pgn_59392() {
+    let mut pgn = Pgn59392::new();
+    pgn.control = IsoControl::Nak;
+    pgn.pgn = 129025;
+    let mut buffer = [0x00; 8];
+    let n = serialize(&pgn, &mut buffer, &Pgn59392::PGN_59392_DESCRIPTOR).unwrap();
+    // control, group function, 3 reserved bytes set to 1s, PGN on 3 LE bytes.
+    assert_eq!(&buffer[..n], [1, 0, 0xFF, 0xFF, 0xFF, 0x01, 0xF8, 0x01]);
+
+    let mut rounded = Pgn59392::new();
+    deserialize_into::<Pgn59392>(&mut rounded, &buffer[..n], &Pgn59392::PGN_59392_DESCRIPTOR)
+        .unwrap();
+    assert_eq!(pgn, rounded);
 }
 
 #[test]

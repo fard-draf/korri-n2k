@@ -1,6 +1,7 @@
 {
     "description": "List of PGNs supported by the korri-n2k library. The build.rs script uses it to generate parsing code only for these PGNs based on canboat.json. Matching is done on `id` only: `name` is documentation. An id that maps to several canboat entries generates one struct per entry.",
     "pgns": [
+        { "id": 59392, "name": "ISO Acknowledgement" },
         { "id": 59904, "name": "ISO Request" },
         { "id": 60160, "name": "ISO Transport Protocol, Data Transfer" },
         {

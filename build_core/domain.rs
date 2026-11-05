@@ -301,6 +301,10 @@ pub(crate) struct PgnInstructions {
     /// 16. Repeating Field Set 2 counter field index.
     #[serde(rename = "RepeatingFieldSet2CountField")]
     pub repeating_field_set_2_count_field: Option<u16>,
+    /// 16b. Catch-all for a whole PGN range, not a real message. CANboat gives it
+    /// the number of the first PGN of the range, so it can share it with one.
+    #[serde(rename = "Fallback", default)]
+    pub fallback: Option<bool>,
     /// 17. Field descriptors.
     #[serde(rename = "Fields")]
     pub fields: Vec<Fields>,

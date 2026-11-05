@@ -32,6 +32,8 @@ fn main() -> Result<(), BuildError> {
     println!("cargo:rerun-if-changed=build_core");
     println!("cargo:rerun-if-changed=build_core/var/pgn_manifest.json");
     println!("cargo:rerun-if-changed=build_core/var/canboat.json");
+    // Without this, pointing the variable at another manifest reused the previous generated code.
+    println!("cargo:rerun-if-env-changed=KORRI_N2K_MANIFEST_PATH");
 
     // 1. Load the manifest to know which PGNs must be generated.
     // Priority order:
