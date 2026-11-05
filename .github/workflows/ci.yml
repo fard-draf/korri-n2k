@@ -25,6 +25,15 @@ jobs:
         run: cargo test --verbose --features tokio
       - name: Run tests (embassy)
         run: cargo test --verbose --features embassy
+      # Not built by any other step: replay, float, lookup-width and round-trip tests
+      # need PGNs the default manifest does not carry.
+      - name: Run tests (full-pgns)
+        run: cargo test --verbose --features full-pgns
+      # The smallest manifest the build accepts (60928 is mandatory).
+      - name: Check a minimal custom manifest
+        run: |
+          printf '{"pgns":[{"id":60928,"name":"ISO Address Claim"}]}' > "$RUNNER_TEMP/minimal.json"
+          KORRI_N2K_MANIFEST_PATH="$RUNNER_TEMP/minimal.json" cargo check --lib
       - name: Build and run the examples
         run: |
           cargo run --example quickstart

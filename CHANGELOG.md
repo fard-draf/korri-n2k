@@ -192,6 +192,8 @@ instead of rejected.
   `Pgn652800xff000XffffManufacturerProprietarySingleFrameNonAddressed`.
 
 ### Internal
+- CI runs `cargo test --features full-pgns` and checks the build with a minimal
+  custom manifest (60928 only). Neither was built before.
 - `tests/replay_real_capture.rs` requires zero decode failures. The exception
   it kept for 130850 has no reason left.
 - `tests/test_min_length.rs` pins the three cases of 129794: 76 bytes read the
