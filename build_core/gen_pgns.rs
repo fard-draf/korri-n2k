@@ -8,9 +8,7 @@ use crate::core::FieldKind;
 use serde_json::Value;
 
 use crate::build_core::gen_lookups::generate_indirect_lookup_helpers;
-use crate::build_core::gen_lookups::{
-    set_lookup_bit_map, set_lookup_enum_map, set_lookup_indir_map,
-};
+use crate::build_core::gen_lookups::{set_lookup_enum_map, set_lookup_indir_map};
 
 use super::domain::*;
 use super::errors::*;
@@ -26,7 +24,6 @@ pub(crate) fn run_pgns_gen(
     // Prepare tracking structures (polymorphic PGNs, caches, etc.).
     let lookup_enum_map = set_lookup_enum_map(canboat_value)?;
     let lookup_indir_map = set_lookup_indir_map(canboat_value)?;
-    let lookup_bit_map = set_lookup_bit_map(canboat_value)?;
     let pgns_set = set_pgns_set(canboat_value)?;
     let poly_pgns_map = set_poly_pgns_map(canboat_value, pgns_set)?;
 
@@ -68,7 +65,6 @@ pub(crate) fn run_pgns_gen(
                         &pgn_def,
                         &lookup_enum_map,
                         &lookup_indir_map,
-                        &lookup_bit_map,
                         &poly_pgns_map,
                         &mut poly_pgns_id_vec,
                     ) {
@@ -186,7 +182,6 @@ fn generate_pgn_code(
     pgn: &PgnInstructions,
     lookup_enum_map: &HashMap<String, LookupEnum>,
     lookup_indir_map: &HashMap<String, LookupIndirEnum>,
-    lookup_bit_map: &HashMap<String, LookupBitEnum>,
     poly_pgns_map: &HashMap<u32, Vec<PolyPgn>>,
     poly_pgns_id_vec: &mut Vec<u32>,
 ) -> Result<String, BuildError> {
@@ -225,14 +220,12 @@ fn generate_pgn_code(
         repeating_info.as_ref(),
         lookup_enum_map,
         lookup_indir_map,
-        lookup_bit_map,
     )?);
     buffer.push_str(&generate_impl_bloc_with_descriptor(
         pgn,
         is_poly,
         lookup_enum_map,
         lookup_indir_map,
-        lookup_bit_map,
     )?);
     buffer.push_str(&generate_trait_impl(
         pgn,
@@ -240,7 +233,6 @@ fn generate_pgn_code(
         repeating_info.as_ref(),
         lookup_enum_map,
         lookup_indir_map,
-        lookup_bit_map,
     )?);
 
     Ok(buffer)
@@ -280,7 +272,6 @@ fn generate_struct_definition(
     repeating_info: Option<&RepeatingFieldSetInfo>,
     lookup_enum_map: &HashMap<String, LookupEnum>,
     lookup_indir_map: &HashMap<String, LookupIndirEnum>,
-    _lookup_bit_map: &HashMap<String, LookupBitEnum>,
 ) -> Result<String, BuildError> {
     // TODO!: Implement PGNs with dynamic or variable-sized payloads
     let mut buffer = String::new();
@@ -658,7 +649,6 @@ fn generate_impl_bloc_with_descriptor(
     is_poly: bool,
     lookup_enum_map: &HashMap<String, LookupEnum>,
     lookup_indir_map: &HashMap<String, LookupIndirEnum>,
-    _lookup_bit_map: &HashMap<String, LookupBitEnum>,
 ) -> Result<String, BuildError> {
     // Extract repeating-field information.
     // Note: unlike struct/trait generation we MUST keep repeating fields inside the
@@ -936,7 +926,6 @@ fn generate_trait_impl(
     repeating_info: Option<&RepeatingFieldSetInfo>,
     lookup_enum_map: &HashMap<String, LookupEnum>,
     lookup_indir_map: &HashMap<String, LookupIndirEnum>,
-    _lookup_bit_map: &HashMap<String, LookupBitEnum>,
 ) -> Result<String, BuildError> {
     let mut buffer = String::new();
     let pgn_id = if is_poly {

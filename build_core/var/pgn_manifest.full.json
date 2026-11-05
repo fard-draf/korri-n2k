@@ -1267,7 +1267,7 @@
     {
       "id": 65280,
       "name": "0xFF00-0xFFFF: Manufacturer Proprietary single-frame non-addressed (+6 variants)",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 1 previous error; 64 warnings emitted"
+      "reason": "compiles alone and with every `pgns` entry; the earlier failure (\"1 previous error\") is not reproduced (cause not isolated)"
     },
     {
       "id": 65288,
@@ -1287,12 +1287,12 @@
     {
       "id": 127233,
       "name": "Man Overboard Notification",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 3 previous errors"
+      "reason": "compiles since the multi-line `Explanation` fix; not promoted to `pgns` yet"
     },
     {
       "id": 127504,
       "name": "AC Output Status",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 15 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `LineInfo` repeating-group struct collides with the one of 127503"
     },
     {
       "id": 129808,
@@ -1302,37 +1302,37 @@
     {
       "id": 129816,
       "name": "AIS Acknowledge (Binary)",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `DestinationIdInfo` repeating-group struct collides with the one of 129796"
     },
     {
       "id": 130067,
       "name": "Route and WP Service - Route - WP Name & Position",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 9 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `WpIdInfo` repeating-group struct collides with the one of 129285, 130068 and 130074"
     },
     {
       "id": 130068,
       "name": "Route and WP Service - Route - WP Name",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 10 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `WpIdInfo` repeating-group struct collides with the one of 129285, 130067 and 130074"
     },
     {
       "id": 130069,
       "name": "Route and WP Service - XTE Limit & Navigation Method",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 29 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `DatabaseIdInfo` repeating-group struct collides with the one of 130064 and 130072"
     },
     {
       "id": 130071,
       "name": "Route and WP Service - Route Comment",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `RouteIdInfo` repeating-group struct collides with the one of 130065"
     },
     {
       "id": 130072,
       "name": "Route and WP Service - Database Comment",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `DatabaseIdInfo` repeating-group struct collides with the one of 130064 and 130069"
     },
     {
       "id": 130074,
       "name": "Route and WP Service - WP List - WP Name & Position",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 9 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `WpIdInfo` repeating-group struct collides with the one of 129285, 130067 and 130068"
     },
     {
       "id": 130573,
@@ -1342,7 +1342,7 @@
     {
       "id": 130581,
       "name": "Zone Configuration (deprecated)",
-      "reason": "generated code does not compile: could not compile `korri-n2k` (lib) due to 14 previous errors; 64 warnings emitted"
+      "reason": "compiles alone; `ZoneIdInfo` repeating-group struct collides with the one of 130574"
     },
     {
       "id": 130584,

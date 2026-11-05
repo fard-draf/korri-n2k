@@ -192,6 +192,13 @@ instead of rejected.
   `Pgn652800xff000XffffManufacturerProprietarySingleFrameNonAddressed`.
 
 ### Internal
+- Dead generator code removed: `derive_struct_name_from_counter` and its test,
+  `set_lookup_bit_map` with the unused `lookup_bit_map` parameters it fed,
+  `_FORBIDEN_PGN`, and a commented-out copy of `map_type`. The generated code is
+  unchanged. The `reason` of eleven `unsupported` entries of
+  `pgn_manifest.full.json` was wrong: they compile alone (127233 since the
+  multi-line fix) and collide on the name of a repeating-group struct, e.g.
+  `WpIdInfo` for 130067, 130068 and 130074.
 - CI runs `cargo test --features full-pgns` and checks the build with a minimal
   custom manifest (60928 only). Neither was built before.
 - `tests/replay_real_capture.rs` requires zero decode failures. The exception

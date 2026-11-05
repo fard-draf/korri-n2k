@@ -528,28 +528,3 @@ pub(super) fn set_lookup_indir_map(
     }
     Ok(lookup_map)
 }
-
-/// Builds a map of bit lookups accessible by raw or PascalCase name.
-pub(super) fn set_lookup_bit_map(
-    canboat_value: &Value,
-) -> Result<HashMap<String, LookupBitEnum>, BuildError> {
-    let mut lookup_map = HashMap::new();
-    if let Some(lookup_def) = canboat_value["LookupBitEnumerations"].as_array() {
-        for lookup in lookup_def {
-            match serde_json::from_value::<LookupBitEnum>(lookup.clone()) {
-                Ok(lookup_def) => {
-                    let pascal_case =
-                        to_pascal_case(&lookup_def.name.to_lowercase(), PascalCaseMode::Hard);
-                    lookup_map
-                        .entry(lookup_def.name.clone())
-                        .or_insert(lookup_def.clone());
-                    lookup_map.entry(pascal_case).or_insert(lookup_def.clone());
-                }
-                Err(e) => {
-                    println!("cargo:warning=[LOOKUP_BIT_ENUM {}] Skipped..", e)
-                }
-            }
-        }
-    }
-    Ok(lookup_map)
-}
