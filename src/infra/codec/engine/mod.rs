@@ -612,7 +612,13 @@ fn scale_raw_field(
 
         FieldKind::Duration => {
             let value = if let Some(res) = field_desc.resolution {
-                let scaled = raw_val as f64 * res as f64;
+                // shortcut: signed without resolution is not handled, add it if CANboat ever publishes one.
+                let raw = if field_desc.is_signed == Some(true) {
+                    sign_extend(raw_val, field_desc.bits_length.unwrap() as u8) as f64
+                } else {
+                    raw_val as f64
+                };
+                let scaled = raw * res as f64;
                 match field_desc.bits_length.unwrap() {
                     1..=24 => PgnValue::F32(scaled as f32),
                     _ => PgnValue::F64(scaled),

@@ -142,6 +142,10 @@ instead of rejected.
 - Simnet 130850 decodes every message of the replay capture. Four of its ten
   failed against the 14-byte length CANboat 7.1.0 declared, while the autopilot
   sends 12.
+- A signed `DURATION` field was read as unsigned, so a negative value came back
+  huge: UTC-5 in `Pgn129033.local_offset` (raw `D4 FE`) decoded as 3914160 s
+  instead of -18000 s. Encoding was already right. The 24 signed `DURATION`
+  fields are all outside the default manifest (`full-pgns` or a custom one).
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
