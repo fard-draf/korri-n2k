@@ -106,7 +106,7 @@ where
 
             // For multi-frame Fast Packets insert a delay between frames
             // (skip before the first frame to minimize latency).
-            if !is_first_frame && payload_slice.len() > 8 {
+            if !is_first_frame {
                 // Recommended inter-frame delay to avoid TX buffer saturation
                 timer.delay_ms(FAST_PACKET_INTER_FRAME_DELAY_MS).await;
             }

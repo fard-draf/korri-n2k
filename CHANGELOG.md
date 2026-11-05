@@ -146,6 +146,13 @@ instead of rejected.
   huge: UTC-5 in `Pgn129033.local_offset` (raw `D4 FE`) decoded as 3914160 s
   instead of -18000 s. Encoding was already right. The 24 signed `DURATION`
   fields are all outside the default manifest (`full-pgns` or a custom one).
+- A Fast Packet PGN whose payload fits in 8 bytes was sent as a bare CAN frame,
+  without the sequence and length header, so every receiver misread it: PGN
+  129540 (GNSS Satellites in View) with no satellite is 3 bytes. Framing now
+  follows the PGN: any Fast Packet PGN, whatever its length, goes out as Fast
+  Packet frames, and any other payload over 8 bytes still does. The inter-frame
+  delay follows the frame count instead of the payload length. No receiver has
+  seen these frames yet, so interoperability is not proven.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`

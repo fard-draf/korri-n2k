@@ -253,7 +253,7 @@ where
         for frame in builder.build() {
             let frame = frame.map_err(SendPgnError::Build)?;
 
-            if sent > 0 && payload.len() > 8 {
+            if sent > 0 {
                 self.timer.delay_ms(FAST_PACKET_INTER_FRAME_DELAY_MS).await;
             }
 

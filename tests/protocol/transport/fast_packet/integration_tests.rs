@@ -479,3 +479,25 @@ fn test_assembler_memory_footprint() {
 
     println!("FastPacketAssembler memory footprint: {size} bytes");
 }
+
+#[test]
+/// A Fast Packet PGN shorter than 8 bytes still reaches the assembler as a message.
+fn test_short_fast_packet_round_trips_through_assembler() {
+    let pgn = 129540;
+    let payload = [0x00, 0xFC, 0x00];
+    let mut assembler = FastPacketAssembler::new();
+
+    let mut complete = None;
+    for frame in FastPacketBuilder::new(pgn, 42, None, &payload).build() {
+        let frame = frame.expect("Frame construction should succeed");
+        if let ProcessResult::MessageComplete(msg) =
+            assembler.process_frame(10, pgn, 42, &frame.data)
+        {
+            complete = Some(msg);
+        }
+    }
+
+    let message = complete.expect("a short Fast Packet must complete");
+    assert_eq!(message.len, 3);
+    assert_eq!(&message.payload[..3], &payload);
+}

@@ -3,7 +3,7 @@
 use crate::error::CanIdBuildError;
 use crate::protocol::transport::can_frame::CanFrame;
 use crate::protocol::transport::can_id::CanId;
-use crate::protocol::transport::fast_packet::MAX_FAST_PACKET_PAYLOAD;
+use crate::protocol::transport::fast_packet::{FAST_PACKET_PGNS_ALL, MAX_FAST_PACKET_PAYLOAD};
 #[cfg(target_has_atomic = "8")]
 use core::sync::atomic::{AtomicU8, Ordering};
 
@@ -44,6 +44,8 @@ pub struct FastPacketBuilder<'a> {
     priority: u8,
     payload: &'a [u8],
     sequence_id: u8,
+    /// Fast Packet framing: any listed Fast Packet PGN, or a payload over 8 bytes.
+    fast: bool,
 }
 
 /// Lazy iterator returning frames one by one as they are encoded.
@@ -79,8 +81,8 @@ impl<'a> Iterator for FrameIterator<'a> {
             return Some(Err(CanIdBuildError::InvalidData));
         }
 
-        // Payload ≤ 8 bytes: single-frame message (no Fast Packet).
-        if total_len <= 8 {
+        // Not a Fast Packet PGN and ≤ 8 bytes: single-frame message.
+        if !self.builder.fast {
             let mut data = [0xFF; 8];
             data[..total_len].copy_from_slice(self.builder.payload);
 
@@ -153,6 +155,7 @@ impl<'a> FastPacketBuilder<'a> {
             destination,
             payload,
             sequence_id: next_sequence_id(),
+            fast: FAST_PACKET_PGNS_ALL.binary_search(&pgn).is_ok() || payload.len() > 8,
         }
     }
 
