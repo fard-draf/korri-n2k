@@ -363,11 +363,12 @@ fn aud_001_lau_at_capacity_is_written() {
     pgn.installation_description1.data[1..230].fill(b'x');
     let mut buffer = [0u8; 1024];
     let written = pgn.to_payload(&mut buffer).expect("230 bytes fit");
-    // length byte (231 = 230 + 1), encoding, 229 characters, then two empty strings.
+    // length byte (231 = 230 + 1), encoding, 229 characters, then two empty strings
+    // of `02 01` each.
     assert_eq!(buffer[0], 231);
     assert_eq!(buffer[1], 1);
     assert!(buffer[2..231].iter().all(|&b| b == b'x'));
-    assert_eq!(written, 231 + 2);
+    assert_eq!(written, 231 + 4);
 }
 
 #[cfg(feature = "full-pgns")]
@@ -398,4 +399,35 @@ fn aud_001_pgn_bytes_views_stay_inside_the_buffer() {
         assert_eq!(bytes.as_slice().len(), 230);
         assert_eq!(bytes.as_mut_slice().len(), 230);
     }
+}
+
+// ---------------------------------------------------------------------------
+// AUD-007 — an empty LAU string is written `02 01`, and a lone `00` is still read.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn aud_007_empty_lau_strings_are_written_as_length_two_and_ascii() {
+    let mut buffer = [0u8; 64];
+    let written = Pgn126998::new().to_payload(&mut buffer).expect("encode");
+    assert_eq!(&buffer[..written], &[2, 1, 2, 1, 2, 1]);
+}
+
+#[test]
+fn aud_007_empty_lau_between_two_texts_keeps_its_place() {
+    let mut pgn = Pgn126998::new();
+    pgn.installation_description1 = bytes_of(&[1, b'A']);
+    pgn.manufacturer_information = bytes_of(&[1, b'B', b'C']);
+    let mut buffer = [0u8; 64];
+    let written = pgn.to_payload(&mut buffer).expect("encode");
+    assert_eq!(&buffer[..written], &[3, 1, b'A', 2, 1, 4, 1, b'B', b'C']);
+}
+
+#[test]
+fn aud_007_lone_zero_lau_is_still_read_as_empty() {
+    let decoded = Pgn126998::from_payload(&[0, 0, 0]).expect("legacy empty strings");
+    assert!(decoded.installation_description1.is_empty());
+    assert!(decoded.installation_description2.is_empty());
+    assert!(decoded.manufacturer_information.is_empty());
+    let decoded = Pgn126998::from_payload(&[2, 1, 2, 1, 2, 1]).expect("canonical empty strings");
+    assert_eq!(decoded.installation_description1, bytes_of(&[1]));
 }

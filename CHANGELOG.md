@@ -229,6 +229,11 @@ instead of rejected.
   126720. Encoding a string field now fails with `SerializationError::InvalidData`,
   and `PgnBytes::as_slice` and `as_mut_slice` clamp to the buffer. The
   generated types and the receive path never produce such a length.
+- An empty `STRING_LAU` was written as a single `00` byte, so a default
+  `Pgn126998::new()` went out as `00 00 00`. CANboat describes an empty string
+  as length 2 and encoding 1 (ASCII): it is now written `02 01`, three times
+  for 126998. Reading is unchanged and still takes a lone `00` as empty, so a
+  payload that held one is re-encoded `02 01`.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string

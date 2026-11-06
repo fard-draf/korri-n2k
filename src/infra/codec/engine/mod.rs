@@ -869,26 +869,21 @@ fn write_field(
         FieldKind::StringLau => {
             if let PgnValue::Bytes(val) = value {
                 // `val` holds the encoding byte followed by the text; the declared
-                // length also counts the length byte itself. An empty field
-                // declares zero, so that reading it back consumes one byte too.
+                // length also counts the length byte itself. An empty value is
+                // written as CANboat describes an empty string: length 2 and
+                // the ASCII encoding (`02 01`). Reading still accepts a lone `00`.
                 let content = pgn_bytes_slice(val)?;
-                let declared = if content.is_empty() {
-                    0
-                } else {
-                    content.len() + 1
-                };
+                let (encoding, text) = content.split_first().unwrap_or((&1, &[]));
                 writer
-                    .write_u64(declared as u64, 8)
+                    .write_u64(text.len() as u64 + 2, 8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                if let Some((encoding, text)) = content.split_first() {
+                writer
+                    .write_u64(*encoding as u64, 8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                if !text.is_empty() {
                     writer
-                        .write_u64(*encoding as u64, 8)
+                        .write_slice(text)
                         .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                    if !text.is_empty() {
-                        writer
-                            .write_slice(text)
-                            .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                    }
                 }
             } else {
                 return Err(SerializationError::CodecError {
