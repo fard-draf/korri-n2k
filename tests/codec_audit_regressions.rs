@@ -479,3 +479,128 @@ fn lz_missing_terminator_is_still_read() {
     assert_eq!(zone_name(&[0xa3, 0x99, 0x22, 0x00, 1, 0]), bytes_of(b""));
     assert_eq!(zone_name(&[0xa3, 0x99, 0x22, 0x00, 1, 0, 0]), bytes_of(b""));
 }
+
+// ---------------------------------------------------------------------------
+// AUD-006 — a quantized value that does not fit its field is refused.
+// ---------------------------------------------------------------------------
+
+/// 130306 Wind Data: sid, wind speed (u16, 0.01 m/s), wind angle (u16, 0.0001 rad).
+fn wind_speed_bytes(speed: f32) -> Result<[u8; 2], SerializationError> {
+    let mut pgn = Pgn130306::new();
+    pgn.wind_speed = speed;
+    let mut buffer = [0u8; 8];
+    pgn.to_payload(&mut buffer)?;
+    Ok([buffer[1], buffer[2]])
+}
+
+/// 127257 Attitude: sid, then yaw, pitch and roll as i16 at 0.0001 rad.
+fn roll_bytes(roll: f32) -> Result<[u8; 2], SerializationError> {
+    let mut pgn = Pgn127257::new();
+    pgn.roll = roll;
+    let mut buffer = [0u8; 8];
+    pgn.to_payload(&mut buffer)?;
+    Ok([buffer[5], buffer[6]])
+}
+
+#[test]
+fn aud_006_unsigned_value_past_its_width_is_refused() {
+    // 700 m/s is 70000 units: the old writer kept the low 16 bits, 44.64 m/s.
+    assert!(matches!(
+        wind_speed_bytes(700.0),
+        Err(SerializationError::ValueOutOfRange {
+            field_id: "WindSpeed"
+        })
+    ));
+    // 655.36 m/s is 65536 units, one past the last raw value.
+    assert!(matches!(
+        wind_speed_bytes(655.36),
+        Err(SerializationError::ValueOutOfRange { .. })
+    ));
+}
+
+#[test]
+fn aud_006_negative_value_in_an_unsigned_field_is_refused() {
+    assert!(matches!(
+        wind_speed_bytes(-1.0),
+        Err(SerializationError::ValueOutOfRange { .. })
+    ));
+    assert!(matches!(
+        wind_speed_bytes(-0.01),
+        Err(SerializationError::ValueOutOfRange { .. })
+    ));
+}
+
+#[test]
+fn aud_006_non_finite_quantized_value_is_refused() {
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(
+            matches!(
+                wind_speed_bytes(value),
+                Err(SerializationError::ValueOutOfRange { .. })
+            ),
+            "{value}"
+        );
+        assert!(
+            matches!(
+                roll_bytes(value),
+                Err(SerializationError::ValueOutOfRange { .. })
+            ),
+            "{value}"
+        );
+    }
+}
+
+#[test]
+fn aud_006_unsigned_limits_are_written() {
+    assert_eq!(wind_speed_bytes(0.0).unwrap(), [0x00, 0x00]);
+    assert_eq!(wind_speed_bytes(0.01).unwrap(), [0x01, 0x00]);
+    // 655.35 m/s is raw 65535, the "not available" sentinel: still representable.
+    assert_eq!(wind_speed_bytes(655.35).unwrap(), [0xFF, 0xFF]);
+}
+
+#[test]
+fn aud_006_signed_limits_are_written_and_one_past_is_refused() {
+    assert_eq!(roll_bytes(3.2767).unwrap(), [0xFF, 0x7F]);
+    assert_eq!(roll_bytes(-3.2768).unwrap(), [0x00, 0x80]);
+    assert_eq!(roll_bytes(-0.0001).unwrap(), [0xFF, 0xFF]);
+    assert!(matches!(
+        roll_bytes(3.2768),
+        Err(SerializationError::ValueOutOfRange { field_id: "Roll" })
+    ));
+    assert!(matches!(
+        roll_bytes(-3.2769),
+        Err(SerializationError::ValueOutOfRange { .. })
+    ));
+}
+
+/// 130321: NaN is the IEEE-754 way to say "no data", a FLOAT is not quantized.
+#[cfg(feature = "full-pgns")]
+#[test]
+fn aud_006_nan_in_a_float_field_is_still_written() {
+    let mut pgn = Pgn130321::new();
+    assert_eq!(pgn.field_mut("Salinity", PgnValue::F32(f32::NAN)), Some(()));
+    let mut buffer = [0u8; 64];
+    let written = pgn.to_payload(&mut buffer).expect("NaN salinity");
+    assert!(written >= 19);
+    assert_eq!(&buffer[15..19], &[0x00, 0x00, 0xC0, 0x7F]);
+}
+
+#[test]
+fn aud_006_error_stays_small() {
+    assert!(core::mem::size_of::<SerializationError>() <= 48);
+}
+
+/// 129029 GNSS Position Data: sid, date (16), time (32), then latitude, longitude
+/// and altitude as 64-bit signed values. A receiver without a fix sends the
+/// "not available" raw `7F FF FF FF FF FF FF FF`; a gateway must pass it on.
+#[test]
+fn aud_006_wide_field_sentinel_survives_a_round_trip() {
+    let mut payload = vec![0u8; 43];
+    let latitude = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F];
+    payload[7..15].copy_from_slice(&latitude);
+    let decoded = Pgn129029::from_payload(&payload).expect("decode 129029");
+    let mut buffer = [0u8; 230];
+    let written = decoded.to_payload(&mut buffer).expect("re-encode 129029");
+    assert_eq!(&buffer[7..15], &latitude);
+    assert!(written >= 15);
+}

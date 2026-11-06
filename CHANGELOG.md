@@ -87,6 +87,17 @@ instead of rejected.
   surplus dropped: 33 `TestId`/`TestResult` pairs of 130944 came back as 32,
   and re-encoding wrote a counter of 32. The generator still caps an array at
   32 elements (`RepeatingFieldSet::max_repetitions`).
+- **BREAKING**: encoding a quantized number that does not fit its field now
+  fails with the new `SerializationError::ValueOutOfRange { field_id }`.
+  The writer used to keep the low bits of the scaled integer, so
+  `Pgn130306.wind_speed = 700.0` went out as 44.64 m/s, `-1.0` as 654.36 m/s,
+  and NaN as 0. Rejected: NaN and infinities, a negative value for an unsigned
+  field, a value past the field's width, for fields that carry a resolution
+  (`Number`, `Date`, `Time`, `Mmsi` and `Duration`, signed or not). Nothing is
+  saturated. The largest and smallest raw values, including the "not available"
+  sentinels, are still accepted, and so is NaN in an IEEE-754 `FLOAT` field,
+  which is how that type says "no data". Integer fields without a resolution
+  are not range-checked.
 - **BREAKING**: `FastPacketAssembler::process_frame` now takes `now_ms: u64`
   instead of `u32`, matching `Clock::now_ms` and `AddressClaimEngine::poll`.
 - **BREAKING**: `canboat.json` is CANboat v9.1.0. Every generated type follows

@@ -708,22 +708,21 @@ fn write_field(
 ) -> Result<(), SerializationError> {
     match field_desc.kind {
         FieldKind::Number | FieldKind::Pgn | FieldKind::IsoName => {
-            let bits_to_write = if field_desc.is_signed.is_some_and(|s| s) {
-                let prepared_val = if let Some(res) = field_desc.resolution {
-                    // Common path: floating-point value that must be scaled back to an integer
-                    let float_val = pgn_value_to_f64(value)
-                        .map_err(|e| SerializationError::CodecError { source: e })?;
-                    scale_to_i64(float_val, res)
-                } else {
-                    pgn_value_to_i64(value)
-                        .map_err(|e| SerializationError::CodecError { source: e })?
-                };
-                // Use the helper to reinterpret the signed integer as u64
-                i64_to_u64_bitwise(prepared_val)
-            } else if let Some(res) = field_desc.resolution {
+            let signed = field_desc.is_signed.is_some_and(|s| s);
+            let bits_to_write = if let Some(res) = field_desc.resolution {
+                // Common path: floating-point value that must be scaled back to an integer
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                i64_to_u64_bitwise(scale_to_i64(float_val, res))
+                let bit_length = field_desc
+                    .bits_length
+                    .ok_or(SerializationError::InvalidData)?;
+                quantize(field_desc, float_val, res, bit_length, signed)?
+            } else if signed {
+                // Use the helper to reinterpret the signed integer as u64
+                i64_to_u64_bitwise(
+                    pgn_value_to_i64(value)
+                        .map_err(|e| SerializationError::CodecError { source: e })?,
+                )
             } else {
                 pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
             };
@@ -749,7 +748,13 @@ fn write_field(
                 // With resolution: value stored as F32/F64
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                scale_to_i64(float_val, field_desc.resolution.unwrap()) as u64 // Direct cast; two's-complement helper not required
+                quantize(
+                    field_desc,
+                    float_val,
+                    field_desc.resolution.unwrap(),
+                    bits_to_write,
+                    false,
+                )?
             } else {
                 // Without resolution: value stored as U16/U32
                 pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
@@ -773,7 +778,13 @@ fn write_field(
                 // Apply the inverse resolution
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                scale_to_i64(float_val, res) as u64
+                quantize(
+                    field_desc,
+                    float_val,
+                    res,
+                    bits_to_write,
+                    field_desc.is_signed.is_some_and(|s| s),
+                )?
             } else {
                 // No resolution involved
                 pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
@@ -959,17 +970,61 @@ fn pgn_bytes_slice(val: &PgnBytes) -> Result<&[u8], SerializationError> {
         .ok_or(SerializationError::InvalidData)
 }
 
-/// Undoes a field's resolution, rounding half away from zero.
-/// Truncating instead would shift every scaled value one LSB towards zero:
-/// 23.767 at a resolution of 0.001 divides to 23766.999… and came back as 23.766.
-/// `f64::round` lives in `std`, which this crate does not have.
-fn scale_to_i64(value: f64, resolution: f32) -> i64 {
-    let scaled = value / resolution as f64;
-    if scaled >= 0.0 {
-        (scaled + 0.5) as i64
-    } else {
-        (scaled - 0.5) as i64
+/// Undoes a field's resolution and returns the raw `bits`-wide pattern to write.
+/// The value is rounded half away from zero: truncating instead would shift every
+/// scaled value one LSB towards zero (23.767 at a resolution of 0.001 divides to
+/// 23766.999… and came back as 23.766). `f64::round` lives in `std`, which this
+/// crate does not have.
+///
+/// A value that does not fit is an error, never a wrapped or masked number:
+/// NaN and infinities, a negative value for an unsigned field, and anything past
+/// the field's width (700.0 m/s at 0.01 is 70000 units, which a 16-bit field
+/// would silently turn into 44.64 m/s).
+fn quantize(
+    field_desc: &'static FieldDescriptor,
+    value: f64,
+    resolution: f32,
+    bits: u32,
+    signed: bool,
+) -> Result<u64, SerializationError> {
+    let out_of_range = SerializationError::ValueOutOfRange {
+        field_id: field_desc.id,
+    };
+    if !(1..=64).contains(&bits) {
+        return Err(SerializationError::InvalidFieldBits {
+            field_name: field_desc.id,
+        });
     }
+    let scaled = value / resolution as f64;
+    if !scaled.is_finite() {
+        return Err(out_of_range);
+    }
+    let rounded = if scaled >= 0.0 {
+        scaled + 0.5
+    } else {
+        scaled - 0.5
+    };
+    // The cast saturates far beyond any 64-bit field, so the range check below catches it.
+    let mut raw = rounded as i128;
+    let (min, max) = if signed {
+        (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1)
+    } else {
+        (0, (1i128 << bits) - 1)
+    };
+    // Past 53 bits an f64 cannot tell the last raw values apart: the "not available"
+    // raw of a 64-bit latitude (0x7FFF…) decodes to a value that divides back to 2^63.
+    // Within that spacing, the nearest raw value is the field's own limit.
+    let spacing = 1i128 << bits.saturating_sub(53);
+    if bits > 53 && (raw > max && raw - max <= spacing) {
+        raw = max;
+    } else if bits > 53 && (raw < min && min - raw <= spacing) {
+        raw = min;
+    }
+    if raw < min || raw > max {
+        return Err(out_of_range);
+    }
+    // Low 64 bits: two's complement for a negative value.
+    Ok(raw as u64)
 }
 
 /// Converts a `PgnValue` into `f64`.
