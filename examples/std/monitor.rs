@@ -27,8 +27,12 @@ fn main() {
         let src = frame.id.source_address();
 
         if assembler.handles(pgn) {
-            if let ProcessResult::MessageComplete(msg) =
-                assembler.process_frame(0, pgn, src, &frame.data)
+            // `process_frame` never sees the DLC: pad a short frame (a last
+            // frame often is) with 0xFF rather than stale bytes.
+            let mut data = [0xFF; 8];
+            let len = frame.len.min(8);
+            data[..len].copy_from_slice(&frame.data[..len]);
+            if let ProcessResult::MessageComplete(msg) = assembler.process_frame(0, pgn, src, &data)
             {
                 print_pgn(pgn, src, &msg.payload[..msg.len]);
             }

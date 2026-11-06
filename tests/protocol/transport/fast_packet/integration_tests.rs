@@ -335,15 +335,21 @@ fn test_assembler_duplicate_frame() {
     assert!(matches!(result1, ProcessResult::FragmentConsumed));
 
     // ⚠️ Retransmit the same frame (duplicate)
-    let result2 = assembler.process_frame(fake_timer_ms, pgn, source, &frame0);
+    assert!(matches!(
+        assembler.process_frame(fake_timer_ms, pgn, source, &frame0),
+        ProcessResult::FragmentConsumed
+    ));
 
-    // Acceptable behavior: ignore or reset, but never crash or corrupt data
-    assert!(
-        matches!(
-            result2,
-            ProcessResult::Ignored | ProcessResult::FragmentConsumed
-        ),
-        "Duplicate frames must be handled properly"
+    // The message must still complete from the continuation, with its 10 bytes.
+    let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
+    let ProcessResult::MessageComplete(message) =
+        assembler.process_frame(fake_timer_ms, pgn, source, &frame1)
+    else {
+        panic!("the duplicate must not lose the message");
+    };
+    assert_eq!(
+        &message.payload[..message.len],
+        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     );
 }
 

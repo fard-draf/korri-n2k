@@ -64,6 +64,12 @@ instead of rejected.
   - Runnable example `monitor` (`cargo run --example monitor --features std`).
 - PGN 127233, Man Overboard Notification, under `full-pgns`: `Pgn127233`. It was
   listed as unsupported only because of its multi-line explanation.
+- `FastPacketAssembler` takes the size of its session pool as a const
+  parameter, `FastPacketAssembler<const SESSIONS: usize = 4>`, built with
+  `FastPacketAssembler::<8>::with_pool(table)`. `new()`, `with_pgns()` and
+  `Default` keep the pool of 4, so existing code compiles unchanged. A full
+  pool still refuses the next message and evicts nothing. Each session holds a
+  223-byte buffer: the assembler is 1064 bytes at 4 and 2088 at 8.
 
 ### Changed
 - **BREAKING**: `FieldDescriptor` gains `unknown_value: Option<i64>`,
@@ -184,6 +190,13 @@ instead of rejected.
   and field `name` strings are escaped. The generated code of the default,
   `full-pgns` and `{60928, 129033}` builds differs only by the two blank lines
   that followed the doc of 65332.
+- A Fast Packet first frame repeated by its sender (same source, PGN and
+  sequence ID) opened a second session slot instead of restarting the first.
+  The continuations then matched the stale slot, were dropped as out of
+  sequence, and the message was lost. The first frame now restarts the session.
+  Messages of one PGN from one source with different sequence IDs still get
+  one slot each. The destination is not part of the key, and messages a source
+  aborts under different sequence IDs each hold a slot for 500 ms.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`

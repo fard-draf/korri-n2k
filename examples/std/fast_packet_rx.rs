@@ -35,7 +35,12 @@ fn main() {
         }
 
         // Fast Packet: feed every fragment, decode only what completes.
-        let result = assembler.process_frame(now_ms(), pgn, frame.id.source_address(), &frame.data);
+        // `process_frame` takes eight bytes and never sees the DLC: pad a short
+        // frame (a last frame often is) with 0xFF rather than stale bytes.
+        let mut data = [0xFF; 8];
+        let len = frame.len.min(8);
+        data[..len].copy_from_slice(&frame.data[..len]);
+        let result = assembler.process_frame(now_ms(), pgn, frame.id.source_address(), &data);
 
         if let ProcessResult::MessageComplete(msg) = result {
             if pgn == 129029 {

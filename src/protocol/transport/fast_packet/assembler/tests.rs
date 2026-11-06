@@ -274,13 +274,13 @@ fn test_expired_session_slot_is_reused_and_counted() {
     let pgn = 129540;
     let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
 
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assembler.process_frame(0, pgn, source, &frame0);
     }
     assert_eq!(assembler.expired_sessions(), 0);
 
     // Every session is now stale; a new sender must still be served.
-    let latecomer = MAX_CONCURRENT_SESSIONS as u8 + 10;
+    let latecomer = DEFAULT_SESSIONS as u8 + 10;
     assert_eq!(
         assembler.process_frame(SESSION_TIMEOUT_MS + 1, pgn, latecomer, &frame0),
         ProcessResult::FragmentConsumed
@@ -301,11 +301,11 @@ fn test_pool_exhaustion_preserves_active_sessions() {
     let now = 100;
     let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
 
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assembler.process_frame(now, pgn, source, &frame0);
     }
 
-    let latecomer = MAX_CONCURRENT_SESSIONS as u8 + 10;
+    let latecomer = DEFAULT_SESSIONS as u8 + 10;
     assert_eq!(
         assembler.process_frame(now, pgn, latecomer, &frame0),
         ProcessResult::Ignored
@@ -323,7 +323,7 @@ fn test_pool_exhaustion_preserves_active_sessions() {
 
     // The sessions already in flight must be intact.
     let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assert!(
             matches!(
                 assembler.process_frame(now, pgn, source, &frame1),
@@ -388,7 +388,7 @@ fn test_pool_exhaustion_counter_tracks_every_refusal() {
     let now = 100;
     let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
 
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assembler.process_frame(now, pgn, source, &frame0);
     }
     assert_eq!(
@@ -498,7 +498,7 @@ fn test_counters_stay_zero_on_healthy_traffic() {
     let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
     let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
 
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assembler.process_frame(100, pgn, source, &frame0);
         assert!(matches!(
             assembler.process_frame(150, pgn, source, &frame1),
@@ -639,4 +639,105 @@ fn test_only_impossible_sizes_are_rejected() {
     }
     assert_eq!(assembler.rejected_frames(), 3);
     assert_eq!(assembler.lost_fragments(), 0);
+}
+
+//==================================================================================Session restart
+
+/// 20-byte message `first_byte, first_byte + 1, ...` as the three frames of `sequence_id`.
+fn frames_of_20_bytes(sequence_id: u8, first_byte: u8) -> [[u8; 8]; 3] {
+    let b = |i: u8| first_byte + i;
+    let header = sequence_id << 5;
+    [
+        [header, 20, b(0), b(1), b(2), b(3), b(4), b(5)],
+        [header | 1, b(6), b(7), b(8), b(9), b(10), b(11), b(12)],
+        [header | 2, b(13), b(14), b(15), b(16), b(17), b(18), b(19)],
+    ]
+}
+
+fn completed_20_bytes(first_byte: u8) -> ProcessResult {
+    let mut payload = [0; MAX_FAST_PACKET_PAYLOAD];
+    for (i, byte) in payload[..20].iter_mut().enumerate() {
+        *byte = first_byte + i as u8;
+    }
+    ProcessResult::MessageComplete(CompletedMessage { payload, len: 20 })
+}
+
+#[test]
+/// A sender that restarts a message (same source, PGN and sequence) replaces its
+/// stale session instead of opening a second slot the continuations would miss.
+fn restarted_first_frame_replaces_stale_session() {
+    let mut assembler = FastPacketAssembler::new();
+    let frames = frames_of_20_bytes(3, 1);
+
+    assert_eq!(
+        assembler.process_frame(0, 129029, 10, &frames[0]),
+        ProcessResult::FragmentConsumed
+    );
+    assert_eq!(
+        assembler.process_frame(10, 129029, 10, &frames[1]),
+        ProcessResult::FragmentConsumed
+    );
+    // The sender starts over.
+    assert_eq!(
+        assembler.process_frame(20, 129029, 10, &frames[0]),
+        ProcessResult::FragmentConsumed
+    );
+    assert_eq!(
+        assembler.process_frame(30, 129029, 10, &frames[1]),
+        ProcessResult::FragmentConsumed
+    );
+    assert_eq!(
+        assembler.process_frame(40, 129029, 10, &frames[2]),
+        completed_20_bytes(1)
+    );
+    assert_eq!(assembler.lost_fragments(), 0);
+    assert_eq!(assembler.expired_sessions(), 0);
+}
+
+#[test]
+/// Two messages of one PGN from one source, told apart by sequence ID (130822
+/// carries both a 223-byte Bulk Report and a 7-byte Object Ping), both complete.
+fn interleaved_messages_of_one_pgn_from_one_source_both_complete() {
+    let mut assembler = FastPacketAssembler::with_pgns(&[130822]);
+    let a = frames_of_20_bytes(1, 1);
+    let b = frames_of_20_bytes(2, 101);
+
+    for frame in [&a[0], &b[0], &a[1], &b[1]] {
+        assert_eq!(
+            assembler.process_frame(0, 130822, 10, frame),
+            ProcessResult::FragmentConsumed
+        );
+    }
+    assert_eq!(
+        assembler.process_frame(0, 130822, 10, &a[2]),
+        completed_20_bytes(1)
+    );
+    assert_eq!(
+        assembler.process_frame(0, 130822, 10, &b[2]),
+        completed_20_bytes(101)
+    );
+}
+
+//==================================================================================Pool size
+
+#[test]
+/// The pool size is a const parameter: eight sources in flight fit a pool of
+/// eight, and the ninth is refused, as the default pool refuses its fifth.
+fn pool_size_is_configurable() {
+    let mut assembler = FastPacketAssembler::<8>::with_pool(FAST_PACKET_PGNS);
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+
+    for source in 0..8 {
+        assert_eq!(
+            assembler.process_frame(0, 129540, source, &frame0),
+            ProcessResult::FragmentConsumed
+        );
+    }
+    assert_eq!(assembler.pool_exhausted(), 0);
+
+    assert_eq!(
+        assembler.process_frame(0, 129540, 8, &frame0),
+        ProcessResult::Ignored
+    );
+    assert_eq!(assembler.pool_exhausted(), 1);
 }
