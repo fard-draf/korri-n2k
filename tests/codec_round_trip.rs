@@ -23,6 +23,37 @@ impl Rng {
     }
 }
 
+/// PGNs CANboat declares with a repeating group but no counter field: the codec
+/// does not support them and refuses every payload, on purpose
+/// (`pgns_without_a_repeat_counter_are_rejected`). They are the only PGNs allowed to
+/// leave the fixed-point check with nothing decoded.
+#[cfg(feature = "full-pgns")]
+const REJECTED_ON_PURPOSE: &[&str] = &["Pgn126464", "Pgn129796", "Pgn129805"];
+#[cfg(not(feature = "full-pgns"))]
+const REJECTED_ON_PURPOSE: &[&str] = &[];
+
+/// PGNs whose swept payloads decode as one variant and re-decode as another, so the
+/// bytes differ the second time round: 130850 reads a catch-all `SimnetEvent`
+/// (reserved fields only) that encodes back to bytes selecting `SimnetAlarm`. A
+/// dispatch ambiguity of the generated variants, older than this check and not
+/// covered by it: the decode, encode and re-decode steps still have to succeed.
+const SWEPT_DISPATCH_AMBIGUOUS: &[&str] = &["Pgn130850"];
+
+/// Valid leading bytes for the few PGNs whose variant is also chosen by a field past
+/// the manufacturer code, or whose counter must stay under the 32 elements it holds.
+/// Random bytes miss them.
+const HAND_PREFIXES: &[(&str, &[u8])] = &[
+    // Simnet (1857), report 2: Device Status.
+    ("Pgn65305", &[0x41, 0x9F, 0x00, 0x02]),
+    // Simnet, command type 10, event 26: autopilot change-course reply.
+    ("Pgn130851", &[0x41, 0x9F, 0x00, 0x00, 0x00, 0x0A, 0x1A]),
+    // Airmar (135) POST with two test/result pairs.
+    ("Pgn130944", &[0x87, 0x98, 0xFE, 0x02]),
+];
+
+/// Room to re-encode: 130821 declares 233 bytes, three more than `MAX_PGN_BYTES`.
+const ENCODE_BUFFER: usize = 2 * MAX_PGN_BYTES;
+
 /// Two invariants per PGN.
 ///
 /// The encoding must be a fixed point: re-encoding a value decoded from our own
@@ -30,19 +61,54 @@ impl Rng {
 /// this meaningful for FLOAT fields, whose CANboat sentinel is NaN — and NaN is
 /// never equal to itself.
 ///
+/// A payload the decoder refuses is skipped, so a decoder refusing everything would
+/// pass. The check therefore also fails when no payload was ever decoded, except for
+/// the PGNs listed in `REJECTED_ON_PURPOSE`. Random bytes rarely name a proprietary
+/// variant: when they decode nothing the manufacturer code is swept, then a hand
+/// prefix is tried.
 fn idempotent<T: PgnData + PartialEq + Debug>(label: &str, failures: &mut Vec<String>) {
+    const RANDOM_ROUNDS: usize = 200;
+    const MANUFACTURER_CODES: usize = 2048;
+    const SHORT_ROUNDS: usize = 256;
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
     let mut payload = [0u8; MAX_PGN_BYTES];
+    let mut decoded = 0usize;
+    let hand_prefix = HAND_PREFIXES.iter().find(|(name, _)| *name == label);
 
-    for round in 0..200 {
+    for round in 0..RANDOM_ROUNDS + MANUFACTURER_CODES + RANDOM_ROUNDS + SHORT_ROUNDS {
+        // Each later way of finding a payload is tried only while nothing decoded.
+        if round >= RANDOM_ROUNDS && decoded > 0 {
+            break;
+        }
         for byte in payload.iter_mut() {
             *byte = rng.next_byte();
         }
-        let Ok(first) = T::from_payload(&payload) else {
+        let mut length = MAX_PGN_BYTES;
+        if (RANDOM_ROUNDS..RANDOM_ROUNDS + MANUFACTURER_CODES).contains(&round) {
+            // Manufacturer code in the low 11 bits, reserved 2 bits set, industry 4 (marine).
+            let code = (round - RANDOM_ROUNDS) as u16;
+            payload[0] = code as u8;
+            payload[1] = (code >> 8) as u8 | 0x18 | (4 << 5);
+        } else if round >= RANDOM_ROUNDS + MANUFACTURER_CODES {
+            let round_after_sweep = round - RANDOM_ROUNDS - MANUFACTURER_CODES;
+            if round_after_sweep < RANDOM_ROUNDS {
+                let Some((_, prefix)) = hand_prefix else {
+                    continue;
+                };
+                payload[..prefix.len()].copy_from_slice(prefix);
+            } else {
+                // A short payload keeps a random repeat counter within what the
+                // payload can hold, hence within the array it fills.
+                length = 8 + (round_after_sweep - RANDOM_ROUNDS) % 64;
+            }
+        }
+        let payload = &payload[..length];
+        let Ok(first) = T::from_payload(payload) else {
             continue;
         };
+        decoded += 1;
 
-        let mut once = [0u8; MAX_PGN_BYTES];
+        let mut once = [0u8; ENCODE_BUFFER];
         let Ok(len) = first.to_payload(&mut once) else {
             failures.push(format!("{label}: encoding its own decoded value failed"));
             return;
@@ -52,15 +118,28 @@ fn idempotent<T: PgnData + PartialEq + Debug>(label: &str, failures: &mut Vec<St
             return;
         };
 
-        let mut twice = [0u8; MAX_PGN_BYTES];
+        let mut twice = [0u8; ENCODE_BUFFER];
         let Ok(len_again) = second.to_payload(&mut twice) else {
             failures.push(format!("{label}: second encoding failed"));
             return;
         };
-        if once[..len] != twice[..len_again] {
+        let swept = round >= RANDOM_ROUNDS;
+        if once[..len] != twice[..len_again]
+            && !(swept && SWEPT_DISPATCH_AMBIGUOUS.contains(&label))
+        {
             failures.push(format!("{label}: round {round} is not a fixed point"));
             return;
         }
+    }
+
+    let expected_silent = REJECTED_ON_PURPOSE.contains(&label);
+    if decoded == 0 && !expected_silent {
+        failures.push(format!(
+            "{label}: no payload decoded, the fixed point was never checked"
+        ));
+    }
+    if decoded > 0 && expected_silent {
+        failures.push(format!("{label}: decoded a payload it is meant to refuse"));
     }
 }
 
@@ -501,4 +580,26 @@ fn local_offset_negative_decodes_and_round_trips() {
     let mut buffer = [0u8; MAX_PGN_BYTES];
     let written = pgn.to_payload(&mut buffer).expect("encode 129033");
     assert_eq!(&buffer[..written], &payload);
+}
+
+/// The three PGNs that CANboat gives a repeating group without a counter are not
+/// supported: every payload is refused, whatever its bytes.
+#[cfg(feature = "full-pgns")]
+#[test]
+fn pgns_without_a_repeat_counter_are_rejected() {
+    let mut rng = Rng(0x1234_5678_9ABC_DEF1);
+    for round in 0..64 {
+        let mut payload = [0u8; MAX_PGN_BYTES];
+        for byte in payload.iter_mut() {
+            *byte = match round {
+                0 => 0x00,
+                1 => 0xFF,
+                _ => rng.next_byte(),
+            };
+        }
+        let payload = &payload[..8 + round * 3];
+        assert!(Pgn126464::from_payload(payload).is_err(), "126464");
+        assert!(Pgn129796::from_payload(payload).is_err(), "129796");
+        assert!(Pgn129805::from_payload(payload).is_err(), "129805");
+    }
 }

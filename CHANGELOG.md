@@ -296,6 +296,13 @@ instead of rejected.
   `WpIdInfo` for 130067, 130068 and 130074.
 - CI runs `cargo test --features full-pgns` and checks the build with a minimal
   custom manifest (60928 only). Neither was built before.
+- `tests/codec_round_trip.rs` fails when a PGN never decodes. The fixed-point
+  helper used to skip a payload the decoder refused, so a decoder refusing
+  everything passed. It now counts decoded payloads per PGN, looks for
+  proprietary variants by sweeping the manufacturer code, and only three PGNs
+  with a repeating group but no counter (126464, 129796, 129805) may stay
+  undecoded, which a separate test pins. Before this, about 140 `full-pgns`
+  PGNs went through the check without a single payload decoded.
 - `tests/replay_real_capture.rs` requires zero decode failures. The exception
   it kept for 130850 has no reason left.
 - `tests/test_min_length.rs` pins the three cases of 129794: 76 bytes read the
