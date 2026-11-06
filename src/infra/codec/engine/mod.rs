@@ -48,6 +48,10 @@ fn is_repetitive_field(descriptor: &'static PgnDescriptor, field_idx: usize) -> 
     })
 }
 
+/// Widest `STRING_FIX` that must be present in full: 32 bytes, the widest fixed
+/// identifier CANboat declares. Wider ones are the texts of 130821 and 130856.
+const MAX_FIXED_STRING_BYTES: usize = 32;
+
 /// Returns the repeating group whose first field is `field_idx`, with its index.
 /// A group is read and written where it sits in the descriptor, so a field
 /// declared after the group follows it on the wire.
@@ -431,10 +435,17 @@ fn read_field_raw_and_value(
             let num_bits = field_desc
                 .bits_length
                 .ok_or(DeserializationError::InvalidDataLength)?;
-            // The declared size is the field's capacity, not the bytes on the wire:
-            // Navico 130821 reserves 230 for its text and sends about 155, the real
-            // length being carried by the Fast Packet header. Read what is there.
-            let num_bytes = ((num_bits / 8) as usize).min(reader.bits_remaining() / 8);
+            // A short text has exactly its declared size on the wire: a payload
+            // that stops inside it lacks data, so reading it fails. A wider one is
+            // a capacity, not a size: Navico 130821 reserves 230 bytes for its text
+            // and sends about 155, the real length being carried by the Fast Packet
+            // header. Read what is there.
+            let declared = (num_bits / 8) as usize;
+            let num_bytes = if declared > MAX_FIXED_STRING_BYTES {
+                declared.min(reader.bits_remaining() / 8)
+            } else {
+                declared
+            };
             let slice = reader
                 .read_slice(num_bytes)
                 .map_err(|e| DeserializationError::BitReaderError { err: e })?;

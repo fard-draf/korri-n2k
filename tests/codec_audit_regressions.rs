@@ -11,8 +11,7 @@ use korri_n2k::infra::codec::traits::{FieldAccess, PgnData};
 use korri_n2k::protocol::messages::*;
 
 /// `PgnBytes` holding `content` (LAU: encoding byte, then text).
-#[cfg(feature = "full-pgns")]
-fn bytes(content: &[u8]) -> PgnBytes {
+fn bytes_of(content: &[u8]) -> PgnBytes {
     let mut b = PgnBytes::default();
     b.copy_from_slice(content);
     b
@@ -52,11 +51,11 @@ fn aud_002_group_tail_field_is_decoded_after_the_group() {
     );
     assert_eq!(
         decoded.repetitive_field("id_types", 0, "Name"),
-        Some(PgnValue::Bytes(bytes(&[1, b'N'])))
+        Some(PgnValue::Bytes(bytes_of(&[1, b'N'])))
     );
     assert_eq!(
         decoded.field("Artist"),
-        Some(PgnValue::Bytes(bytes(&[1, b'A'])))
+        Some(PgnValue::Bytes(bytes_of(&[1, b'A'])))
     );
 }
 
@@ -74,11 +73,11 @@ fn aud_002_group_tail_field_is_encoded_after_the_group() {
         Some(())
     );
     assert_eq!(
-        pgn.repetitive_field_mut("id_types", 0, "Name", PgnValue::Bytes(bytes(&[1, b'N']))),
+        pgn.repetitive_field_mut("id_types", 0, "Name", PgnValue::Bytes(bytes_of(&[1, b'N']))),
         Some(())
     );
     assert_eq!(
-        pgn.field_mut("Artist", PgnValue::Bytes(bytes(&[1, b'A']))),
+        pgn.field_mut("Artist", PgnValue::Bytes(bytes_of(&[1, b'A']))),
         Some(())
     );
     let mut buffer = [0u8; 64];
@@ -184,4 +183,78 @@ fn aud_005_polymorphic_enum_delegates_the_repeating_group() {
     assert_eq!(decoded.set_repetitive_count("test_ids", 1), Some(()));
     assert_eq!(decoded.repetitive_count("test_ids"), Some(1));
     assert_eq!(decoded.repetitive_field("test_ids", 1, "TestResult"), None);
+}
+
+// ---------------------------------------------------------------------------
+// AUD-008 — a short fixed string is required in full; a long text is a capacity.
+// ---------------------------------------------------------------------------
+
+/// 129044 Datum is 20 bytes: two 4-byte strings around three 32-bit numbers.
+#[test]
+fn aud_008_short_fixed_string_truncated_by_the_payload_is_rejected() {
+    for len in 16..20 {
+        let payload = vec![0u8; len];
+        assert!(
+            Pgn129044::from_payload(&payload).is_err(),
+            "{len} bytes decoded"
+        );
+        let visited = for_each_field(
+            descriptor(129044).expect("129044 descriptor"),
+            &payload,
+            |_, _| {},
+        );
+        assert!(visited.is_err(), "{len} bytes visited");
+    }
+}
+
+#[test]
+fn aud_008_full_length_datum_is_accepted() {
+    let payload = [0u8; 20];
+    assert!(Pgn129044::from_payload(&payload).is_ok());
+    let mut visited = 0;
+    for_each_field(
+        descriptor(129044).expect("129044 descriptor"),
+        &payload,
+        |_, _| visited += 1,
+    )
+    .expect("visit 129044");
+    assert_eq!(visited, 5);
+}
+
+/// Navico 130821 reserves 230 bytes for its text and sends fewer: the capture
+/// of the replay test relies on it. Header `13 99` is manufacturer 275, industry 4.
+#[test]
+fn aud_008_short_navico_text_keeps_decoding() {
+    let payload = [0x13, 0x99, 150, b'h', b'i'];
+    let decoded = Pgn130821::from_payload(&payload).expect("short 130821");
+    assert_eq!(decoded.field("A"), Some(PgnValue::U8(150)));
+    match decoded.field("Message") {
+        Some(PgnValue::Bytes(text)) => assert_eq!(&text.as_slice()[..2], b"hi"),
+        other => panic!("unexpected message {other:?}"),
+    }
+    let mut texts = Vec::new();
+    for_each_field(
+        descriptor_for(130821, &payload).expect("130821 descriptor"),
+        &payload,
+        |field, reading| {
+            if field.id == "Message" {
+                texts.push(reading.value);
+            }
+        },
+    )
+    .expect("visit short 130821");
+    assert_eq!(texts, vec![PgnValue::Bytes(bytes_of(b"hi"))]);
+}
+
+/// Simnet 130856: header `41 9f` is manufacturer 1857, industry 4; then
+/// alarm id (16 bits), two bytes, and a 223-byte text sent shorter.
+#[cfg(feature = "full-pgns")]
+#[test]
+fn aud_008_short_simnet_text_keeps_decoding() {
+    let payload = [0x41, 0x9f, 1, 0, 2, 3, b'h', b'i'];
+    let decoded = Pgn130856::from_payload(&payload).expect("short 130856");
+    match decoded.field("Text") {
+        Some(PgnValue::Bytes(text)) => assert_eq!(&text.as_slice()[..2], b"hi"),
+        other => panic!("unexpected text {other:?}"),
+    }
 }

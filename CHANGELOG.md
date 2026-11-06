@@ -213,6 +213,12 @@ instead of rejected.
   the four repeating-group methods of `FieldAccess`, so `repetitive_count` and
   its siblings answered `None` on the enum while the variant held the data.
   Every enum now delegates them, as it already did `field` and `field_mut`.
+- A payload that stopped inside a fixed-size string was accepted, whatever the
+  string: 129044 (Datum) decoded from 16 to 19 bytes with `ReferenceDatum`
+  half missing. Only the text of 130821 and 130856, which reserve about 230
+  bytes and are sent shorter, may stop early now; any `STRING_FIX` of 32 bytes
+  or less must be complete. Under `full-pgns` this also applies to the trailing
+  strings of 129045, 130817, 130833 and 130842.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string
