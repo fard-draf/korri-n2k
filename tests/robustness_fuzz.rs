@@ -448,7 +448,8 @@ fn assembler_survives_an_adversarial_stream() {
             *byte = rng.next_byte();
         }
         let source = rng.next_byte() % 6;
-        let pgn = 126_000 + (rng.next_byte() % 3) as u32;
+        // Two PGNs of the default table: others are refused before any session.
+        let pgn = [129_029, 129_540][(rng.next_byte() % 2) as usize];
 
         now = now.saturating_add((rng.next_byte() % 200) as u64);
         if i % 10_000 == 0 {
@@ -461,6 +462,12 @@ fn assembler_survives_an_adversarial_stream() {
             assert!(message.len <= message.payload.len());
         }
     }
+
+    // The stream must reach the sessions, not bounce off the PGN table.
+    assert_eq!(assembler.unknown_pgn(), 0);
+    assert!(
+        assembler.pool_exhausted() + assembler.lost_fragments() + assembler.expired_sessions() > 0
+    );
 }
 
 /// Every length a Fast Packet can carry must reassemble byte for byte.
