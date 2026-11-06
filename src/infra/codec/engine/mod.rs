@@ -48,6 +48,20 @@ fn is_repetitive_field(descriptor: &'static PgnDescriptor, field_idx: usize) -> 
     })
 }
 
+/// Returns the repeating group whose first field is `field_idx`, with its index.
+/// A group is read and written where it sits in the descriptor, so a field
+/// declared after the group follows it on the wire.
+fn group_starting_at(
+    descriptor: &'static PgnDescriptor,
+    field_idx: usize,
+) -> Option<(usize, &'static RepeatingFieldSet)> {
+    descriptor
+        .repeating_field_sets
+        .iter()
+        .enumerate()
+        .find(|(_, rfs)| rfs.start_field_index == field_idx)
+}
+
 /// Computes the clamped repetition count for `rfs` from its raw counter reading.
 fn repeating_group_count(
     descriptor: &'static PgnDescriptor,
@@ -107,6 +121,36 @@ pub fn for_each_field(
     let mut counters = [None::<usize>; 4];
 
     for (field_idx, field_desc) in desc.fields.iter().enumerate() {
+        if let Some((rfs_idx, rfs)) = group_starting_at(desc, field_idx) {
+            let counter_raw = counters.get(rfs_idx).copied().flatten();
+            let count = repeating_group_count(desc, rfs, counter_raw, reader.bits_remaining())?;
+
+            for elem_idx in 0..count {
+                for field_offset in 0..rfs.size {
+                    let group_field_idx = rfs.start_field_index + field_offset;
+                    let group_field_desc = desc
+                        .fields
+                        .get(group_field_idx)
+                        .ok_or(DeserializationError::InvalidDataLength)?;
+
+                    if let Some((raw, value)) =
+                        read_field_raw_and_value(&mut reader, group_field_desc)?
+                    {
+                        let availability = field_availability(group_field_desc, raw, &value);
+                        f(
+                            group_field_desc,
+                            FieldReading {
+                                value,
+                                raw,
+                                availability,
+                                repetition: Some((rfs.array_id, elem_idx)),
+                            },
+                        );
+                    }
+                }
+            }
+            continue;
+        }
         if is_repetitive_field(desc, field_idx) {
             continue;
         }
@@ -127,34 +171,6 @@ pub fn for_each_field(
                     repetition: None,
                 },
             );
-        }
-    }
-
-    for (rfs_idx, rfs) in desc.repeating_field_sets.iter().enumerate() {
-        let counter_raw = counters.get(rfs_idx).copied().flatten();
-        let count = repeating_group_count(desc, rfs, counter_raw, reader.bits_remaining())?;
-
-        for elem_idx in 0..count {
-            for field_offset in 0..rfs.size {
-                let field_idx = rfs.start_field_index + field_offset;
-                let field_desc = desc
-                    .fields
-                    .get(field_idx)
-                    .ok_or(DeserializationError::InvalidDataLength)?;
-
-                if let Some((raw, value)) = read_field_raw_and_value(&mut reader, field_desc)? {
-                    let availability = field_availability(field_desc, raw, &value);
-                    f(
-                        field_desc,
-                        FieldReading {
-                            value,
-                            raw,
-                            availability,
-                            repetition: Some((rfs.array_id, elem_idx)),
-                        },
-                    );
-                }
-            }
         }
     }
 
@@ -203,7 +219,55 @@ pub fn deserialize_into<T: FieldAccess>(
     let mut reader = BitReader::new(payload);
 
     for (field_idx, field_desc) in descriptor.fields.iter().enumerate() {
-        // Skip fields that belong to repeating groups; they are handled later
+        // A repeating group is read where it starts; its other fields are not
+        // visited on their own.
+        if let Some((_, rfs)) = group_starting_at(descriptor, field_idx) {
+            let counter_raw = if let Some(counter_idx) = rfs.count_field_index {
+                let counter_field = descriptor
+                    .fields
+                    .get(counter_idx)
+                    .ok_or(DeserializationError::InvalidDataLength)?;
+                match instance.field(counter_field.id) {
+                    Some(PgnValue::U8(v)) => Some(v as usize),
+                    Some(PgnValue::U16(v)) => Some(v as usize),
+                    Some(PgnValue::U32(v)) => Some(v as usize),
+                    _ => return Err(DeserializationError::InvalidDataLength),
+                }
+            } else {
+                None
+            };
+            let count =
+                repeating_group_count(descriptor, rfs, counter_raw, reader.bits_remaining())?;
+
+            // Set the number of valid elements through the FieldAccess trait
+            instance
+                .set_repetitive_count(rfs.array_id, count)
+                .ok_or(DeserializationError::FieldAssignmentFailed { desc: rfs.array_id })?;
+
+            for elem_idx in 0..count {
+                for field_offset in 0..rfs.size {
+                    let group_field_idx = rfs.start_field_index + field_offset;
+                    let group_field_desc = descriptor
+                        .fields
+                        .get(group_field_idx)
+                        .ok_or(DeserializationError::InvalidDataLength)?;
+
+                    if let Some(value) = read_field_value(&mut reader, group_field_desc)? {
+                        instance
+                            .repetitive_field_mut(
+                                rfs.array_id,
+                                elem_idx,
+                                group_field_desc.id,
+                                value,
+                            )
+                            .ok_or(DeserializationError::FieldAssignmentFailed {
+                                desc: group_field_desc.id,
+                            })?;
+                    }
+                }
+            }
+            continue;
+        }
         if is_repetitive_field(descriptor, field_idx) {
             continue;
         }
@@ -214,52 +278,6 @@ pub fn deserialize_into<T: FieldAccess>(
                     desc: field_desc.id,
                 },
             )?
-        }
-    }
-
-    // ==================== Repeating field handling ====================
-    // After processing all regular fields, handle repeating groups
-    for rfs in descriptor.repeating_field_sets {
-        let counter_raw = if let Some(counter_idx) = rfs.count_field_index {
-            let counter_field = descriptor
-                .fields
-                .get(counter_idx)
-                .ok_or(DeserializationError::InvalidDataLength)?;
-            match instance.field(counter_field.id) {
-                Some(PgnValue::U8(v)) => Some(v as usize),
-                Some(PgnValue::U16(v)) => Some(v as usize),
-                Some(PgnValue::U32(v)) => Some(v as usize),
-                _ => return Err(DeserializationError::InvalidDataLength),
-            }
-        } else {
-            None
-        };
-        let count = repeating_group_count(descriptor, rfs, counter_raw, reader.bits_remaining())?;
-
-        // 2. Set the number of valid elements through the FieldAccess trait
-        instance
-            .set_repetitive_count(rfs.array_id, count)
-            .ok_or(DeserializationError::FieldAssignmentFailed { desc: rfs.array_id })?;
-
-        // 3. Iterate through every element of the repeating group
-        for elem_idx in 0..count {
-            // For each field in the group
-            for field_offset in 0..rfs.size {
-                let field_idx = rfs.start_field_index + field_offset;
-                let field_desc = descriptor
-                    .fields
-                    .get(field_idx)
-                    .ok_or(DeserializationError::InvalidDataLength)?;
-
-                if let Some(value) = read_field_value(&mut reader, field_desc)? {
-                    // Write the value into the array entry through FieldAccess
-                    instance
-                        .repetitive_field_mut(rfs.array_id, elem_idx, field_desc.id, value)
-                        .ok_or(DeserializationError::FieldAssignmentFailed {
-                            desc: field_desc.id,
-                        })?;
-                }
-            }
         }
     }
 
@@ -285,20 +303,40 @@ pub fn serialize<T: FieldAccess>(
 
     let mut writer = BitWriter::new(buffer);
 
-    // Helper to detect whether a field belongs to a repeating group
-    let is_repetitive_field = |field_idx: usize| -> bool {
-        for rfs in descriptor.repeating_field_sets {
-            if field_idx >= rfs.start_field_index && field_idx < (rfs.start_field_index + rfs.size)
-            {
-                return true;
-            }
-        }
-        false
-    };
-
     for (field_idx, field_desc) in descriptor.fields.iter().enumerate() {
-        // Skip repeating fields; they are processed afterwards
-        if is_repetitive_field(field_idx) {
+        // A repeating group is written where it starts; its other fields are not
+        // written on their own.
+        if let Some((_, rfs)) = group_starting_at(descriptor, field_idx) {
+            // 1. Retrieve the number of valid elements for the array
+            let count = pgn_instance.repetitive_count(rfs.array_id).ok_or(
+                SerializationError::FieldNotFound {
+                    field_id: rfs.array_id,
+                },
+            )?;
+
+            // 2. Clamp the counter against the allowed maximum
+            let count = count.min(rfs.max_repetitions);
+
+            // 3. Serialize every element of the repeating group
+            for elem_idx in 0..count {
+                for field_offset in 0..rfs.size {
+                    let group_field_idx = rfs.start_field_index + field_offset;
+                    let group_field_desc = descriptor
+                        .fields
+                        .get(group_field_idx)
+                        .ok_or(SerializationError::InvalidData)?;
+
+                    let value = pgn_instance
+                        .repetitive_field(rfs.array_id, elem_idx, group_field_desc.id)
+                        .ok_or(SerializationError::FieldNotFound {
+                            field_id: group_field_desc.id,
+                        })?;
+                    write_field(&mut writer, group_field_desc, &value)?;
+                }
+            }
+            continue;
+        }
+        if is_repetitive_field(descriptor, field_idx) {
             continue;
         }
 
@@ -308,42 +346,6 @@ pub fn serialize<T: FieldAccess>(
                 field_id: field_desc.id,
             })?;
         write_field(&mut writer, field_desc, &value)?;
-    }
-
-    // ==================== Repeating field serialization ====================
-    // After writing regular fields, serialize the repeating groups
-    for rfs in descriptor.repeating_field_sets {
-        // 1. Retrieve the number of valid elements for the array
-        let count = pgn_instance.repetitive_count(rfs.array_id).ok_or(
-            SerializationError::FieldNotFound {
-                field_id: rfs.array_id,
-            },
-        )?;
-
-        // 2. Clamp the counter against the allowed maximum
-        let count = count.min(rfs.max_repetitions);
-
-        // 3. Serialize every element of the repeating group
-        for elem_idx in 0..count {
-            // For each field in the group
-            for field_offset in 0..rfs.size {
-                let field_idx = rfs.start_field_index + field_offset;
-                let field_desc = descriptor
-                    .fields
-                    .get(field_idx)
-                    .ok_or(SerializationError::InvalidData)?;
-
-                // Fetch the value from the structure via the trait
-                let value = pgn_instance
-                    .repetitive_field(rfs.array_id, elem_idx, field_desc.id)
-                    .ok_or(SerializationError::FieldNotFound {
-                        field_id: field_desc.id,
-                    })?;
-
-                // Write the value into the buffer
-                write_field(&mut writer, field_desc, &value)?;
-            }
-        }
     }
 
     let bits_written = writer.bit_cursor();

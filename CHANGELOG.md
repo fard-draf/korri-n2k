@@ -202,6 +202,11 @@ instead of rejected.
   Messages of one PGN from one source with different sequence IDs still get
   one slot each. The destination is not part of the key, and messages a source
   aborts under different sequence IDs each hold a slot for 500 ms.
+- A field declared after a repeating group was read, written and visited
+  before it, so the codec disagreed with the wire layout. 130571 (Library Data
+  Group, `full-pgns`) is the only generated PGN with one: its `Artist` string
+  follows the `IdType`/`Id`/`Name` group. A group is now handled where it
+  starts in the descriptor, by decoding, encoding and `for_each_field`.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
