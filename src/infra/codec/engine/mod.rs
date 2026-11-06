@@ -196,13 +196,25 @@ fn field_availability(
     raw: Option<u64>,
     value: &PgnValue,
 ) -> Availability {
-    if field_desc.kind == FieldKind::StringFix {
-        if let PgnValue::Bytes(ref b) = value {
+    match (field_desc.kind, value) {
+        (FieldKind::StringFix, PgnValue::Bytes(b)) => {
             if string_fix_trimmed(b.as_slice()).is_empty() {
                 return Availability::NotAvailable;
             }
+            return Availability::Available;
         }
-        return Availability::Available;
+        (FieldKind::StringFix, _) => return Availability::Available,
+        // NaN is how an IEEE-754 field says "no data"; it has no integer sentinel.
+        (FieldKind::Float, PgnValue::F32(v)) if v.is_nan() => return Availability::NotAvailable,
+        // A variable string without text is absent. A LAU value starts with its
+        // encoding byte, which is not text.
+        (FieldKind::StringLau, PgnValue::Bytes(b)) if b.len() <= 1 => {
+            return Availability::NotAvailable
+        }
+        (FieldKind::StringLz, PgnValue::Bytes(b)) if b.is_empty() => {
+            return Availability::NotAvailable
+        }
+        _ => {}
     }
     match raw {
         Some(raw_val) => field_desc.availability(raw_val),

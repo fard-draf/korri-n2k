@@ -5,7 +5,7 @@
 //! carry are gated on `full-pgns`.
 #![allow(unused_imports)]
 
-use korri_n2k::core::{PgnBytes, PgnValue};
+use korri_n2k::core::{Availability, PgnBytes, PgnValue};
 use korri_n2k::infra::codec::engine::for_each_field;
 use korri_n2k::infra::codec::traits::{FieldAccess, PgnData};
 use korri_n2k::protocol::messages::*;
@@ -257,4 +257,77 @@ fn aud_008_short_simnet_text_keeps_decoding() {
         Some(PgnValue::Bytes(text)) => assert_eq!(&text.as_slice()[..2], b"hi"),
         other => panic!("unexpected text {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// AUD-009 — NaN and text-less variable strings are "not available".
+// ---------------------------------------------------------------------------
+
+/// Availability of every field of `payload`, in wire order.
+fn availabilities(pgn: u32, payload: &[u8]) -> Vec<(&'static str, Availability, PgnValue)> {
+    let mut seen = Vec::new();
+    for_each_field(
+        descriptor_for(pgn, payload).expect("descriptor"),
+        payload,
+        |field, reading| seen.push((field.id, reading.availability, reading.value)),
+    )
+    .expect("visit");
+    seen
+}
+
+/// 126998 carries three LAU strings. An empty one is `02 01` (length 2, ASCII)
+/// per CANboat; a lone `00` is the older form.
+#[test]
+fn aud_009_empty_lau_strings_are_not_available() {
+    for payload in [[2, 1, 2, 1, 2, 1].as_slice(), [0, 0, 0].as_slice()] {
+        let seen = availabilities(126998, payload);
+        assert_eq!(seen.len(), 3);
+        for (id, availability, _) in &seen {
+            assert_eq!(*availability, Availability::NotAvailable, "{id}");
+        }
+    }
+    // The value is still exposed: the encoding byte is kept.
+    let seen = availabilities(126998, &[2, 1, 2, 1, 2, 1]);
+    assert_eq!(seen[0].2, PgnValue::Bytes(bytes_of(&[1])));
+}
+
+#[test]
+fn aud_009_lau_string_with_text_is_available() {
+    let seen = availabilities(126998, &[3, 1, b'A', 2, 1, 2, 1]);
+    assert_eq!(seen[0].1, Availability::Available);
+    assert_eq!(seen[1].1, Availability::NotAvailable);
+    assert_eq!(seen[2].1, Availability::NotAvailable);
+}
+
+/// 130321 Salinity Station Data: 23 bytes of fixed fields (salinity FLOAT at
+/// bytes 15-18), then two LAU strings.
+#[cfg(feature = "full-pgns")]
+fn salinity_station(salinity: [u8; 4]) -> Vec<u8> {
+    let mut payload = vec![0u8; 15];
+    payload.extend(salinity);
+    payload.extend([0, 0]); // water temperature
+    payload.extend([2, 1]); // station id: empty
+    payload.extend([3, 1, b'S']); // station name: "S"
+    payload
+}
+
+#[cfg(feature = "full-pgns")]
+#[test]
+fn aud_009_nan_float_is_not_available() {
+    let nan = salinity_station([0x00, 0x00, 0xC0, 0x7F]);
+    let seen = availabilities(130321, &nan);
+    let salinity = seen.iter().find(|(id, _, _)| *id == "Salinity").unwrap();
+    assert_eq!(salinity.1, Availability::NotAvailable);
+    assert!(matches!(salinity.2, PgnValue::F32(v) if v.is_nan()));
+    let station_id = seen.iter().find(|(id, _, _)| *id == "StationId").unwrap();
+    assert_eq!(station_id.1, Availability::NotAvailable);
+    let station_name = seen.iter().find(|(id, _, _)| *id == "StationName").unwrap();
+    assert_eq!(station_name.1, Availability::Available);
+
+    // 35.0 psu is IEEE 0x420C0000: a real measurement stays available.
+    let measured = salinity_station([0x00, 0x00, 0x0C, 0x42]);
+    let seen = availabilities(130321, &measured);
+    let salinity = seen.iter().find(|(id, _, _)| *id == "Salinity").unwrap();
+    assert_eq!(salinity.1, Availability::Available);
+    assert_eq!(salinity.2, PgnValue::F32(35.0));
 }

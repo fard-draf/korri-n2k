@@ -219,6 +219,10 @@ instead of rejected.
   bytes and are sent shorter, may stop early now; any `STRING_FIX` of 32 bytes
   or less must be complete. Under `full-pgns` this also applies to the trailing
   strings of 129045, 130817, 130833 and 130842.
+- `for_each_field` reported two kinds of absent value as `Available`: a NaN
+  `FLOAT` (the `Salinity` of 130321) and a variable string without text, an
+  empty LAU (`02 01`, or the older `00`) or an empty LZ. Both are now
+  `NotAvailable`; the value and its bytes are still handed over unchanged.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string
