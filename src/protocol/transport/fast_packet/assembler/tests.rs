@@ -274,13 +274,13 @@ fn test_expired_session_slot_is_reused_and_counted() {
     let pgn = 129540;
     let frame0: [u8; 8] = [0b000_00000, 15, 1, 2, 3, 4, 5, 6];
 
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assembler.process_frame(0, pgn, source, &frame0);
     }
     assert_eq!(assembler.expired_sessions(), 0);
 
     // Every session is now stale; a new sender must still be served.
-    let latecomer = MAX_CONCURRENT_SESSIONS as u8 + 10;
+    let latecomer = DEFAULT_SESSIONS as u8 + 10;
     assert_eq!(
         assembler.process_frame(SESSION_TIMEOUT_MS + 1, pgn, latecomer, &frame0),
         ProcessResult::FragmentConsumed
@@ -301,11 +301,11 @@ fn test_pool_exhaustion_preserves_active_sessions() {
     let now = 100;
     let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
 
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assembler.process_frame(now, pgn, source, &frame0);
     }
 
-    let latecomer = MAX_CONCURRENT_SESSIONS as u8 + 10;
+    let latecomer = DEFAULT_SESSIONS as u8 + 10;
     assert_eq!(
         assembler.process_frame(now, pgn, latecomer, &frame0),
         ProcessResult::Ignored
@@ -323,7 +323,7 @@ fn test_pool_exhaustion_preserves_active_sessions() {
 
     // The sessions already in flight must be intact.
     let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assert!(
             matches!(
                 assembler.process_frame(now, pgn, source, &frame1),
@@ -388,7 +388,7 @@ fn test_pool_exhaustion_counter_tracks_every_refusal() {
     let now = 100;
     let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
 
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assembler.process_frame(now, pgn, source, &frame0);
     }
     assert_eq!(
@@ -498,7 +498,7 @@ fn test_counters_stay_zero_on_healthy_traffic() {
     let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
     let frame1: [u8; 8] = [0b000_00001, 7, 8, 9, 10, 0xFF, 0xFF, 0xFF];
 
-    for source in 0..MAX_CONCURRENT_SESSIONS as u8 {
+    for source in 0..DEFAULT_SESSIONS as u8 {
         assembler.process_frame(100, pgn, source, &frame0);
         assert!(matches!(
             assembler.process_frame(150, pgn, source, &frame1),
@@ -716,4 +716,28 @@ fn interleaved_messages_of_one_pgn_from_one_source_both_complete() {
         assembler.process_frame(0, 130822, 10, &b[2]),
         completed_20_bytes(101)
     );
+}
+
+//==================================================================================Pool size
+
+#[test]
+/// The pool size is a const parameter: eight sources in flight fit a pool of
+/// eight, and the ninth is refused, as the default pool refuses its fifth.
+fn pool_size_is_configurable() {
+    let mut assembler = FastPacketAssembler::<8>::with_pool(FAST_PACKET_PGNS);
+    let frame0: [u8; 8] = [0b000_00000, 10, 1, 2, 3, 4, 5, 6];
+
+    for source in 0..8 {
+        assert_eq!(
+            assembler.process_frame(0, 129540, source, &frame0),
+            ProcessResult::FragmentConsumed
+        );
+    }
+    assert_eq!(assembler.pool_exhausted(), 0);
+
+    assert_eq!(
+        assembler.process_frame(0, 129540, 8, &frame0),
+        ProcessResult::Ignored
+    );
+    assert_eq!(assembler.pool_exhausted(), 1);
 }

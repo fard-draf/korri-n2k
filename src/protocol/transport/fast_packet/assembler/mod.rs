@@ -4,9 +4,9 @@ use super::{FAST_PACKET_PGNS, MAX_FAST_PACKET_PAYLOAD};
 
 //==================================================================================Constants
 
-/// Maximum number of Fast Packet sessions handled in parallel, one per message in
-/// flight (see `FastPacketAssembler` for the key).
-const MAX_CONCURRENT_SESSIONS: usize = 4;
+/// Sessions in the default pool, one per message in flight (see
+/// `FastPacketAssembler` for the key).
+const DEFAULT_SESSIONS: usize = 4;
 
 /// Maximum time without addressed message for a fast packet session.
 const SESSION_TIMEOUT_MS: u64 = 500;
@@ -101,7 +101,8 @@ impl FastPacketSession {
     }
 }
 
-/// Main assembler: owns a fixed pool of reusable sessions.
+/// Main assembler: owns a fixed pool of reusable sessions, `SESSIONS` of them
+/// (4 by default; `with_pool` takes another size). Each one holds a 223-byte buffer.
 ///
 /// A session is keyed by `(source address, PGN, sequence ID)`, so a sender can
 /// interleave messages of one PGN. A first frame with the key of a session
@@ -112,8 +113,8 @@ impl FastPacketSession {
 /// the next one. The destination is not part of the key, so addressed PGNs
 /// (126208, 126464, 126720) sent by one source to two devices at once share it.
 #[derive(Debug, Copy, Clone)]
-pub struct FastPacketAssembler {
-    sessions: [FastPacketSession; MAX_CONCURRENT_SESSIONS],
+pub struct FastPacketAssembler<const SESSIONS: usize = DEFAULT_SESSIONS> {
+    sessions: [FastPacketSession; SESSIONS],
     fast_packet_pgns: &'static [u32],
     expired_sessions: u32,
     pool_exhausted: u32,
@@ -141,8 +142,17 @@ impl FastPacketAssembler {
     /// `FAST_PACKET_PGNS_ALL` holds every Fast Packet canboat declares, 182 against
     /// the 152 of `full-pgns`. Extend it for proprietary PGNs.
     pub const fn with_pgns(pgns: &'static [u32]) -> Self {
+        Self::with_pool(pgns)
+    }
+}
+
+impl<const SESSIONS: usize> FastPacketAssembler<SESSIONS> {
+    /// Like `with_pgns`, with a pool of `SESSIONS` sessions instead of 4:
+    /// `FastPacketAssembler::<8>::with_pool(table)`. A full pool still refuses
+    /// the next message; it evicts nothing.
+    pub const fn with_pool(pgns: &'static [u32]) -> Self {
         Self {
-            sessions: [FastPacketSession::new(); MAX_CONCURRENT_SESSIONS],
+            sessions: [FastPacketSession::new(); SESSIONS],
             fast_packet_pgns: pgns,
             expired_sessions: 0,
             pool_exhausted: 0,
