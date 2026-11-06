@@ -234,6 +234,11 @@ instead of rejected.
   as length 2 and encoding 1 (ASCII): it is now written `02 01`, three times
   for 126998. Reading is unchanged and still takes a lone `00` as empty, so a
   payload that held one is re-encoded `02 01`.
+- A `STRING_LZ` was written without its terminating zero, and a received one
+  left that zero unread. CANboat defines the string as a length byte, the text
+  and a zero the length does not count: it is now written and consumed, and a
+  sender that omits it is still read. Among the generated PGNs only 126720
+  (Fusion Set Zone Name, Set Device Name) and 130847 use it, all `full-pgns`.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string

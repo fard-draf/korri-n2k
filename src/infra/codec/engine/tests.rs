@@ -262,9 +262,11 @@ fn test_string_lz_roundtrip() {
 
     let mut buffer = [0xFF; 64];
     let bytes_written = serialize(&payload, &mut buffer, &PgnStringLz::DESCRIPTOR).unwrap();
-    assert_eq!(bytes_written, payload.text.len() + 1);
+    // Length byte, text, then the terminating zero the length does not count.
+    assert_eq!(bytes_written, payload.text.len() + 2);
     assert_eq!(buffer[0], payload.text.len() as u8);
     assert_eq!(&buffer[1..1 + payload.text.len()], payload.text.as_slice());
+    assert_eq!(buffer[1 + payload.text.len()], 0);
 
     let mut decoded = PgnStringLz::default();
     deserialize_into(

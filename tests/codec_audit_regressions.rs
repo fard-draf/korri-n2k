@@ -431,3 +431,51 @@ fn aud_007_lone_zero_lau_is_still_read_as_empty() {
     let decoded = Pgn126998::from_payload(&[2, 1, 2, 1, 2, 1]).expect("canonical empty strings");
     assert_eq!(decoded.installation_description1, bytes_of(&[1]));
 }
+
+// ---------------------------------------------------------------------------
+// LZ — the terminating zero is written, and read when present or absent.
+// ---------------------------------------------------------------------------
+
+/// 126720 Fusion Set Zone Name: header `a3 99` (Fusion, marine), id 34, zone 1,
+/// then the LZ name: length 1, `X`, terminating zero.
+#[cfg(feature = "full-pgns")]
+const ZONE_NAME_X: [u8; 8] = [0xa3, 0x99, 0x22, 0x00, 1, 1, b'X', 0];
+
+#[cfg(feature = "full-pgns")]
+fn zone_name(payload: &[u8]) -> PgnBytes {
+    match Pgn126720::from_payload(payload).expect("126720 zone name") {
+        Pgn126720::FusionSetZoneName(inner) => inner.name,
+        other => panic!("unexpected variant {other:?}"),
+    }
+}
+
+#[cfg(feature = "full-pgns")]
+#[test]
+fn lz_terminating_zero_is_written() {
+    let decoded = Pgn126720::from_payload(&ZONE_NAME_X).expect("valid 126720");
+    let mut buffer = [0u8; 64];
+    let written = decoded.to_payload(&mut buffer).expect("encode");
+    assert_eq!(&buffer[..written], &ZONE_NAME_X);
+}
+
+#[cfg(feature = "full-pgns")]
+#[test]
+fn lz_empty_string_is_length_zero_then_terminator() {
+    let mut inner = Pgn126720FusionSetZoneName::new();
+    inner.zone = 1;
+    let mut buffer = [0u8; 64];
+    let written = Pgn126720::FusionSetZoneName(inner)
+        .to_payload(&mut buffer)
+        .expect("encode");
+    assert_eq!(&buffer[4..written], &[1, 0, 0]);
+}
+
+#[cfg(feature = "full-pgns")]
+#[test]
+fn lz_missing_terminator_is_still_read() {
+    assert_eq!(zone_name(&ZONE_NAME_X), bytes_of(b"X"));
+    assert_eq!(zone_name(&ZONE_NAME_X[..7]), bytes_of(b"X"));
+    // The terminator is not part of the text, whether or not it is sent.
+    assert_eq!(zone_name(&[0xa3, 0x99, 0x22, 0x00, 1, 0]), bytes_of(b""));
+    assert_eq!(zone_name(&[0xa3, 0x99, 0x22, 0x00, 1, 0, 0]), bytes_of(b""));
+}

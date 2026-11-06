@@ -485,6 +485,20 @@ fn read_field_raw_and_value(
                 pgn_bytes.copy_from_slice(slice);
             }
             pgn_bytes.len = strlen;
+            // The text ends with a zero byte that the length does not count. A
+            // sender that leaves it out is still read: the byte is consumed only
+            // when it is there.
+            // shortcut: an absent terminator followed by a field starting with 0x00
+            // would lose that byte; every generated LZ string is the last field.
+            if reader.bits_remaining() >= 8 {
+                let text_end = reader.bit_cursor();
+                let next = reader
+                    .read_u8(8)
+                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+                if next != 0 {
+                    reader.seek(text_end);
+                }
+            }
             Ok(Some((None, PgnValue::Bytes(pgn_bytes))))
         }
 
@@ -857,6 +871,10 @@ fn write_field(
                         .write_slice(text)
                         .map_err(|e| SerializationError::BitWriteError { err: e })?;
                 }
+                // Terminating zero, not counted by the length.
+                writer
+                    .write_u64(0, 8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 return Err(SerializationError::CodecError {
                     source: CodecError::DataTypeMismatch {
