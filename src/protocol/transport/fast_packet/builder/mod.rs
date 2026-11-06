@@ -59,6 +59,15 @@ impl<'a> Iterator for FrameIterator<'a> {
     type Item = Result<CanFrame, CanIdBuildError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // An empty payload has nothing to send: say so once instead of ending
+        // as if every frame had gone out.
+        if self.builder.payload.is_empty() {
+            if self.frame_index == 0 {
+                self.frame_index = 1;
+                return Some(Err(CanIdBuildError::EmptyPayload));
+            }
+            return None;
+        }
         if self.bytes_sent >= self.builder.payload.len() {
             return None;
         }

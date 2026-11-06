@@ -264,6 +264,10 @@ instead of rejected.
   reported, so a third-party `PgnData` returning more panicked. It now returns
   `SendPgnError::Serialization` before any frame goes out. The generated types
   cannot do this.
+- An empty payload made `FastPacketBuilder` end its iterator before looking at
+  anything, so `send_pgn` and the address manager returned `Ok` having sent
+  nothing. The iterator now yields `CanIdBuildError::EmptyPayload` once, then
+  ends, and both send loops report it.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string

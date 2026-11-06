@@ -1,14 +1,17 @@
 //! `PgnSender` against a recording bus and timer. AUD-012 b: a codec reporting more
 //! bytes than the 223-byte buffer holds is a serialization error, not a panic.
+//! AUD-012 c: an empty payload is one error, not a silent success.
 use core::future::pending;
 use korri_n2k::core::PgnValue;
-use korri_n2k::error::{DeserializationError, SendPgnError, SerializationError};
+use korri_n2k::error::{CanIdBuildError, DeserializationError, SendPgnError, SerializationError};
 use korri_n2k::infra::codec::traits::{FieldAccess, PgnData};
 use korri_n2k::protocol::transport::can_frame::CanFrame;
+use korri_n2k::protocol::transport::fast_packet::builder::FastPacketBuilder;
 use korri_n2k::protocol::transport::traits::korri_timer::{Clock, KorriTimer};
 use korri_n2k::protocol::transport::traits::{can_bus::CanBus, pgn_sender::PgnSender};
 
-/// 129540 is a Fast Packet PGN.
+/// 129025 is single frame; 129540 is a Fast Packet PGN.
+const SINGLE_FRAME_PGN: u32 = 129025;
 const FAST_PACKET_PGN: u32 = 129540;
 
 /// What the bus saw. `fail_at` makes the n-th `send` (0-based) return an error.
@@ -60,6 +63,15 @@ struct Payload {
     reported: Result<usize, ()>,
 }
 
+impl Payload {
+    fn of(len: usize) -> Self {
+        Self {
+            bytes: len,
+            reported: Ok(len),
+        }
+    }
+}
+
 impl FieldAccess for Payload {
     fn field(&self, _: &'static str) -> Option<PgnValue> {
         None
@@ -103,4 +115,35 @@ async fn a_codec_reporting_more_than_the_buffer_is_a_serialization_error() {
     assert!(matches!(result, Err(SendPgnError::Serialization)));
     assert_eq!(bus.attempts, 0);
     assert!(timer.delays.is_empty());
+}
+
+/// AUD-012 c: an empty payload is one error, not a silent success.
+#[tokio::test]
+async fn an_empty_payload_is_refused_with_no_bus_call() {
+    for pgn in [SINGLE_FRAME_PGN, FAST_PACKET_PGN] {
+        let (mut bus, mut timer) = Default::default();
+        let result = send(&Payload::of(0), pgn, None, &mut bus, &mut timer).await;
+        assert!(
+            matches!(
+                result,
+                Err(SendPgnError::Build(CanIdBuildError::EmptyPayload))
+            ),
+            "pgn {pgn}"
+        );
+        assert_eq!(bus.attempts, 0);
+        assert!(timer.delays.is_empty());
+    }
+}
+
+#[test]
+fn the_frame_iterator_of_an_empty_payload_yields_one_error_then_ends() {
+    for pgn in [SINGLE_FRAME_PGN, FAST_PACKET_PGN] {
+        let mut frames = FastPacketBuilder::new(pgn, 42, None, &[]).build();
+        assert!(matches!(
+            frames.next(),
+            Some(Err(CanIdBuildError::EmptyPayload))
+        ));
+        assert!(frames.next().is_none());
+        assert!(frames.next().is_none());
+    }
 }
