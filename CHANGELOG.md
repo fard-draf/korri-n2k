@@ -132,6 +132,10 @@ instead of rejected.
   refused by the generator (e.g. 129792) was only a `cargo:warning`. Polymorphic
   PGNs with some variants refused (126208, 130820) still stop in rustc, not in
   the build script. A non-UTF-8 `KORRI_N2K_MANIFEST_PATH` is no longer ignored.
+- **BREAKING (build)**: a `KORRI_N2K_MANIFEST_PATH` that points to a missing
+  file now fails the build, naming the path, instead of falling back to the
+  default manifest with a warning. The variable set but empty fails too: unset
+  it to get the default manifest.
 
 ### Fixed
 - The generator treated CANboat's `Fallback` entries as real messages. A

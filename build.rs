@@ -62,22 +62,15 @@ fn main() -> Result<(), BuildError> {
     // `var_os`: a non-UTF-8 path is still a path, `var().ok()` silently dropped it.
     let user_manifest_path = std::env::var_os("KORRI_N2K_MANIFEST_PATH").map(PathBuf::from);
 
+    // No fallback: a missing file (or an empty variable) fails below with `ReadFile`,
+    // so a typo never builds the default PGN set unnoticed.
     let manifest_path = if let Some(path) = user_manifest_path {
-        if path.exists() {
-            println!(
-                "cargo:warning=Using custom pgn_manifest.json from {:?}",
-                path
-            );
-            println!("cargo:rerun-if-changed={}", path.display());
+        println!(
+            "cargo:warning=Using custom pgn_manifest.json from {:?}",
             path
-        } else {
-            println!(
-                "cargo:warning=Custom manifest path specified but file not found: {:?}",
-                path
-            );
-            println!("cargo:warning=Falling back to the default pgn_manifest");
-            default_manifest_path
-        }
+        );
+        println!("cargo:rerun-if-changed={}", path.display());
+        path
     } else if let Some(path) = feature_manifest_path {
         println!(
             "cargo:warning=full-pgns feature enabled: generating every supported PGN from {}",
