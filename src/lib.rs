@@ -18,8 +18,9 @@
 //! # Choosing PGNs
 //!
 //! Types are generated at build time from [CANboat](https://github.com/canboat/canboat),
-//! only for the ids in a manifest (`{"pgns": [{"id": 128267, "name": "Water Depth"}]}`;
-//! names are documentation). Precedence: `KORRI_N2K_MANIFEST_PATH` (absolute
+//! only for the ids in a manifest (`{"pgns": [{"id": 60928, "name": "ISO Address
+//! Claim"}, {"id": 128267, "name": "Water Depth"}]}`; 60928 is mandatory, names
+//! are documentation). Precedence: `KORRI_N2K_MANIFEST_PATH` (absolute
 //! path) → `full-pgns` → default manifest (common PGNs). Counts and rejected
 //! PGNs: `build_core/var/pgn_manifest*.json`.
 //!

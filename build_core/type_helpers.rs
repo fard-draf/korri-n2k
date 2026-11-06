@@ -255,63 +255,6 @@ pub(crate) fn map_type(
             }
         }
     }
-    // Variable-length fields must be handled with arrays
-    // if map_to_fieldkind(field) == FieldKind::StringFix {
-    //     let num_bits = field.bits_length.ok_or(BuildError::BitLengthErr {
-    //         path: field.id.clone(),
-    //         comment: "build.rs / map_type",
-    //     })?;
-    //     let num_bytes = num_bits / 8;
-    //     return Ok(format!("[u8;{}]", num_bytes));
-    // }
-
-    // Fields with a resolution become floating-point values.
-    // if field.resolution.is_some_and(|r| r != 1.0) || field.kind.contains("DECIMAL") {
-    //     match field.bits_length.ok_or(BuildError::BitLengthErr {
-    //         path: field.id.clone(),
-    //         comment: "build.rs / map_type",
-    //     })? {
-    //         1..=32 => return Ok("f32".to_string()),
-    //         _ => return Ok("f64".to_string()),
-    //     }
-    //     // return Ok("f64".to_string());
-    // }
-    // For other cases rely on bit length and signedness.
-    // let is_signed = is_signed_type(field)?;
-    // match field.bits_length.ok_or(BuildError::BitLengthErr {
-    //     path: field.id.clone(),
-    //     comment: "build.rs / map_type",
-    // })? {
-    //     1..=8 => {
-    //         if is_signed {
-    //             Ok("i8".to_string())
-    //         } else {
-    //             Ok("u8".to_string())
-    //         }
-    //     }
-    //     9..=16 => {
-    //         if is_signed {
-    //             Ok("i16".to_string())
-    //         } else {
-    //             Ok("u16".to_string())
-    //         }
-    //     }
-    //     17..=32 => {
-    //         if is_signed {
-    //             Ok("i32".to_string())
-    //         } else {
-    //             Ok("u32".to_string())
-    //         }
-    //     }
-    //     33..=64 => {
-    //         if is_signed {
-    //             Ok("i64".to_string())
-    //         } else {
-    //             Ok("u64".to_string())
-    //         }
-    //     }
-    //     _ => Ok("()".to_string()),
-    // }
 }
 
 /// Return the native `repr` type associated with a Lookup field for conversion helpers.

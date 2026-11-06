@@ -34,7 +34,7 @@ Features planned before 1.0, by priority within each section.
       decodes back as that variant.
 - [ ] Build fails if the optional tail of a `MinLength` PGN holds a signed,
       string or float field: its 0xFF padding would read as a valid value.
-- [ ] The 34 PGNs listed as unsupported in `pgn_manifest.full.json`.
+- [ ] The 33 PGNs listed as unsupported in `pgn_manifest.full.json`.
 
 ## 4. Validation
 

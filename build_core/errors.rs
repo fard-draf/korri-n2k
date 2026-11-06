@@ -62,6 +62,14 @@ pub(crate) enum BuildError {
     #[error("[MESSAGE]:Unvalid lookup setup [PGN]:{pgn}, [FIELD]:{field}")]
     UnvalidLookupConfiguration { pgn: u32, field: String },
 
+    /// The manifest lacks a PGN the library cannot compile without.
+    #[error("[MESSAGE]:The manifest must list PGN {pgn} (the library imports it unconditionally)")]
+    RequiredPgnMissing { pgn: u32 },
+
+    /// Manifest ids for which no code was generated (unknown to CANboat, or refused by the generator).
+    #[error("[MESSAGE]:No code generated for the manifest PGNs {pgns:?}: unknown to CANboat or unsupported by the generator (see the `cargo:warning` lines)")]
+    PgnsNotGenerated { pgns: Vec<u32> },
+
     /// Download failure for canboat.json from the upstream CANboat repository.
     #[error("[MESSAGE]:Failed to download canboat.json from [URL]:{url} [ERROR]:{message}")]
     DownloadError { url: String, message: String },

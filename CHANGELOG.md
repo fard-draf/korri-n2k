@@ -62,6 +62,8 @@ instead of rejected.
   - `protocol::lookups::lookup_name` and `lookup_name_indirect`, returning the
     original CANboat labels for the lookups referenced by the active manifest.
   - Runnable example `monitor` (`cargo run --example monitor --features std`).
+- PGN 127233, Man Overboard Notification, under `full-pgns`: `Pgn127233`. It was
+  listed as unsupported only because of its multi-line explanation.
 
 ### Changed
 - **BREAKING**: `FieldDescriptor` gains `unknown_value: Option<i64>`,
@@ -125,6 +127,17 @@ instead of rejected.
 - The `build-download` feature fetches `canboat.json` from the `v9.1.0` tag
   instead of `master`, so a build no longer depends on the day it runs.
 - `NOTICE` names the bundled database: schema 2.8.0, CANboat v9.1.0.
+- **BREAKING (build)**: a manifest that cannot be honoured now fails the build
+  instead of compiling with fewer PGNs. A manifest without 60928 stopped on an
+  `unresolved import` of `Pgn60928` that never mentioned the manifest, and the
+  `README` example was one of them. A manifest id that is unknown to CANboat or
+  refused by the generator (e.g. 129792) was only a `cargo:warning`. Polymorphic
+  PGNs with some variants refused (126208, 130820) still stop in rustc, not in
+  the build script. A non-UTF-8 `KORRI_N2K_MANIFEST_PATH` is no longer ignored.
+- **BREAKING (build)**: a `KORRI_N2K_MANIFEST_PATH` that points to a missing
+  file now fails the build, naming the path, instead of falling back to the
+  default manifest with a warning. The variable set but empty fails too: unset
+  it to get the default manifest.
 
 ### Fixed
 - The generator treated CANboat's `Fallback` entries as real messages. A
@@ -164,6 +177,13 @@ instead of rejected.
   and a driver slicing `data[..len]` would panic and end the runner. The
   supervisor now drops such a frame, as it already does for a `SendPayload`
   with a bad length.
+- The generator copied CANboat's multi-line `Explanation` into a single `///`
+  line, so every following line was bare text and the generated code did not
+  compile: 127233 (Man Overboard Notification) failed that way with a custom
+  manifest. Each line now gets its own `///`, and the descriptor `description`
+  and field `name` strings are escaped. The generated code of the default,
+  `full-pgns` and `{60928, 129033}` builds differs only by the two blank lines
+  that followed the doc of 65332.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
@@ -178,6 +198,15 @@ instead of rejected.
   `Pgn652800xff000XffffManufacturerProprietarySingleFrameNonAddressed`.
 
 ### Internal
+- Dead generator code removed: `derive_struct_name_from_counter` and its test,
+  `set_lookup_bit_map` with the unused `lookup_bit_map` parameters it fed,
+  `_FORBIDEN_PGN`, and a commented-out copy of `map_type`. The generated code is
+  unchanged. The `reason` of eleven `unsupported` entries of
+  `pgn_manifest.full.json` was wrong: they compile alone (127233 since the
+  multi-line fix) and collide on the name of a repeating-group struct, e.g.
+  `WpIdInfo` for 130067, 130068 and 130074.
+- CI runs `cargo test --features full-pgns` and checks the build with a minimal
+  custom manifest (60928 only). Neither was built before.
 - `tests/replay_real_capture.rs` requires zero decode failures. The exception
   it kept for 130850 has no reason left.
 - `tests/test_min_length.rs` pins the three cases of 129794: 76 bytes read the

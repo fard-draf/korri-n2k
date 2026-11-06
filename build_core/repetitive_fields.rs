@@ -116,33 +116,6 @@ impl RepeatingFieldSetInfo {
     }
 }
 
-#[cfg(test)]
-/// Derive the struct name from the counter field name.
-///
-/// **Examples**:
-/// - "numberOfSatellites" → "SatelliteInfo"
-/// - "referenceStations" → "ReferenceStationInfo"
-/// - "itemCount" → "ItemInfo"
-fn derive_struct_name_from_counter(counter_field_name: &str) -> String {
-    // Strip common prefixes
-    let name = counter_field_name
-        .trim_start_matches("numberOf")
-        .trim_start_matches("number_of")
-        .trim_start_matches("count");
-
-    // Convert to PascalCase and append "Info"
-    let base_name = to_pascal_case(name, PascalCaseMode::Soft);
-
-    // Remove trailing "s" (plural) when present
-    let singular = if base_name.ends_with('s') && base_name.len() > 1 {
-        &base_name[..base_name.len() - 1]
-    } else {
-        &base_name
-    };
-
-    format!("{}Info", singular)
-}
-
 /// Convert the struct name into a plural snake_case array field name.
 ///
 /// **Examples**:
@@ -646,19 +619,6 @@ pub(crate) fn generate_repetitive_field_access(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_derive_struct_name() {
-        assert_eq!(
-            derive_struct_name_from_counter("numberOfSatellites"),
-            "SatelliteInfo"
-        );
-        assert_eq!(
-            derive_struct_name_from_counter("referenceStations"),
-            "ReferenceStationInfo"
-        );
-        assert_eq!(derive_struct_name_from_counter("itemCount"), "ItemInfo");
-    }
 
     #[test]
     fn test_pluralize_field_name() {

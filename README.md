@@ -94,11 +94,17 @@ Only the PGNs listed in a manifest are compiled in:
 | Need | Configuration |
 |---|---|
 | Common PGNs (position, heading, AIS, depth, wind) | default |
-| Custom or minimal set (`{"pgns": [{"id": 128267, "name": "..."}]}`) | `KORRI_N2K_MANIFEST_PATH=/abs/path/manifest.json` |
+| Custom or minimal set (`{"pgns": [{"id": 60928, "name": "..."}, {"id": 128267, "name": "..."}]}`) | `KORRI_N2K_MANIFEST_PATH=/abs/path/manifest.json` |
 | Every supported PGN | `features = ["full-pgns"]` |
 
 `KORRI_N2K_MANIFEST_PATH` wins over `full-pgns`. If the file does not exist, the
-build falls back to the default manifest and prints a warning.
+build fails and names the path. An empty `KORRI_N2K_MANIFEST_PATH` fails the same
+way: unset the variable to get the default manifest.
+
+A manifest must list PGN 60928 (ISO Address Claim), which the address
+management code needs. Every listed PGN must also be generated: an id unknown
+to CANboat, or one the generator cannot handle, fails the build instead of
+being left out.
 
 ## Passive monitoring
 
