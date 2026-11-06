@@ -194,6 +194,7 @@ fn decode_encode_decode_is_a_fixed_point_for_every_supported_pgn() {
     idempotent::<Pgn126986>("Pgn126986", &mut failures);
     idempotent::<Pgn126987>("Pgn126987", &mut failures);
     idempotent::<Pgn126988>("Pgn126988", &mut failures);
+    idempotent::<Pgn127233>("Pgn127233", &mut failures);
     idempotent::<Pgn127252>("Pgn127252", &mut failures);
     idempotent::<Pgn127258>("Pgn127258", &mut failures);
     idempotent::<Pgn127490>("Pgn127490", &mut failures);

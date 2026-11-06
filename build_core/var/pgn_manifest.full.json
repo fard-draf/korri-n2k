@@ -458,6 +458,10 @@
       "name": "Configuration Information"
     },
     {
+      "id": 127233,
+      "name": "Man Overboard Notification"
+    },
+    {
       "id": 127237,
       "name": "Heading/Track control"
     },
@@ -1283,11 +1287,6 @@
       "id": 126208,
       "name": "0x1ED00 - 0x1EE00: Standardized fast-packet addressed (+7 variants)",
       "reason": "generator refuses: [MESSAGE]:Unvalid bitlength for [PGN]:value, [COMMENT]:build.rs / map_type"
-    },
-    {
-      "id": 127233,
-      "name": "Man Overboard Notification",
-      "reason": "compiles since the multi-line `Explanation` fix; not promoted to `pgns` yet"
     },
     {
       "id": 127504,

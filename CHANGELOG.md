@@ -62,6 +62,8 @@ instead of rejected.
   - `protocol::lookups::lookup_name` and `lookup_name_indirect`, returning the
     original CANboat labels for the lookups referenced by the active manifest.
   - Runnable example `monitor` (`cargo run --example monitor --features std`).
+- PGN 127233, Man Overboard Notification, under `full-pgns`: `Pgn127233`. It was
+  listed as unsupported only because of its multi-line explanation.
 
 ### Changed
 - **BREAKING**: `FieldDescriptor` gains `unknown_value: Option<i64>`,
