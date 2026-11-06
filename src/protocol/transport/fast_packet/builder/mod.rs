@@ -113,11 +113,9 @@ impl<'a> Iterator for FrameIterator<'a> {
 
             self.bytes_sent += bytes_to_copy;
 
-            CanFrame {
-                id,
-                data,
-                len: 2 + bytes_to_copy,
-            }
+            // Every Fast Packet frame goes out at DLC 8, unused bytes 0xFF, as
+            // other senders do: a receiver may drop a shorter one.
+            CanFrame { id, data, len: 8 }
         } else {
             let mut data = [0xFF; 8];
             data[0] = header;
@@ -130,11 +128,7 @@ impl<'a> Iterator for FrameIterator<'a> {
 
             self.bytes_sent += bytes_to_copy;
 
-            CanFrame {
-                id,
-                data,
-                len: 1 + bytes_to_copy,
-            }
+            CanFrame { id, data, len: 8 }
         };
 
         self.frame_index = self.frame_index.wrapping_add(1);

@@ -72,6 +72,11 @@ instead of rejected.
   223-byte buffer: the assembler is 1064 bytes at 4 and 2088 at 8.
 
 ### Changed
+- Every Fast Packet frame `FastPacketBuilder` emits now has DLC 8, its unused
+  bytes 0xFF. The last frame, and the single frame of a short Fast Packet PGN,
+  used to carry only the bytes in use (DLC 7 for the last frame of a 26-byte
+  127489). Other senders observed on a bus pad to 8, and a receiver may drop
+  a shorter frame. Single-frame PGNs outside Fast Packet keep their length.
 - **BREAKING**: `FieldDescriptor` gains `unknown_value: Option<i64>`,
   `out_of_range_value: Option<i64>` and `reserved_value: Option<i64>`. A
   descriptor built by hand must set them (`None` disables sentinel matching).

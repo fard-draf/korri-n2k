@@ -37,7 +37,9 @@ fn test_builder_two_frames() {
     let frame1 = iter.next().unwrap().unwrap();
     assert_eq!(frame1.data[0], 1); // seq_id
     assert_eq!(&frame1.data[1..5], &[7, 8, 9, 10]);
-    assert_eq!(frame1.len, 5);
+    // Last frame: full DLC, unused bytes 0xFF.
+    assert_eq!(frame1.len, 8);
+    assert_eq!(&frame1.data[5..], &[0xFF; 3]);
 
     assert!(iter.next().is_none());
 }
@@ -116,6 +118,8 @@ fn test_builder_short_fast_packet_pgn_keeps_header() {
     assert_eq!(frame.data[0], 0); // sequence 0, frame 0
     assert_eq!(frame.data[1], 3); // total length
     assert_eq!(&frame.data[2..5], &payload);
+    assert_eq!(frame.len, 8);
+    assert_eq!(&frame.data[5..], &[0xFF; 3]);
     assert!(iter.next().is_none());
 }
 
@@ -134,6 +138,8 @@ fn test_builder_seven_byte_fast_packet_pgn_takes_two_frames() {
     let frame1 = iter.next().unwrap().unwrap();
     assert_eq!(frame1.data[0], 1); // sequence 0, frame 1
     assert_eq!(frame1.data[1], 7);
+    assert_eq!(frame1.len, 8);
+    assert_eq!(&frame1.data[2..], &[0xFF; 6]);
 
     assert!(iter.next().is_none());
 }
