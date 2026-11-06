@@ -250,6 +250,11 @@ instead of rejected.
   and a zero the length does not count: it is now written and consumed, and a
   sender that omits it is still read. Among the generated PGNs only 126720
   (Fusion Set Zone Name, Set Device Name) and 130847 use it, all `full-pgns`.
+- The generated repeating-group accessors (`repetitive_field`,
+  `repetitive_field_mut`) trusted the counter field, which is public and can be
+  set to 255 through `field_mut`, so reading or writing index 32 of
+  `Pgn129029.reference_station_types` panicked instead of returning `None`.
+  They now stop at the array's capacity as well as at the counter.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string

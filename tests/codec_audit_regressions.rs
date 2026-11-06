@@ -604,3 +604,64 @@ fn aud_006_wide_field_sentinel_survives_a_round_trip() {
     assert_eq!(&buffer[7..15], &latitude);
     assert!(written >= 15);
 }
+
+// ---------------------------------------------------------------------------
+// AUD-004 — the repeating accessors never index past the array.
+// ---------------------------------------------------------------------------
+
+/// `field_mut` on a counter stores the raw value, 255 included (the "not
+/// available" sentinel). 129029's group holds 32 stations.
+#[test]
+fn aud_004_counter_past_the_capacity_does_not_arm_out_of_range_access() {
+    let mut pgn = Pgn129029::new();
+    assert_eq!(
+        pgn.field_mut("ReferenceStations", PgnValue::U8(255)),
+        Some(())
+    );
+    assert_eq!(pgn.repetitive_count("reference_station_types"), Some(255));
+    assert!(pgn
+        .repetitive_field("reference_station_types", 31, "ReferenceStationId")
+        .is_some());
+    assert_eq!(
+        pgn.repetitive_field_mut(
+            "reference_station_types",
+            31,
+            "ReferenceStationId",
+            PgnValue::U16(7)
+        ),
+        Some(())
+    );
+    for index in [32, 254, usize::MAX] {
+        assert_eq!(
+            pgn.repetitive_field("reference_station_types", index, "ReferenceStationId"),
+            None,
+            "read {index}"
+        );
+        assert_eq!(
+            pgn.repetitive_field_mut(
+                "reference_station_types",
+                index,
+                "ReferenceStationId",
+                PgnValue::U16(1)
+            ),
+            None,
+            "write {index}"
+        );
+    }
+}
+
+#[test]
+fn aud_004_indices_past_the_counter_stay_refused() {
+    let mut pgn = Pgn129029::new();
+    assert_eq!(
+        pgn.set_repetitive_count("reference_station_types", 2),
+        Some(())
+    );
+    assert!(pgn
+        .repetitive_field("reference_station_types", 1, "ReferenceStationId")
+        .is_some());
+    assert_eq!(
+        pgn.repetitive_field("reference_station_types", 2, "ReferenceStationId"),
+        None
+    );
+}

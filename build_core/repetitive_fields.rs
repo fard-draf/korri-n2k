@@ -355,7 +355,7 @@ pub(crate) fn generate_repetitive_fields(
 /// fn repetitive_field(&self, array_id: &'static str, index: usize, field_id: &'static str) -> Option<PgnValue> {
 ///     match array_id {
 ///         "reference_station_types" => {
-///             if index >= self.reference_station_types_count {
+///             if index >= self.reference_station_types_count.min(32) {
 ///                 return None;
 ///             }
 ///             match field_id {
@@ -400,11 +400,12 @@ pub(crate) fn generate_repetitive_field_access(
     writeln!(buffer, "\t\tmatch array_id {{")?;
     writeln!(buffer, "\t\t\t\"{}\" => {{", info.array_field_name)?;
 
-    // Bounds check
+    // Bounds check: the counter is a public field, so it may exceed the array; the
+    // capacity is the limit that keeps the indexing below in bounds.
     writeln!(
         buffer,
-        "\t\t\t\tif index >= self.{} {{",
-        info.count_field_name
+        "\t\t\t\tif index >= self.{}.min({}) {{",
+        info.count_field_name, info.max_repetitions
     )?;
     writeln!(buffer, "\t\t\t\t\treturn None;")?;
     writeln!(buffer, "\t\t\t\t}}")?;
@@ -484,11 +485,12 @@ pub(crate) fn generate_repetitive_field_access(
     writeln!(buffer, "\t\tmatch array_id {{")?;
     writeln!(buffer, "\t\t\t\"{}\" => {{", info.array_field_name)?;
 
-    // Bounds check
+    // Bounds check: the counter is a public field, so it may exceed the array; the
+    // capacity is the limit that keeps the indexing below in bounds.
     writeln!(
         buffer,
-        "\t\t\t\tif index >= self.{} {{",
-        info.count_field_name
+        "\t\t\t\tif index >= self.{}.min({}) {{",
+        info.count_field_name, info.max_repetitions
     )?;
     writeln!(buffer, "\t\t\t\t\treturn None;")?;
     writeln!(buffer, "\t\t\t\t}}")?;
