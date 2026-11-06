@@ -152,6 +152,14 @@ pub enum DeserializationError {
     #[error("Invalid field bit length for {field_name}")]
     InvalidFieldBits { field_name: &'static str },
 
+    /// The payload carries more repetitions than the generated array can hold.
+    #[error("{count} repetitions of {array_id} exceed the supported maximum of {max}")]
+    RepetitionsExceedCapacity {
+        array_id: &'static str,
+        count: usize,
+        max: usize,
+    },
+
     /// Error bubbled up from the generic codec engine.
     #[error("Codec Error: {source}")]
     CodecError { source: CodecError },

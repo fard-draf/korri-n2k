@@ -62,7 +62,9 @@ fn group_starting_at(
         .find(|(_, rfs)| rfs.start_field_index == field_idx)
 }
 
-/// Computes the clamped repetition count for `rfs` from its raw counter reading.
+/// Computes the repetition count for `rfs` from its raw counter reading, limited to
+/// what the payload can hold. More repetitions than the generated array holds
+/// (`max_repetitions`, 32 at most) is an error: dropping them would be a silent loss.
 fn repeating_group_count(
     descriptor: &'static PgnDescriptor,
     rfs: &'static RepeatingFieldSet,
@@ -96,13 +98,21 @@ fn repeating_group_count(
         .map(|f| f.bits_length.unwrap_or(0) as usize)
         .sum();
     let fits = bits_remaining.checked_div(group_bits).unwrap_or(0);
-    Ok(count.min(rfs.max_repetitions).min(fits))
+    let count = count.min(fits);
+    if count > rfs.max_repetitions {
+        return Err(DeserializationError::RepetitionsExceedCapacity {
+            array_id: rfs.array_id,
+            count,
+            max: rfs.max_repetitions,
+        });
+    }
+    Ok(count)
 }
 
 /// Visits every non-reserved field of `payload` according to `desc`, in wire order.
 ///
 /// `Reserved` and `Spare` fields are skipped. Repeating groups follow the same
-/// counter sentinel (`all-ones` = 0) and clamping rules as [`deserialize_into`],
+/// counter sentinel (`all-ones` = 0) and limits as [`deserialize_into`],
 /// reporting `repetition = Some((array_id, index))`. If an unsupported field kind
 /// or truncated tail is encountered mid-message, the error is returned after any
 /// earlier fields have already been passed to `f`.

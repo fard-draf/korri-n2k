@@ -191,6 +191,9 @@ pub struct RepeatingFieldSet {
     /// - Static analysis performed by the code generator
     ///
     /// **Usage:** determines the array size in the generated Rust structure.
+    ///
+    /// Capped at 32 by the generator. A payload announcing more repetitions
+    /// is rejected (`DeserializationError::RepetitionsExceedCapacity`), never truncated.
     pub max_repetitions: usize,
 }
 

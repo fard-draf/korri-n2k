@@ -110,3 +110,52 @@ fn aud_002_visitor_reports_group_fields_before_the_tail_field() {
         ]
     );
 }
+
+// ---------------------------------------------------------------------------
+// AUD-003 — repetitions past the generated capacity.
+// ---------------------------------------------------------------------------
+
+/// 130944 Airmar POST with `pairs` TestId/TestResult pairs (pair i = `i`, `100 + i`).
+#[cfg(feature = "full-pgns")]
+fn airmar_post(pairs: u8) -> Vec<u8> {
+    let mut payload = vec![0x87, 0x98, 0xfe, pairs];
+    for i in 0..pairs {
+        payload.extend([i, 100 + i]);
+    }
+    payload
+}
+
+#[cfg(feature = "full-pgns")]
+#[test]
+fn aud_003_more_repetitions_than_the_capacity_is_an_error() {
+    let payload = airmar_post(33);
+    assert!(Pgn130944::from_payload(&payload).is_err());
+    let visited = for_each_field(
+        descriptor_for(130944, &payload).expect("130944 descriptor"),
+        &payload,
+        |_, _| {},
+    );
+    assert!(visited.is_err());
+}
+
+#[cfg(feature = "full-pgns")]
+#[test]
+fn aud_003_the_capacity_itself_is_kept_whole() {
+    let payload = airmar_post(32);
+    let decoded = Pgn130944::from_payload(&payload).expect("32 pairs fit");
+    let mut buffer = [0u8; 128];
+    let written = decoded.to_payload(&mut buffer).expect("encode 32 pairs");
+    assert_eq!(&buffer[..written], &payload[..]);
+    let mut last = None;
+    for_each_field(
+        descriptor_for(130944, &payload).expect("130944 descriptor"),
+        &payload,
+        |field, reading| {
+            if field.id == "TestResult" {
+                last = Some(reading.value);
+            }
+        },
+    )
+    .expect("visit 32 pairs");
+    assert_eq!(last, Some(PgnValue::U8(131)));
+}

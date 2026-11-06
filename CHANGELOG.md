@@ -80,6 +80,13 @@ instead of rejected.
 - **BREAKING**: `FieldDescriptor` gains `unknown_value: Option<i64>`,
   `out_of_range_value: Option<i64>` and `reserved_value: Option<i64>`. A
   descriptor built by hand must set them (`None` disables sentinel matching).
+- **BREAKING**: a payload announcing more repetitions than the generated array
+  holds is now rejected with the new
+  `DeserializationError::RepetitionsExceedCapacity { array_id, count, max }`,
+  by decoding and by `for_each_field`. It used to decode successfully with the
+  surplus dropped: 33 `TestId`/`TestResult` pairs of 130944 came back as 32,
+  and re-encoding wrote a counter of 32. The generator still caps an array at
+  32 elements (`RepeatingFieldSet::max_repetitions`).
 - **BREAKING**: `FastPacketAssembler::process_frame` now takes `now_ms: u64`
   instead of `u32`, matching `Clock::now_ms` and `AddressClaimEngine::poll`.
 - **BREAKING**: `canboat.json` is CANboat v9.1.0. Every generated type follows
