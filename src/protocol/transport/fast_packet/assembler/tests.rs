@@ -640,3 +640,80 @@ fn test_only_impossible_sizes_are_rejected() {
     assert_eq!(assembler.rejected_frames(), 3);
     assert_eq!(assembler.lost_fragments(), 0);
 }
+
+//==================================================================================Session restart
+
+/// 20-byte message `first_byte, first_byte + 1, ...` as the three frames of `sequence_id`.
+fn frames_of_20_bytes(sequence_id: u8, first_byte: u8) -> [[u8; 8]; 3] {
+    let b = |i: u8| first_byte + i;
+    let header = sequence_id << 5;
+    [
+        [header, 20, b(0), b(1), b(2), b(3), b(4), b(5)],
+        [header | 1, b(6), b(7), b(8), b(9), b(10), b(11), b(12)],
+        [header | 2, b(13), b(14), b(15), b(16), b(17), b(18), b(19)],
+    ]
+}
+
+fn completed_20_bytes(first_byte: u8) -> ProcessResult {
+    let mut payload = [0; MAX_FAST_PACKET_PAYLOAD];
+    for (i, byte) in payload[..20].iter_mut().enumerate() {
+        *byte = first_byte + i as u8;
+    }
+    ProcessResult::MessageComplete(CompletedMessage { payload, len: 20 })
+}
+
+#[test]
+/// A sender that restarts a message (same source, PGN and sequence) replaces its
+/// stale session instead of opening a second slot the continuations would miss.
+fn restarted_first_frame_replaces_stale_session() {
+    let mut assembler = FastPacketAssembler::new();
+    let frames = frames_of_20_bytes(3, 1);
+
+    assert_eq!(
+        assembler.process_frame(0, 129029, 10, &frames[0]),
+        ProcessResult::FragmentConsumed
+    );
+    assert_eq!(
+        assembler.process_frame(10, 129029, 10, &frames[1]),
+        ProcessResult::FragmentConsumed
+    );
+    // The sender starts over.
+    assert_eq!(
+        assembler.process_frame(20, 129029, 10, &frames[0]),
+        ProcessResult::FragmentConsumed
+    );
+    assert_eq!(
+        assembler.process_frame(30, 129029, 10, &frames[1]),
+        ProcessResult::FragmentConsumed
+    );
+    assert_eq!(
+        assembler.process_frame(40, 129029, 10, &frames[2]),
+        completed_20_bytes(1)
+    );
+    assert_eq!(assembler.lost_fragments(), 0);
+    assert_eq!(assembler.expired_sessions(), 0);
+}
+
+#[test]
+/// Two messages of one PGN from one source, told apart by sequence ID (130822
+/// carries both a 223-byte Bulk Report and a 7-byte Object Ping), both complete.
+fn interleaved_messages_of_one_pgn_from_one_source_both_complete() {
+    let mut assembler = FastPacketAssembler::with_pgns(&[130822]);
+    let a = frames_of_20_bytes(1, 1);
+    let b = frames_of_20_bytes(2, 101);
+
+    for frame in [&a[0], &b[0], &a[1], &b[1]] {
+        assert_eq!(
+            assembler.process_frame(0, 130822, 10, frame),
+            ProcessResult::FragmentConsumed
+        );
+    }
+    assert_eq!(
+        assembler.process_frame(0, 130822, 10, &a[2]),
+        completed_20_bytes(1)
+    );
+    assert_eq!(
+        assembler.process_frame(0, 130822, 10, &b[2]),
+        completed_20_bytes(101)
+    );
+}

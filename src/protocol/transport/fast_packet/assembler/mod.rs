@@ -4,7 +4,8 @@ use super::{FAST_PACKET_PGNS, MAX_FAST_PACKET_PAYLOAD};
 
 //==================================================================================Constants
 
-/// Maximum number of Fast Packet sessions handled in parallel (distinct sources).
+/// Maximum number of Fast Packet sessions handled in parallel, one per message in
+/// flight (see `FastPacketAssembler` for the key).
 const MAX_CONCURRENT_SESSIONS: usize = 4;
 
 /// Maximum time without addressed message for a fast packet session.
@@ -101,6 +102,15 @@ impl FastPacketSession {
 }
 
 /// Main assembler: owns a fixed pool of reusable sessions.
+///
+/// A session is keyed by `(source address, PGN, sequence ID)`, so a sender can
+/// interleave messages of one PGN. A first frame with the key of a session
+/// already open restarts it.
+///
+/// Limits: the messages a source aborts, each with a different sequence ID, hold
+/// one slot apiece until `SESSION_TIMEOUT_MS` has passed, and a full pool refuses
+/// the next one. The destination is not part of the key, so addressed PGNs
+/// (126208, 126464, 126720) sent by one source to two devices at once share it.
 #[derive(Debug, Copy, Clone)]
 pub struct FastPacketAssembler {
     sessions: [FastPacketSession; MAX_CONCURRENT_SESSIONS],
@@ -232,10 +242,22 @@ impl FastPacketAssembler {
                 });
             }
 
+            // A first frame with the key of a session already open restarts that
+            // session: the sender started the message over, or sent it twice.
             let session_index = self
                 .sessions
                 .iter()
-                .position(|s| s.source_address == source_address && s.is_free(now_ms))
+                .position(|s| {
+                    s.state == SessionState::InProgress
+                        && s.source_address == source_address
+                        && s.pgn == pgn
+                        && s.sequence_id == sequence_id
+                })
+                .or_else(|| {
+                    self.sessions
+                        .iter()
+                        .position(|s| s.source_address == source_address && s.is_free(now_ms))
+                })
                 .or_else(|| self.sessions.iter().position(|s| s.is_free(now_ms)));
 
             if let Some(index) = session_index {

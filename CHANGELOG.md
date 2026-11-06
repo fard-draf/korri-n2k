@@ -184,6 +184,13 @@ instead of rejected.
   and field `name` strings are escaped. The generated code of the default,
   `full-pgns` and `{60928, 129033}` builds differs only by the two blank lines
   that followed the doc of 65332.
+- A Fast Packet first frame repeated by its sender (same source, PGN and
+  sequence ID) opened a second session slot instead of restarting the first.
+  The continuations then matched the stale slot, were dropped as out of
+  sequence, and the message was lost. The first frame now restarts the session.
+  Messages of one PGN from one source with different sequence IDs still get
+  one slot each. The destination is not part of the key, and messages a source
+  aborts under different sequence IDs each hold a slot for 500 ms.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
