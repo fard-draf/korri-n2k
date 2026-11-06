@@ -280,15 +280,18 @@ impl PgnBytes {
     }
 
     /// Immutable view over the populated bytes.
+    ///
+    /// `len` is a public field: a value past the 230-byte buffer is clamped to it
+    /// rather than indexed. The codec refuses such a value when writing.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {
-        &self.data[..self.len]
+        &self.data[..self.len.min(MAX_PGN_BYTES)]
     }
 
-    /// Mutable view over the populated bytes.
+    /// Mutable view over the populated bytes (clamped like [`Self::as_slice`]).
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        &mut self.data[..self.len]
+        &mut self.data[..self.len.min(MAX_PGN_BYTES)]
     }
 }
 

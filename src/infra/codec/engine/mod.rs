@@ -835,7 +835,7 @@ fn write_field(
         FieldKind::StringFix => {
             if let PgnValue::Bytes(val) = value {
                 writer
-                    .write_slice(&val.data[..val.len])
+                    .write_slice(pgn_bytes_slice(val)?)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 return Err(SerializationError::CodecError {
@@ -848,15 +848,13 @@ fn write_field(
         }
         FieldKind::StringLz => {
             if let PgnValue::Bytes(val) = value {
-                if val.len > u8::MAX as usize {
-                    return Err(SerializationError::InvalidData);
-                }
+                let text = pgn_bytes_slice(val)?;
                 writer
-                    .write_u64(val.len as u64, 8)
+                    .write_u64(text.len() as u64, 8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                if val.len > 0 {
+                if !text.is_empty() {
                     writer
-                        .write_slice(&val.data[..val.len])
+                        .write_slice(text)
                         .map_err(|e| SerializationError::BitWriteError { err: e })?;
                 }
             } else {
@@ -873,20 +871,22 @@ fn write_field(
                 // `val` holds the encoding byte followed by the text; the declared
                 // length also counts the length byte itself. An empty field
                 // declares zero, so that reading it back consumes one byte too.
-                let declared = if val.len == 0 { 0 } else { val.len + 1 };
-                if declared > u8::MAX as usize {
-                    return Err(SerializationError::InvalidData);
-                }
+                let content = pgn_bytes_slice(val)?;
+                let declared = if content.is_empty() {
+                    0
+                } else {
+                    content.len() + 1
+                };
                 writer
                     .write_u64(declared as u64, 8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                if val.len > 0 {
+                if let Some((encoding, text)) = content.split_first() {
                     writer
-                        .write_u64(val.data[0] as u64, 8)
+                        .write_u64(*encoding as u64, 8)
                         .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                    if val.len > 1 {
+                    if !text.is_empty() {
                         writer
-                            .write_slice(&val.data[1..val.len])
+                            .write_slice(text)
                             .map_err(|e| SerializationError::BitWriteError { err: e })?;
                     }
                 }
@@ -922,7 +922,7 @@ fn write_field(
                     return Err(SerializationError::InvalidData);
                 }
                 writer
-                    .write_slice(&val.data[..expected_len])
+                    .write_slice(pgn_bytes_slice(val)?)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 return Err(SerializationError::CodecError {
@@ -936,6 +936,14 @@ fn write_field(
         _ => return Err(SerializationError::UnsupportedFieldKind),
     }
     Ok(())
+}
+
+/// The `len` bytes of `val`. `PgnBytes::len` is public, so it can exceed the
+/// buffer: that is invalid data to refuse, never an index to trust.
+fn pgn_bytes_slice(val: &PgnBytes) -> Result<&[u8], SerializationError> {
+    val.data
+        .get(..val.len)
+        .ok_or(SerializationError::InvalidData)
 }
 
 /// Undoes a field's resolution, rounding half away from zero.

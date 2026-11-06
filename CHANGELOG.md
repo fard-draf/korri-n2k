@@ -223,6 +223,12 @@ instead of rejected.
   `FLOAT` (the `Salinity` of 130321) and a variable string without text, an
   empty LAU (`02 01`, or the older `00`) or an empty LZ. Both are now
   `NotAvailable`; the value and its bytes are still handed over unchanged.
+- `PgnBytes::len` is public, and a value past the 230-byte buffer made
+  encoding panic, or overflow in a debug build for `usize::MAX`, instead of
+  returning an error: 231 bytes in a LAU string of 126998 or a LZ string of
+  126720. Encoding a string field now fails with `SerializationError::InvalidData`,
+  and `PgnBytes::as_slice` and `as_mut_slice` clamp to the buffer. The
+  generated types and the receive path never produce such a length.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string

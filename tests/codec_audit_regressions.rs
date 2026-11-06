@@ -6,6 +6,7 @@
 #![allow(unused_imports)]
 
 use korri_n2k::core::{Availability, PgnBytes, PgnValue};
+use korri_n2k::error::SerializationError;
 use korri_n2k::infra::codec::engine::for_each_field;
 use korri_n2k::infra::codec::traits::{FieldAccess, PgnData};
 use korri_n2k::protocol::messages::*;
@@ -330,4 +331,71 @@ fn aud_009_nan_float_is_not_available() {
     let salinity = seen.iter().find(|(id, _, _)| *id == "Salinity").unwrap();
     assert_eq!(salinity.1, Availability::Available);
     assert_eq!(salinity.2, PgnValue::F32(35.0));
+}
+
+// ---------------------------------------------------------------------------
+// AUD-001 — a `PgnBytes::len` past its buffer is refused, never indexed.
+// ---------------------------------------------------------------------------
+
+const OVERSIZED_LENGTHS: [usize; 3] = [231, 255, usize::MAX];
+
+#[test]
+fn aud_001_lau_length_past_capacity_is_invalid_data() {
+    for len in OVERSIZED_LENGTHS {
+        let mut pgn = Pgn126998::new();
+        pgn.installation_description1.len = len;
+        let mut buffer = [0u8; 1024];
+        assert!(
+            matches!(
+                pgn.to_payload(&mut buffer),
+                Err(SerializationError::InvalidData)
+            ),
+            "len {len}"
+        );
+    }
+}
+
+#[test]
+fn aud_001_lau_at_capacity_is_written() {
+    let mut pgn = Pgn126998::new();
+    pgn.installation_description1.len = 230;
+    pgn.installation_description1.data[0] = 1;
+    pgn.installation_description1.data[1..230].fill(b'x');
+    let mut buffer = [0u8; 1024];
+    let written = pgn.to_payload(&mut buffer).expect("230 bytes fit");
+    // length byte (231 = 230 + 1), encoding, 229 characters, then two empty strings.
+    assert_eq!(buffer[0], 231);
+    assert_eq!(buffer[1], 1);
+    assert!(buffer[2..231].iter().all(|&b| b == b'x'));
+    assert_eq!(written, 231 + 2);
+}
+
+#[cfg(feature = "full-pgns")]
+#[test]
+fn aud_001_lz_length_past_capacity_is_invalid_data() {
+    for len in OVERSIZED_LENGTHS {
+        let mut zone_name = Pgn126720FusionSetZoneName::new();
+        zone_name.name.len = len;
+        let pgn = Pgn126720::FusionSetZoneName(zone_name);
+        let mut buffer = [0u8; 1024];
+        assert!(
+            matches!(
+                pgn.to_payload(&mut buffer),
+                Err(SerializationError::InvalidData)
+            ),
+            "len {len}"
+        );
+    }
+}
+
+#[test]
+fn aud_001_pgn_bytes_views_stay_inside_the_buffer() {
+    for len in OVERSIZED_LENGTHS {
+        let mut bytes = PgnBytes {
+            len,
+            ..PgnBytes::default()
+        };
+        assert_eq!(bytes.as_slice().len(), 230);
+        assert_eq!(bytes.as_mut_slice().len(), 230);
+    }
 }
