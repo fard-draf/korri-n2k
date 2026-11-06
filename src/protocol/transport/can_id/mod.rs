@@ -55,6 +55,11 @@ impl CanId {
     }
 }
 //==================================================================================CAN_ID_BUILDER
+/// Largest PGN: 18 bits (reserved, data page, PF, PS).
+const MAX_PGN: u32 = 0x3_FFFF;
+/// Largest priority: 3 bits.
+const MAX_PRIORITY: u8 = 7;
+
 #[derive(Debug)]
 /// Fluent builder that enforces the PDU1/PDU2 rules.
 pub struct CanIdBuilder {
@@ -104,8 +109,17 @@ impl CanIdBuilder {
     /// - PF ≥ 240 → broadcast (PDU2): `destination` must not be provided
     /// - R/DP/PF/PS bits are copied from the provided PGN
     ///
+    /// A PGN above `0x3FFFF` or a priority above 7 (possible by assigning the public
+    /// fields directly) is refused with `InvalidData`, not truncated.
+    ///
     /// Returns a dedicated error when the configuration violates these rules.
     pub fn build(self) -> Result<CanId, CanIdBuildError> {
+        // `priority` and `pgn` are public fields, so the setters' masking can be
+        // bypassed. Bits past the PGN's 18 or the priority's 3 would otherwise be
+        // dropped or spill into the identifier's reserved top bits.
+        if self.pgn > MAX_PGN || self.priority > MAX_PRIORITY {
+            return Err(CanIdBuildError::InvalidData);
+        }
         let r_from_pgn = (self.pgn >> 17) & 0x01;
         let dp_from_pgn = (self.pgn >> 16) & 0x01;
         let pf_from_pgn = ((self.pgn >> 8) & 0xFF) as u8;

@@ -255,6 +255,11 @@ instead of rejected.
   set to 255 through `field_mut`, so reading or writing index 32 of
   `Pgn129029.reference_station_types` panicked instead of returning `None`.
   They now stop at the array's capacity as well as at the counter.
+- `CanIdBuilder::build` accepted a PGN above `0x3FFFF` and a priority above 7
+  set through the public fields, and returned an identifier for another PGN
+  (`0x40000 | 129029` came out as 129029) or with the priority overflowing
+  into the top bits. It now returns `CanIdBuildError::InvalidData`. The
+  `with_priority` and `priority` setters still mask to 3 bits.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string
