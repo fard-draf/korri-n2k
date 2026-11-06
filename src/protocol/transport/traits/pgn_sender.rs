@@ -93,7 +93,10 @@ where
         let len = pgn_data
             .to_payload(&mut payload_buffer)
             .map_err(|_| SendPgnError::Serialization)?;
-        let payload_slice = &payload_buffer[..len];
+        // A third-party codec may report more bytes than the buffer holds.
+        let payload_slice = payload_buffer
+            .get(..len)
+            .ok_or(SendPgnError::Serialization)?;
 
         // Step 3: prepare the Fast Packet (or single-frame) builder.
         let builder = FastPacketBuilder::new(pgn, source_address, destination, payload_slice);

@@ -260,6 +260,10 @@ instead of rejected.
   (`0x40000 | 129029` came out as 129029) or with the priority overflowing
   into the top bits. It now returns `CanIdBuildError::InvalidData`. The
   `with_priority` and `priority` setters still mask to 3 bits.
+- `PgnSender::send_pgn` sliced its 223-byte buffer with the length a codec
+  reported, so a third-party `PgnData` returning more panicked. It now returns
+  `SendPgnError::Serialization` before any frame goes out. The generated types
+  cannot do this.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string
