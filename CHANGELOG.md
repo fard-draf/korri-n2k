@@ -64,6 +64,12 @@ instead of rejected.
   - Runnable example `monitor` (`cargo run --example monitor --features std`).
 - PGN 127233, Man Overboard Notification, under `full-pgns`: `Pgn127233`. It was
   listed as unsupported only because of its multi-line explanation.
+- `FastPacketAssembler` takes the size of its session pool as a const
+  parameter, `FastPacketAssembler<const SESSIONS: usize = 4>`, built with
+  `FastPacketAssembler::<8>::with_pool(table)`. `new()`, `with_pgns()` and
+  `Default` keep the pool of 4, so existing code compiles unchanged. A full
+  pool still refuses the next message and evicts nothing. Each session holds a
+  223-byte buffer: the assembler is 1064 bytes at 4 and 2088 at 8.
 
 ### Changed
 - **BREAKING**: `FieldDescriptor` gains `unknown_value: Option<i64>`,
@@ -138,12 +144,6 @@ instead of rejected.
   file now fails the build, naming the path, instead of falling back to the
   default manifest with a warning. The variable set but empty fails too: unset
   it to get the default manifest.
-- `FastPacketAssembler` takes the size of its session pool as a const
-  parameter, `FastPacketAssembler<const SESSIONS: usize = 4>`, built with
-  `FastPacketAssembler::<8>::with_pool(table)`. `new()`, `with_pgns()` and
-  `Default` keep the pool of 4, so existing code compiles unchanged. A full
-  pool still refuses the next message and evicts nothing. Each session holds a
-  223-byte buffer: the assembler is 1064 bytes at 4 and 2088 at 8.
 
 ### Fixed
 - The generator treated CANboat's `Fallback` entries as real messages. A

@@ -210,7 +210,8 @@ impl<const SESSIONS: usize> FastPacketAssembler<SESSIONS> {
     //==================================================================================Process Functions
     /// Process a CAN frame that may belong to a Fast Packet session.
     ///
-    /// * `source_address` – logical address of the sender (session key)
+    /// * `source_address` – logical address of the sender (part of the session
+    ///   key, with the PGN and the sequence ID)
     /// * `data` – raw 8-byte payload of the received CAN frame
     ///
     /// Returns a `ProcessResult` indicating whether the frame was ignored,
