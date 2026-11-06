@@ -10,10 +10,17 @@
 //!
 //! if !assembler.handles(pgn) {
 //!     // Single frame: decode the eight bytes directly.
-//! } else if let ProcessResult::MessageComplete(msg) =
-//!     assembler.process_frame(now_ms, pgn, frame.id.source_address(), &frame.data)
-//! {
-//!     let fix = Pgn129029::from_payload(&msg.payload[..msg.len])?;
+//! } else {
+//!     // `process_frame` takes eight bytes and never sees the DLC: pad a short
+//!     // frame (a last frame often is) with 0xFF rather than stale bytes.
+//!     let mut data = [0xFF; 8];
+//!     let len = frame.len.min(8);
+//!     data[..len].copy_from_slice(&frame.data[..len]);
+//!     if let ProcessResult::MessageComplete(msg) =
+//!         assembler.process_frame(now_ms, pgn, frame.id.source_address(), &data)
+//!     {
+//!         let fix = Pgn129029::from_payload(&msg.payload[..msg.len])?;
+//!     }
 //! }
 //! ```
 //!
