@@ -209,6 +209,10 @@ instead of rejected.
   Messages of one PGN from one source with different sequence IDs still get
   one slot each. The destination is not part of the key, and messages a source
   aborts under different sequence IDs each hold a slot for 500 ms.
+- The dispatch enum of a multi-variant PGN (e.g. `Pgn130944`) did not forward
+  the four repeating-group methods of `FieldAccess`, so `repetitive_count` and
+  its siblings answered `None` on the enum while the variant held the data.
+  Every enum now delegates them, as it already did `field` and `field_mut`.
 - A field declared after a repeating group was read, written and visited
   before it, so the codec disagreed with the wire layout. 130571 (Library Data
   Group, `full-pgns`) is the only generated PGN with one: its `Artist` string

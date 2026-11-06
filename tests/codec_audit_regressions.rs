@@ -159,3 +159,29 @@ fn aud_003_the_capacity_itself_is_kept_whole() {
     .expect("visit 32 pairs");
     assert_eq!(last, Some(PgnValue::U8(131)));
 }
+// ---------------------------------------------------------------------------
+// AUD-005 — the polymorphic enum forwards the repeating-group accessors.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "full-pgns")]
+#[test]
+fn aud_005_polymorphic_enum_delegates_the_repeating_group() {
+    let payload = airmar_post(2);
+    let mut decoded = Pgn130944::from_payload(&payload).expect("valid 130944");
+    assert_eq!(decoded.repetitive_count("test_ids"), Some(2));
+    assert_eq!(
+        decoded.repetitive_field("test_ids", 1, "TestResult"),
+        Some(PgnValue::U8(101))
+    );
+    assert_eq!(
+        decoded.repetitive_field_mut("test_ids", 1, "TestResult", PgnValue::U8(7)),
+        Some(())
+    );
+    assert_eq!(
+        decoded.repetitive_field("test_ids", 1, "TestResult"),
+        Some(PgnValue::U8(7))
+    );
+    assert_eq!(decoded.set_repetitive_count("test_ids", 1), Some(()));
+    assert_eq!(decoded.repetitive_count("test_ids"), Some(1));
+    assert_eq!(decoded.repetitive_field("test_ids", 1, "TestResult"), None);
+}
