@@ -250,6 +250,8 @@ instead of rejected.
   and a zero the length does not count: it is now written and consumed, and a
   sender that omits it is still read. Among the generated PGNs only 126720
   (Fusion Set Zone Name, Set Device Name) and 130847 use it, all `full-pgns`.
+  The 130847 seen on real buses omit that terminal: they are still read, but
+  writing one back adds a byte.
 - The generated repeating-group accessors (`repetitive_field`,
   `repetitive_field_mut`) trusted the counter field, which is public and can be
   set to 255 through `field_mut`, so reading or writing index 32 of
