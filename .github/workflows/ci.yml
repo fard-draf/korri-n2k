@@ -17,32 +17,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.96.0
-      # `default = []`, so this compiles no runner at all: it is the I/O-free
-      # engine and the codec on their own, which is now a first-class API.
-      - name: Run tests (no runtime)
-        run: cargo test --verbose --no-default-features
-      - name: Run tests (tokio)
-        run: cargo test --verbose --features tokio
-      - name: Run tests (embassy)
-        run: cargo test --verbose --features embassy
-      # Not built by any other step: replay, float, lookup-width and round-trip tests
-      # need PGNs the default manifest does not carry.
-      - name: Run tests (full-pgns)
-        run: cargo test --verbose --features full-pgns
-      # The smallest manifest the build accepts (60928 is mandatory).
-      - name: Check a minimal custom manifest
-        run: |
-          printf '{"pgns":[{"id":60928,"name":"ISO Address Claim"}]}' > "$RUNNER_TEMP/minimal.json"
-          KORRI_N2K_MANIFEST_PATH="$RUNNER_TEMP/minimal.json" cargo check --lib
-      - name: Build and run the examples
-        run: |
-          cargo run --example quickstart
-          cargo run --example lookup_enum_usage
-          cargo run --example iso_name_usage
-          cargo run --example fast_packet_rx --features std
-          cargo run --example blocking_claim --features std
-          cargo run --example address_claim --features tokio
-          cargo run --example monitor --features std
+      - name: Install just
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
+        with:
+          tool: just
+      - name: Run ci-test
+        run: just ci-test
 
   check-embedded-cortex-m4:
     name: Check (no_std / cortex-m4)
@@ -53,12 +33,12 @@ jobs:
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: thumbv7em-none-eabihf
-      - name: Check compilation for stm32
-        run: cargo check --target thumbv7em-none-eabihf --verbose
-      # The bare-metal runner only exists under `embassy`, so the job above
-      # never compiles it.
-      - name: Check the embassy runner for stm32
-        run: cargo check --lib --target thumbv7em-none-eabihf --features embassy --verbose
+      - name: Install just
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
+        with:
+          tool: just
+      - name: Run ci-cortex-m4
+        run: just ci-cortex-m4
 
   check-embedded-esp32c3:
     name: Check (no_std / esp32c3 / RISC-V)
@@ -69,10 +49,12 @@ jobs:
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: riscv32imc-unknown-none-elf
-      - name: Check library compilation
-        run: cargo check --lib --target riscv32imc-unknown-none-elf --verbose
-      - name: Check the embassy runner for esp32c3
-        run: cargo check --lib --target riscv32imc-unknown-none-elf --features embassy --verbose
+      - name: Install just
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
+        with:
+          tool: just
+      - name: Run ci-esp32c3
+        run: just ci-esp32c3
 
   # check-embedded-esp32s3:
   #   name: Check (no_std / esp32s3 / Xtensa)
@@ -99,11 +81,9 @@ jobs:
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy, rustfmt
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Run clippy (Linter)
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Clippy (tokio)
-        run: cargo clippy --no-default-features --features tokio --all-targets -- -D warnings
-      - name: Clippy (embassy)
-        run: cargo clippy --no-default-features --features embassy --all-targets -- -D warnings
+      - name: Install just
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
+        with:
+          tool: just
+      - name: Run ci-lint
+        run: just ci-lint
