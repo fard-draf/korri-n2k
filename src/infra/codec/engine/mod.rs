@@ -1145,15 +1145,6 @@ fn sign_extend(value: u64, bits: u8) -> i64 {
     }
 }
 
-/// Reinterprets the bits of an `i64` as `u64` for writing.
-/// Negative `i64` values are already stored in two's complement, so the bits can be reused verbatim.
-/// Keeps the bitwise `as` cast in a single helper to simplify debugging and reviews.
-/// The `inline` annotation avoids the overhead of a function call for a trivial conversion.
-#[inline] // The function is tiny; encourage inlining.
-fn i64_to_u64_bitwise(value: i64) -> u64 {
-    value as u64
-}
-
 //==================================================================================TESTS
 
 #[cfg(test)]
