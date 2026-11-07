@@ -1394,6 +1394,39 @@ fn test_wide_fixed_string_may_stop_early_only_in_last_position() {
     })
     .expect("a wide last text may stop early");
     assert_eq!(text_len, Some(10));
+
+    // The typed path (`from_payload`) applies the same rule.
+    #[derive(Default)]
+    struct Sink {
+        count: u8,
+        text_len: Option<usize>,
+    }
+
+    impl FieldAccess for Sink {
+        fn field(&self, id: &'static str) -> Option<PgnValue> {
+            (id == "Count").then_some(PgnValue::U8(self.count))
+        }
+
+        fn field_mut(&mut self, id: &'static str, value: PgnValue) -> Option<()> {
+            match (id, value) {
+                ("Count", PgnValue::U8(count)) => self.count = count,
+                ("Text", PgnValue::Bytes(text)) => self.text_len = Some(text.len),
+                _ => {}
+            }
+            Some(())
+        }
+
+        fn set_repetitive_count(&mut self, _: &'static str, _: usize) -> Option<()> {
+            Some(())
+        }
+    }
+
+    assert!(deserialize_into(&mut Sink::default(), &short, &MIDDLE).is_err());
+    assert!(deserialize_into(&mut Sink::default(), &[0u8; 41], &MIDDLE).is_ok());
+
+    let mut sink = Sink::default();
+    deserialize_into(&mut sink, &short, &LAST).expect("a wide last text may stop early");
+    assert_eq!(sink.text_len, Some(10));
 }
 
 /// Integer kinds with no resolution (NUMBER, LOOKUP, BITLOOKUP, INDIRECT_LOOKUP,
