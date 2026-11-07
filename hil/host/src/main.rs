@@ -19,7 +19,13 @@ const TARGET: &str = "thumbv7em-none-eabihf";
 fn main() -> ExitCode {
     let env = match hil_env::Env::from_env() {
         Ok(env) => env,
-        Err(message) => return absent(&message),
+        Err(hil_env::ConfigError::MissingProbe) => {
+            return absent("KORRI_HIL_PROBE is not set (see hil/README.md)");
+        }
+        Err(hil_env::ConfigError::Invalid(message)) => {
+            eprintln!("invalid HIL configuration: {message}");
+            return ExitCode::from(1);
+        }
     };
     let requested: Vec<String> = std::env::args().skip(1).collect();
     if let Some(unknown) = requested

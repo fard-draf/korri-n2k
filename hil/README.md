@@ -40,9 +40,11 @@ just check                  # `just ci`, then `just hil`, before a PR
 ```
 
 Exit codes of `just hil`: **0** every scenario passed; **1** a scenario failed (firmware
-verdict, timeout or oracle) or the firmware did not build; **77** the bench is absent (variable
+verdict, timeout or oracle), configuration is invalid, or the firmware did not build;
+**77** the bench is absent (probe variable
 unset, probe not listed, `can0` missing, down, not ERROR-ACTIVE or not at 250 kbit/s). In the
-last case nothing was flashed and nothing was sent.
+last case nothing was flashed and nothing was sent. Invalid numbers or empty optional variables
+are rejected before preflight, even when the probe is not configured.
 
 ## Scenarios
 
