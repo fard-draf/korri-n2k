@@ -86,18 +86,12 @@ fn describe(result: &Result<(), String>) -> String {
 }
 
 fn build_firmware(target_dir: &PathBuf) -> Result<(), String> {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../firmware/Cargo.toml");
+    // Run from the firmware directory: its `.cargo/config.toml` (target, linker flags) and
+    // `rust-toolchain.toml` are found from the working directory, not from `--manifest-path`.
     let status = Command::new("cargo")
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "--bins",
-            "--manifest-path",
-        ])
-        .arg(&manifest)
-        .arg("--target-dir")
+        .args(["build", "--release", "--locked", "--bins", "--target-dir"])
         .arg(target_dir)
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../firmware"))
         .status()
         .map_err(|e| format!("cannot run cargo: {e}"))?;
     if status.success() {

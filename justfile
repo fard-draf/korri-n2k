@@ -44,6 +44,14 @@ ci-embedded: ci-cortex-m4 ci-esp32c3
 ci-cortex-m4:
     cargo check --target thumbv7em-none-eabihf --verbose
     cargo check --lib --target thumbv7em-none-eabihf --features embassy --verbose
+    just ci-hil-crates
+
+# The bench crates are not built by anything else, so they would rot unnoticed. They are
+# checked from their own directory: that is where their toolchain and target are read.
+[private]
+ci-hil-crates:
+    cd hil/firmware && cargo check --locked --release
+    cd hil/host && cargo check --locked
 
 # Job `check-embedded-esp32c3`.
 ci-esp32c3:
@@ -56,3 +64,11 @@ ci-lint:
     cargo clippy --all-targets -- -D warnings
     cargo clippy --no-default-features --features tokio --all-targets -- -D warnings
     cargo clippy --no-default-features --features embassy --all-targets -- -D warnings
+
+# The hardware bench: one STM32G431 and `can0`, see hil/README.md. Exits 77 when the bench is
+# absent. Writes frames on the real bus. Optional arguments select scenarios.
+hil *scenarios:
+    cd hil/host && cargo run --locked --quiet -- {{ scenarios }}
+
+# Before a PR: CI, then the bench.
+check: ci hil
