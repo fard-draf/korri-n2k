@@ -5,7 +5,7 @@ Features planned before 1.0, by priority within each section.
 
 ## 1. Protocol: behave like a certified node
 
-- [~] Several addresses on one node (`feat/multi_address`).
+- [x] Several addresses on one node (`feat/multi_address`).
 - [ ] Pseudo-random delay before the first claim. Nodes starting together
       currently transmit at the same time.
 - [ ] ISO Transport Protocol (60160, 60416): BAM and RTS/CTS sessions, send
@@ -38,6 +38,13 @@ Features planned before 1.0, by priority within each section.
 
 ## 4. Validation
 
+- [x] Shared local and GitHub software checks through `just ci`, including
+      offline tests for the HIL host oracle.
+- [x] Local STM32G431 hardware bench (`just hil`): Fast Packet TX and RX,
+      independent host payload/framing checks and firmware exit status.
+      Both scenarios validated with J-Link and WCH-Link. See `hil/README.md`.
+- [ ] Extend the hardware bench with malformed/reordered Fast Packet frames,
+      address conflicts and Commanded Address scenarios as their fixes land.
 - [ ] Interoperability tests on a real bus against certified devices: claim,
       arbitration, Fast Packet.
 - [ ] CANboat `analyzer` as an oracle: encode with korri-n2k, decode with
