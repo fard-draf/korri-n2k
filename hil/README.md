@@ -1,8 +1,10 @@
 # Hardware-in-the-loop bench
 
-A local bench, not run by GitHub CI: one STM32G431 board (the device under test, DUT) and the
-host's `can0`. `just hil` flashes the DUT, runs the scenarios and checks the result twice: the
-firmware's own verdict and an oracle on the frames captured on `can0`.
+A local bench, not run by GitHub CI: two STM32G431 boards, each connected to its own debug
+probe, share the host's `can0` bus. Both boards have passed the TX and RX scenarios.
+Each `just hil` invocation selects one board as the device under test (DUT), flashes it and
+checks the result twice: the firmware's own verdict and an oracle on the frames captured on
+`can0`. The two boards are tested in separate runs, not as a simultaneous transmitter/receiver pair.
 
 > **It transmits on the real bus.** The DUT claims address 90 and sends traffic, and the host
 > injects frames from address 91. Every other node on the bus sees them. Do not run it on a bus
@@ -12,7 +14,8 @@ firmware's own verdict and an oracle on the frames captured on `can0`.
 
 - `just` >= 1.44.0, `probe-rs` (0.32 tested), `ip`, `timeout`, and the toolchain of `hil/firmware/rust-toolchain.toml`
   (Rust 1.96.0 with `thumbv7em-none-eabihf`).
-- A debug probe wired to an STM32G431CB board with its CAN transceiver on `can0`'s bus.
+- Two STM32G431CB boards with their CAN transceivers on `can0`'s bus, each connected to a
+  debug probe supported by `probe-rs`. A single board and its probe suffice for an individual run.
 - `can0` brought up by you, at **250000 bit/s**, UP and ERROR-ACTIVE. The bench never changes it
   and never uses `sudo`:
 
@@ -41,6 +44,16 @@ just hil tx_fast_packet     # one scenario
 just check                  # `just ci`, then `just hil`, before a PR
 ```
 
+To test both boards, run them sequentially with their respective probe selectors from
+`probe-rs list`. Use separate output directories to preserve both sets of results:
+
+```sh
+KORRI_HIL_PROBE=<BOARD_A_PROBE_SELECTOR> KORRI_HIL_OUT=./hil-results/board-a just hil
+KORRI_HIL_PROBE=<BOARD_B_PROBE_SELECTOR> KORRI_HIL_OUT=./hil-results/board-b just hil
+```
+
+Do not run both DUTs simultaneously: the test firmware uses the same fixed address 90.
+
 Exit codes of `just hil`: **0** every scenario passed; **1** a scenario failed (firmware
 verdict, timeout or oracle), configuration is invalid, or the firmware did not build;
 **77** the bench is absent (probe variable
@@ -58,8 +71,10 @@ semihosting exit (0 pass, 1 fail).
 | `tx_fast_packet` | Sends five Engine Parameters, Dynamic (127489, 26 bytes, Fast Packet) every 100 ms. | Reassembles the frames of address 90 byte by byte, independently of the library: DLC 8, `FF` padding, frame indices, sequence counter (+1 per message), announced length, all 26 payload bytes (zero defaults except the reserved `FF` byte and engine hours 1000…1004), plus the address claim before the first emission. |
 | `rx_fast_packet` | Reassembles with the library the five messages the host injects. Exit 0 if all arrive intact and in order within 20 s. | The DUT's claim is seen, then the host injects five 127489 messages from address 91 (never claimed) once the DUT is ready. |
 
-The bus carries other nodes (addresses 80 and 81 on the author's bench): the oracle filters by
-source address. Scenarios that need two DUTs are out of scope.
+The oracle filters other traffic by source address. Before the HIL tests, the two boards ran
+continuous publishers at addresses 80 and 81; flashing the test firmware replaces those images.
+Each scenario ends after its checks, so a silent bus after both boards have finished is normal.
+The current scenarios use the host as the DUT's peer, not the other STM32.
 
 The firmware ends with a semihosting call that faults when no debugger is attached: flashed
 boards are test images, to be reflashed with their normal firmware afterwards.
