@@ -727,6 +727,29 @@ fn unsigned_24_bit_trip_volume_not_available_is_written_back_unchanged() {
     assert_eq!(out, payload);
 }
 
+/// 129541 GNSS Almanac Data: `root_of_semi_major_axis` is 24 bits unsigned at bytes
+/// 11-13 with a resolution of 2^-11. The product is exact in an `f32`, so the field
+/// stays one: no raw is lost. Bytes 24-25 close the message (the last two bits
+/// are reserved and written as 1).
+#[cfg(feature = "full-pgns")]
+#[test]
+fn unsigned_24_bit_with_a_power_of_two_resolution_stays_f32() {
+    for (root_bytes, root_raw) in [
+        ([0xFF, 0xFF, 0xFF], 0xFF_FFFF_u32),
+        ([0x56, 0x34, 0x12], 0x12_3456),
+    ] {
+        let mut payload = [0u8; 26];
+        payload[11..14].copy_from_slice(&root_bytes);
+        payload[25] = 0xC0;
+        let decoded = Pgn129541::from_payload(&payload).expect("valid 129541");
+        let root: f32 = decoded.root_of_semi_major_axis;
+        assert_eq!(root, root_raw as f32 / 2048.0);
+        let mut out = [0u8; 26];
+        assert_eq!(decoded.to_payload(&mut out).unwrap(), 26);
+        assert_eq!(out, payload);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Integers without a resolution are range-checked like the scaled ones: the
 // writer used to keep their low bits only.

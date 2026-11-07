@@ -65,10 +65,18 @@ pub enum FieldKind {
 /// `raw * resolution` is rounded to 24 significant bits, which moves it by up to
 /// `|raw| / 2^24` raw units. The raw is recovered only while that stays under half
 /// a unit, so `|raw| <= 2^23`: up to 23 bits, or 24 bits when signed. An unsigned
-/// 24-bit field reaches `0xFFFFFF` (its "not available" raw) and needs an `f64`.
-/// The engine and the generator both decide the Rust type with this function.
-pub const fn scaled_value_fits_f32(bits: u32, signed: bool) -> bool {
-    bits >= 1 && (bits < 24 || (bits == 24 && signed))
+/// 24-bit field reaches `0xFFFFFF` (its "not available" raw) and needs an `f64`,
+/// unless its resolution is a power of two: the product then only moves the
+/// exponent and stays exact.
+/// The engine and the generator both decide the Rust type with this function, from
+/// the same `f32` resolution.
+pub const fn scaled_value_fits_f32(bits: u32, signed: bool, resolution: f32) -> bool {
+    // shortcut: a power-of-two resolution is assumed in `f32` range, as every CANboat one.
+    let bits_of_resolution = resolution.to_bits();
+    let exponent = (bits_of_resolution >> 23) & 0xFF;
+    let is_power_of_two =
+        bits_of_resolution & 0x007F_FFFF == 0 && exponent != 0 && exponent != 0xFF;
+    bits >= 1 && (bits < 24 || (bits == 24 && (signed || is_power_of_two)))
 }
 
 /// Descriptor for a single PGN field.

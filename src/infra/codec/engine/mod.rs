@@ -624,7 +624,7 @@ fn scale_raw_field(
                     let bits = field_desc
                         .bits_length
                         .ok_or(DeserializationError::InvalidDataLength)?;
-                    if scaled_value_fits_f32(bits, true) {
+                    if scaled_value_fits_f32(bits, true, res) {
                         PgnValue::F32(signed_val as f32 * res)
                     } else {
                         PgnValue::F64(signed_val as f64 * res as f64)
@@ -641,7 +641,7 @@ fn scale_raw_field(
                 let bits = field_desc
                     .bits_length
                     .ok_or(DeserializationError::InvalidDataLength)?;
-                if scaled_value_fits_f32(bits, false) {
+                if scaled_value_fits_f32(bits, false, res) {
                     PgnValue::F32(raw_val as f32 * res)
                 } else {
                     PgnValue::F64(raw_val as f64 * res as f64)
@@ -662,7 +662,7 @@ fn scale_raw_field(
         FieldKind::Date | FieldKind::Mmsi => {
             let value = if let Some(res) = field_desc.resolution {
                 let scaled = raw_val as f64 * res as f64;
-                if scaled_value_fits_f32(field_desc.bits_length.unwrap(), false) {
+                if scaled_value_fits_f32(field_desc.bits_length.unwrap(), false, res) {
                     PgnValue::F32(scaled as f32)
                 } else {
                     PgnValue::F64(scaled)
@@ -691,7 +691,7 @@ fn scale_raw_field(
                     raw_val as f64
                 };
                 let scaled = raw * res as f64;
-                if scaled_value_fits_f32(field_desc.bits_length.unwrap(), signed) {
+                if scaled_value_fits_f32(field_desc.bits_length.unwrap(), signed, res) {
                     PgnValue::F32(scaled as f32)
                 } else {
                     PgnValue::F64(scaled)

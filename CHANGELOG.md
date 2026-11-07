@@ -105,19 +105,19 @@ instead of rejected.
   0x200000 in the 21-bit field of 60928 as 0. Every raw the field holds is
   still written, sentinels included; a negative value for an unsigned field was
   already refused as a `DataTypeMismatch`.
-- **BREAKING**: an unsigned 24-bit field with a resolution is now an `f64`
-  instead of an `f32`. An `f32` cannot tell the top raw values of a 24-bit
-  range apart: 130316 `Temperature` re-encoded the "not available" raw
-  `FF FF FF` as `FF FF FE`, and 191,890 of the 16.7 million raws came back one
-  unit off (all of them from `F9 FF FF` up). A gateway forwarding that PGN
-  changed the value it relayed. Fields concerned, all `full-pgns` only:
-  `Pgn130316::temperature`, `Pgn65287MaretronTripVolume::trip_volume` and
-  `Pgn129541::root_of_semi_major_axis` (this one is a power-of-two
-  resolution that an `f32` held exactly, moved by the same width rule). The
-  default manifest has no 24-bit scaled field. Signed 24-bit fields and every narrower one stay `f32`: their
-  raw is at most 2^23 and survives. `PgnValue::F64` replaces `PgnValue::F32`
-  for these fields in `FieldAccess`. Past 53 bits an `f64` has the same limit
-  (see the 64-bit latitude and longitude of 129029).
+- **BREAKING**: an unsigned 24-bit field with a resolution that is not a power
+  of two is now an `f64` instead of an `f32`. An `f32` cannot tell the top raw
+  values of a 24-bit range apart: 130316 `Temperature` re-encoded the "not
+  available" raw `FF FF FF` as `FF FF FE`, and 191,890 of the 16.7 million raws
+  came back one unit off (all of them from `F9 FF FF` up). A gateway forwarding
+  that PGN changed the value it relayed. Fields concerned, all `full-pgns`
+  only: `Pgn130316::temperature` and `Pgn65287MaretronTripVolume::trip_volume`.
+  A power-of-two resolution keeps the `f32`: the product is exact, as for
+  `Pgn129541::root_of_semi_major_axis` (2^-11). The default manifest has no
+  24-bit scaled field. Signed 24-bit fields and every narrower one stay `f32`:
+  their raw is at most 2^23 and survives. `PgnValue::F64` replaces
+  `PgnValue::F32` for these fields in `FieldAccess`. Past 53 bits an `f64` has
+  the same limit (see the 64-bit latitude and longitude of 129029).
 - **BREAKING**: `FastPacketAssembler::process_frame` now takes `now_ms: u64`
   instead of `u32`, matching `Clock::now_ms` and `AddressClaimEngine::poll`.
 - **BREAKING**: `canboat.json` is CANboat v9.1.0. Every generated type follows

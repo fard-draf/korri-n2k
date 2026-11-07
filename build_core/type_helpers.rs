@@ -122,11 +122,14 @@ pub(crate) fn map_type(
                 comment: "Duration without BitLength",
             })?;
             let scaled = field.resolution.is_some_and(|res| res as u8 != 1);
+            // Same mantissa limit as the generic path below.
+            let fits_f32 = scaled_value_fits_f32(
+                bits.into(),
+                is_signed_type(field)?,
+                field.resolution.unwrap_or(1.0),
+            );
             Ok(match bits {
-                // Same mantissa limit as the generic path below.
-                1..=32 if scaled && scaled_value_fits_f32(bits.into(), is_signed_type(field)?) => {
-                    "f32".to_string()
-                }
+                1..=32 if scaled && fits_f32 => "f32".to_string(),
                 1..=32 if scaled => "f64".to_string(),
                 1..=16 => "u16".to_string(),
                 17..=32 => "u32".to_string(),
@@ -214,14 +217,12 @@ pub(crate) fn map_type(
                 // An f32 does not always give back the raw it came from: latitude at
                 // 1e-7 drifted by 0.75 m, and the 24-bit "not available" came back one
                 // short. See `scaled_value_fits_f32`.
-                return Ok(
-                    if scaled_value_fits_f32(bits.into(), is_signed_type(field)?) {
-                        "f32"
-                    } else {
-                        "f64"
-                    }
-                    .to_string(),
+                let fits_f32 = scaled_value_fits_f32(
+                    bits.into(),
+                    is_signed_type(field)?,
+                    field.resolution.unwrap_or(1.0),
                 );
+                return Ok(if fits_f32 { "f32" } else { "f64" }.to_string());
             }
             // Otherwise rely on bit length and signedness.
             let is_signed = is_signed_type(field)?;
