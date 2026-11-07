@@ -1,0 +1,10 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+# No flip-link: it is not needed to run a bounded test, and it would be one more tool to install.
+[target.thumbv7em-none-eabihf]
+rustflags = [
+    "-C", "link-arg=-Tdefmt.x",
+    "-C", "link-arg=-Tlink.x",
+    "-C", "link-arg=--nmagic",
+]

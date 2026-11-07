@@ -12,3 +12,7 @@ Cargo.lock
 *.log
 *.tmp
 .projectile
+
+# The HIL crates are built on their own: their lock files and cargo config are tracked.
+!/hil/*/Cargo.lock
+!/hil/*/.cargo/
