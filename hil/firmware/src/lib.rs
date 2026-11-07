@@ -81,8 +81,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     exit(false)
 }
 
-/// Content of message `index` sent by `tx_fast_packet`: all fields not available but the
-/// running engine hours, which the host reads back byte by byte (offset 11, u32 LE).
+/// Engine hours sent by `tx_fast_packet`, starting at this value (offset 11, u32 LE).
+/// Other fields keep `Pgn127489::new()` defaults: zero, except the reserved byte (FF).
 pub const TX_HOURS_BASE: u32 = 1_000;
 
 /// Payload the host injects as message `index` (`rx_fast_packet`).

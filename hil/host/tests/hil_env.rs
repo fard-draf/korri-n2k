@@ -35,6 +35,7 @@ fn invalid_values_are_errors_even_without_a_probe() {
         ("KORRI_HIL_TIMEOUT_S", ""),
         ("KORRI_HIL_TIMEOUT_S", "18446744073709551616"),
         ("KORRI_HIL_EXPECTED_MESSAGES", "-1"),
+        ("KORRI_HIL_EXPECTED_MESSAGES", "0"),
         ("KORRI_HIL_CAN", ""),
         ("KORRI_HIL_OUT", ""),
     ] {

@@ -131,19 +131,28 @@ pub fn fast_packet_frames(id: u32, sequence: u8, payload: &[u8]) -> Vec<Frame> {
 }
 
 /// What `tx_fast_packet` must put on the bus: a claim (60928, 8 bytes) of `source`, then
-/// `expected` messages of 127489, 26 bytes each, whose engine hours (offset 11, u32 LE)
-/// are `hours_base`, `hours_base + 1`, … and whose sequence counter advances by one.
+/// `expected` messages of 127489 matching the firmware's 26-byte pattern, whose engine
+/// hours (offset 11, u32 LE) are `hours_base`, `hours_base + 1`, … and sequence advances by one.
 pub fn check_tx(
     frames: &[Frame],
     source: u8,
     expected: usize,
     hours_base: u32,
 ) -> Result<(), String> {
-    if !frames
+    if expected == 0 {
+        return Err("expected message count must be greater than zero".to_string());
+    }
+    let before_tx = frames
+        .iter()
+        .position(|f| source_address(f.id) == source && pgn(f.id) == 127_489)
+        .unwrap_or(frames.len());
+    if !frames[..before_tx]
         .iter()
         .any(|f| source_address(f.id) == source && pgn(f.id) == 60928 && f.data.len() == 8)
     {
-        return Err(format!("no address claim from {source}"));
+        return Err(format!(
+            "no address claim from {source} before first emission"
+        ));
     }
     let messages = reassemble(frames, source, 127_489)?;
     if messages.len() != expected {
@@ -164,6 +173,16 @@ pub fn check_tx(
             return Err(format!(
                 "message {i}: engine hours {hours}, expected {}",
                 hours_base + i as u32
+            ));
+        }
+        // Pgn127489::new() defaults to zero, with one reserved FF byte (not all NA).
+        let mut payload = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 0, 0, 0, 0,
+        ];
+        payload[11..15].copy_from_slice(&(hours_base + i as u32).to_le_bytes());
+        if message.payload != payload {
+            return Err(format!(
+                "message {i}: payload differs from the firmware pattern"
             ));
         }
         if i > 0 && message.sequence != (messages[i - 1].sequence + 1) % 8 {
@@ -267,11 +286,49 @@ mod tests {
         assert_eq!(fast_packet_frames(ID, 2, &payload), valid_capture());
     }
 
+    // Firmware defaults are zero, except its reserved byte at payload offset 19.
+    // Engine hours 1000 = E8 03 00 00 at offset 11; no library encoder is used.
+    fn tx_capture() -> Vec<Frame> {
+        vec![
+            frame(0x18EE_FF5A, [0; 8]),
+            frame(ID, [0x00, 0x1A, 0, 0, 0, 0, 0, 0]),
+            frame(ID, [0x01, 0, 0, 0, 0, 0, 0xE8, 0x03]),
+            frame(ID, [0x02, 0, 0, 0, 0, 0, 0, 0xFF]),
+            frame(ID, [0x03, 0, 0, 0, 0, 0, 0, 0xFF]),
+        ]
+    }
+
+    #[test]
+    fn check_tx_validates_all_payload_bytes_and_filters_other_traffic() {
+        let mut capture = tx_capture();
+        capture.insert(0, frame(ID ^ 1, [0xAA; 8]));
+        capture.insert(2, frame(ID ^ 0x100, [0xAA; 8]));
+        check_tx(&capture, 90, 1, 1000).unwrap();
+        for (frame_index, byte_index) in [(1, 2), (3, 7), (4, 6)] {
+            let mut corrupted = tx_capture();
+            corrupted[frame_index].data[byte_index] = 0xAA;
+            assert!(check_tx(&corrupted, 90, 1, 1000).is_err());
+        }
+    }
+
+    #[test]
+    fn check_tx_rejects_late_claim() {
+        let mut late = tx_capture();
+        late.rotate_left(1);
+        assert!(check_tx(&late, 90, 1, 1000).is_err());
+    }
+
+    #[test]
+    fn check_tx_rejects_zero_expected_messages() {
+        assert!(check_tx(&tx_capture()[..1], 90, 0, 1000).is_err());
+    }
+
     #[test]
     fn check_tx_reads_hours_and_sequence() {
         let claim = frame((6 << 26) | (0xEE00 << 8) | 90, [0; 8]);
         let message = |hours: u32, sequence: u8| {
-            let mut payload = vec![0xFF; 26];
+            let mut payload = vec![0; 26];
+            payload[19] = 0xFF;
             payload[11..15].copy_from_slice(&hours.to_le_bytes());
             fast_packet_frames(ID, sequence, &payload)
         };

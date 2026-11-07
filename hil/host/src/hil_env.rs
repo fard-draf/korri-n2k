@@ -46,6 +46,11 @@ impl Env {
             crate::scenario::MESSAGE_COUNT as u64,
         )?)
         .map_err(|_| Invalid("KORRI_HIL_EXPECTED_MESSAGES is too large".to_string()))?;
+        if expected_messages == 0 {
+            return Err(Invalid(
+                "KORRI_HIL_EXPECTED_MESSAGES must be greater than zero".to_string(),
+            ));
+        }
         let can = var("KORRI_HIL_CAN")?.unwrap_or_else(|| "can0".to_string());
         let out = var("KORRI_HIL_OUT")?
             .map(PathBuf::from)

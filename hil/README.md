@@ -28,7 +28,7 @@ firmware's own verdict and an oracle on the frames captured on `can0`.
 | `KORRI_HIL_CAN` | `can0` | SocketCAN interface. |
 | `KORRI_HIL_OUT` | `$TMPDIR/korri-hil` | Where RTT logs (`<scenario>.rtt.log`), captures (`<scenario>.can.log`) and, unless `CARGO_TARGET_DIR` is set, the firmware build go. |
 | `KORRI_HIL_TIMEOUT_S` | 90 | Positive limit for the firmware process, flashing included; a forced stop may take 5 s more. SocketCAN writes have a separate 100 ms timeout per frame. |
-| `KORRI_HIL_EXPECTED_MESSAGES` | 5 | Messages the `tx_fast_packet` oracle expects. A wrong value makes the bench fail, which shows the verdict is not rubber-stamped. |
+| `KORRI_HIL_EXPECTED_MESSAGES` | 5 | Positive number of messages the `tx_fast_packet` oracle expects. A wrong value makes the bench fail, which shows the verdict is not rubber-stamped. |
 
 ## Use
 
@@ -53,7 +53,7 @@ semihosting exit (0 pass, 1 fail).
 
 | Scenario | DUT | Host oracle |
 |---|---|---|
-| `tx_fast_packet` | Sends five Engine Parameters, Dynamic (127489, 26 bytes, Fast Packet) every 100 ms. | Reassembles the frames of address 90 byte by byte, independently of the library: DLC 8, `FF` padding, frame indices, sequence counter (+1 per message), announced length, engine hours 1000…1004, plus the address claim. |
+| `tx_fast_packet` | Sends five Engine Parameters, Dynamic (127489, 26 bytes, Fast Packet) every 100 ms. | Reassembles the frames of address 90 byte by byte, independently of the library: DLC 8, `FF` padding, frame indices, sequence counter (+1 per message), announced length, all 26 payload bytes (zero defaults except the reserved `FF` byte and engine hours 1000…1004), plus the address claim before the first emission. |
 | `rx_fast_packet` | Reassembles with the library the five messages the host injects. Exit 0 if all arrive intact and in order within 20 s. | The DUT's claim is seen, then the host injects five 127489 messages from address 91 (never claimed) once the DUT is ready. |
 
 The bus carries other nodes (addresses 80 and 81 on the author's bench): the oracle filters by
