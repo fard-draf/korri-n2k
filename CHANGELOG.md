@@ -96,8 +96,15 @@ instead of rejected.
   (`Number`, `Date`, `Time`, `Mmsi` and `Duration`, signed or not). Nothing is
   saturated. The largest and smallest raw values, including the "not available"
   sentinels, are still accepted, and so is NaN in an IEEE-754 `FLOAT` field,
-  which is how that type says "no data". Integer fields without a resolution
-  are not range-checked.
+  which is how that type says "no data".
+- **BREAKING**: the same check now covers integer fields without a resolution
+  (`Number`, `Lookup`, `BitLookup`, `IndirectLookup`, `Pgn`, `IsoName`, `Date`,
+  `Time`, `Mmsi`, `Duration` and a sub-byte `Binary`): `ValueOutOfRange` for a
+  value past the field's width or sign. The writer used to keep only the low
+  bits, so 158 in a 4-bit field went out as 14 and a unique number of
+  0x200000 in the 21-bit field of 60928 as 0. Every raw the field holds is
+  still written, sentinels included; a negative value for an unsigned field was
+  already refused as a `DataTypeMismatch`.
 - **BREAKING**: an unsigned 24-bit field with a resolution is now an `f64`
   instead of an `f32`. An `f32` cannot tell the top raw values of a 24-bit
   range apart: 130316 `Temperature` re-encoded the "not available" raw

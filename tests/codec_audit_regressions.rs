@@ -726,3 +726,61 @@ fn unsigned_24_bit_trip_volume_not_available_is_written_back_unchanged() {
     assert_eq!(decoded.to_payload(&mut out).unwrap(), 8);
     assert_eq!(out, payload);
 }
+
+// ---------------------------------------------------------------------------
+// Integers without a resolution are range-checked like the scaled ones: the
+// writer used to keep their low bits only.
+// ---------------------------------------------------------------------------
+
+/// 127505 Fluid Level: the instance is a 4-bit unsigned number in the low nibble
+/// of byte 0, the "not available" raw being 0xF.
+fn fluid_level_first_byte(instance: u8) -> Result<u8, SerializationError> {
+    let mut pgn = Pgn127505::new();
+    assert_eq!(pgn.field_mut("Instance", PgnValue::U8(instance)), Some(()));
+    let mut buffer = [0u8; 8];
+    pgn.to_payload(&mut buffer)?;
+    Ok(buffer[0])
+}
+
+#[test]
+fn integer_wider_than_its_field_is_refused() {
+    // 158 = 0x9E used to go out as 0xE (14) on four bits.
+    assert!(matches!(
+        fluid_level_first_byte(158),
+        Err(SerializationError::ValueOutOfRange {
+            field_id: "Instance"
+        })
+    ));
+    assert!(matches!(
+        fluid_level_first_byte(16),
+        Err(SerializationError::ValueOutOfRange { .. })
+    ));
+}
+
+#[test]
+fn integer_limits_of_a_narrow_field_are_written() {
+    assert_eq!(fluid_level_first_byte(0).unwrap() & 0x0F, 0x0);
+    assert_eq!(fluid_level_first_byte(1).unwrap() & 0x0F, 0x1);
+    // 15 is the "not available" sentinel of four bits: still representable.
+    assert_eq!(fluid_level_first_byte(15).unwrap() & 0x0F, 0xF);
+}
+
+/// 60928 ISO Address Claim: the unique number is 21 bits (`FF FF 1F` at most in
+/// bytes 0 to 2, the top three bits of byte 2 belong to the manufacturer code).
+#[test]
+fn integer_of_21_bits_stops_at_its_largest_raw() {
+    let mut pgn = Pgn60928::new();
+    pgn.unique_number = 0x1F_FFFF;
+    let mut buffer = [0u8; 8];
+    pgn.to_payload(&mut buffer).expect("largest 21-bit raw");
+    assert_eq!(buffer[..2], [0xFF, 0xFF]);
+    assert_eq!(buffer[2] & 0x1F, 0x1F);
+
+    pgn.unique_number = 0x20_0000;
+    assert!(matches!(
+        pgn.to_payload(&mut buffer),
+        Err(SerializationError::ValueOutOfRange {
+            field_id: "UniqueNumber"
+        })
+    ));
+}

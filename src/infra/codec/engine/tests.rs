@@ -1395,3 +1395,146 @@ fn test_wide_fixed_string_may_stop_early_only_in_last_position() {
     .expect("a wide last text may stop early");
     assert_eq!(text_len, Some(10));
 }
+
+/// Integer kinds with no resolution (NUMBER, LOOKUP, BITLOOKUP, INDIRECT_LOOKUP,
+/// PGN, ISO_NAME, DATE, TIME, MMSI, DURATION, sub-byte BINARY) refuse a value that
+/// does not fit their width or sign, and write the extremes, sentinels included.
+mod integer_range {
+    use super::*;
+    use crate::error::SerializationError;
+    use crate::infra::codec::bits::BitWriter;
+    use crate::infra::codec::engine::write_field;
+
+    const fn field(kind: FieldKind, bits: u32, signed: bool) -> FieldDescriptor {
+        FieldDescriptor {
+            id: "Narrow",
+            name: "Narrow",
+            kind,
+            bits_length: Some(bits),
+            bits_length_var: None,
+            bits_offset: Some(0),
+            is_signed: Some(signed),
+            resolution: None,
+            enum_direct_name: None,
+            enum_indirect_name: None,
+            enum_indirect_field_order: None,
+            physical_unit: None,
+            physical_qtity: None,
+            unknown_value: None,
+            out_of_range_value: None,
+            reserved_value: None,
+        }
+    }
+
+    fn written(
+        descriptor: &'static FieldDescriptor,
+        value: PgnValue,
+    ) -> Result<[u8; 8], SerializationError> {
+        let mut buffer = [0u8; 8];
+        write_field(&mut BitWriter::new(&mut buffer), descriptor, &value)?;
+        Ok(buffer)
+    }
+
+    fn is_out_of_range(result: Result<[u8; 8], SerializationError>) -> bool {
+        matches!(
+            result,
+            Err(SerializationError::ValueOutOfRange { field_id: "Narrow" })
+        )
+    }
+
+    /// Every kind that reads and writes an unsigned integer, four bits wide.
+    static UNSIGNED_4: [FieldDescriptor; 10] = [
+        field(FieldKind::Number, 4, false),
+        field(FieldKind::Pgn, 4, false),
+        field(FieldKind::IsoName, 4, false),
+        field(FieldKind::Lookup, 4, false),
+        field(FieldKind::BitLookup, 4, false),
+        field(FieldKind::IndirectLookup, 4, false),
+        field(FieldKind::Date, 4, false),
+        field(FieldKind::Time, 4, false),
+        field(FieldKind::Mmsi, 4, false),
+        field(FieldKind::Duration, 4, false),
+    ];
+    static BINARY_4: FieldDescriptor = field(FieldKind::Binary, 4, false);
+
+    #[test]
+    fn unsigned_value_wider_than_the_field_is_refused() {
+        for descriptor in UNSIGNED_4.iter().chain([&BINARY_4]) {
+            for value in [16u64, 158, 255, u64::MAX] {
+                assert!(
+                    is_out_of_range(written(descriptor, PgnValue::U64(value))),
+                    "{:?} {value}",
+                    descriptor.kind
+                );
+            }
+            assert!(is_out_of_range(written(descriptor, PgnValue::U8(158))));
+            assert!(is_out_of_range(written(descriptor, PgnValue::U16(16))));
+            assert!(is_out_of_range(written(descriptor, PgnValue::U32(16))));
+        }
+    }
+
+    #[test]
+    fn unsigned_limits_and_sentinels_are_written() {
+        for descriptor in UNSIGNED_4.iter().chain([&BINARY_4]) {
+            for (value, byte) in [(0u8, 0x00), (1, 0x01), (13, 0x0D), (14, 0x0E), (15, 0x0F)] {
+                assert_eq!(
+                    written(descriptor, PgnValue::U8(value)).unwrap()[0],
+                    byte,
+                    "{:?} {value}",
+                    descriptor.kind
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn negative_value_in_an_unsigned_field_is_refused() {
+        for descriptor in UNSIGNED_4.iter().chain([&BINARY_4]) {
+            assert!(written(descriptor, PgnValue::I8(-1)).is_err());
+            assert!(written(descriptor, PgnValue::I64(i64::MIN)).is_err());
+        }
+    }
+
+    static SIGNED_4: FieldDescriptor = field(FieldKind::Number, 4, true);
+    static SIGNED_64: FieldDescriptor = field(FieldKind::Number, 64, true);
+    static UNSIGNED_64: FieldDescriptor = field(FieldKind::Number, 64, false);
+
+    #[test]
+    fn signed_value_past_the_field_is_refused() {
+        for value in [8i8, 127, -9, -128] {
+            assert!(
+                is_out_of_range(written(&SIGNED_4, PgnValue::I8(value))),
+                "{value}"
+            );
+        }
+        assert!(is_out_of_range(written(&SIGNED_4, PgnValue::I64(i64::MAX))));
+        assert!(is_out_of_range(written(&SIGNED_4, PgnValue::I64(i64::MIN))));
+    }
+
+    #[test]
+    fn signed_limits_are_written_in_twos_complement() {
+        for (value, byte) in [(7i8, 0x07), (0, 0x00), (-1, 0x0F), (-8, 0x08)] {
+            assert_eq!(
+                written(&SIGNED_4, PgnValue::I8(value)).unwrap()[0],
+                byte,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn sixty_four_bit_extremes_are_written() {
+        assert_eq!(
+            written(&UNSIGNED_64, PgnValue::U64(u64::MAX)).unwrap(),
+            [0xFF; 8]
+        );
+        assert_eq!(
+            written(&SIGNED_64, PgnValue::I64(i64::MIN)).unwrap(),
+            [0, 0, 0, 0, 0, 0, 0, 0x80]
+        );
+        assert_eq!(
+            written(&SIGNED_64, PgnValue::I64(i64::MAX)).unwrap(),
+            [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]
+        );
+    }
+}

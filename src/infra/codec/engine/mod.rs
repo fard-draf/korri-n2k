@@ -733,31 +733,26 @@ fn write_field(
     match field_desc.kind {
         FieldKind::Number | FieldKind::Pgn | FieldKind::IsoName => {
             let signed = field_desc.is_signed.is_some_and(|s| s);
-            let bits_to_write = if let Some(res) = field_desc.resolution {
+            let bit_length = field_desc
+                .bits_length
+                .ok_or(SerializationError::InvalidData)?;
+            if let Some(res) = field_desc.resolution {
                 // Common path: floating-point value that must be scaled back to an integer
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                let bit_length = field_desc
-                    .bits_length
-                    .ok_or(SerializationError::InvalidData)?;
-                quantize(field_desc, float_val, res, bit_length, signed)?
-            } else if signed {
-                // Use the helper to reinterpret the signed integer as u64
-                i64_to_u64_bitwise(
-                    pgn_value_to_i64(value)
-                        .map_err(|e| SerializationError::CodecError { source: e })?,
-                )
-            } else {
-                pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
-            };
-
-            if let Some(bit_length) = field_desc.bits_length {
+                let raw = quantize(field_desc, float_val, res, bit_length, signed)?;
                 writer
-                    .write_u64(bits_to_write, bit_length as u8)
+                    .write_u64(raw, bit_length as u8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
+            } else if signed {
+                let int_val = pgn_value_to_i64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                write_integer(writer, field_desc, int_val.into(), bit_length, true)?;
             } else {
-                return Err(SerializationError::InvalidData);
-            };
+                let int_val = pgn_value_to_u64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                write_integer(writer, field_desc, int_val.into(), bit_length, false)?;
+            }
         }
 
         FieldKind::Date | FieldKind::Time | FieldKind::Mmsi => {
@@ -768,25 +763,26 @@ fn write_field(
                         field_name: field_desc.id,
                     })?;
 
-            let int_val = if field_desc.resolution.is_some_and(|res| res as u8 != 1) {
+            if field_desc.resolution.is_some_and(|res| res as u8 != 1) {
                 // With resolution: value stored as F32/F64
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                quantize(
+                let raw = quantize(
                     field_desc,
                     float_val,
                     field_desc.resolution.unwrap(),
                     bits_to_write,
                     false,
-                )?
+                )?;
+                writer
+                    .write_u64(raw, bits_to_write as u8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 // Without resolution: value stored as U16/U32
-                pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
-            };
-
-            writer
-                .write_u64(int_val, bits_to_write as u8)
-                .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                let int_val = pgn_value_to_u64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                write_integer(writer, field_desc, int_val.into(), bits_to_write, false)?;
+            }
         }
 
         FieldKind::Duration => {
@@ -798,33 +794,32 @@ fn write_field(
                         field_name: field_desc.id,
                     })?;
 
-            let prepared_val = if let Some(res) = field_desc.resolution {
+            if let Some(res) = field_desc.resolution {
                 // Apply the inverse resolution
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                quantize(
+                let raw = quantize(
                     field_desc,
                     float_val,
                     res,
                     bits_to_write,
                     field_desc.is_signed.is_some_and(|s| s),
-                )?
+                )?;
+                writer
+                    .write_u64(raw, bits_to_write as u8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 // No resolution involved
-                pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
-            };
-
-            writer
-                .write_u64(prepared_val, bits_to_write as u8)
-                .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                let int_val = pgn_value_to_u64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                write_integer(writer, field_desc, int_val.into(), bits_to_write, false)?;
+            }
         }
         FieldKind::Lookup => {
             let int_val = pgn_value_to_u64(value)
                 .map_err(|e| SerializationError::CodecError { source: e })?;
             if let Some(bit_len) = field_desc.bits_length {
-                writer
-                    .write_u64(int_val, bit_len as u8)
-                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                write_integer(writer, field_desc, int_val.into(), bit_len, false)?;
             };
         }
 
@@ -841,9 +836,7 @@ fn write_field(
                     field_name: field_desc.id,
                 })?;
 
-            writer
-                .write_u64(int_val, bit_len as u8)
-                .map_err(|e| SerializationError::BitWriteError { err: e })?;
+            write_integer(writer, field_desc, int_val.into(), bit_len, false)?;
         }
         FieldKind::IndirectLookup => {
             // The field holds its own raw value; the master field is written separately.
@@ -851,9 +844,7 @@ fn write_field(
                 .map_err(|e| SerializationError::CodecError { source: e })?;
 
             if let Some(bit_len) = field_desc.bits_length {
-                writer
-                    .write_u64(value_to_write, bit_len as u8)
-                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                write_integer(writer, field_desc, value_to_write.into(), bit_len, false)?;
             };
         }
         FieldKind::Spare => {
@@ -959,9 +950,7 @@ fn write_field(
             if expected_bits % 8 != 0 {
                 let raw_val = pgn_value_to_u64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                return writer
-                    .write_u64(raw_val, expected_bits as u8)
-                    .map_err(|e| SerializationError::BitWriteError { err: e });
+                return write_integer(writer, field_desc, raw_val.into(), expected_bits, false);
             }
 
             if let PgnValue::Bytes(val) = value {
@@ -992,6 +981,42 @@ fn pgn_bytes_slice(val: &PgnBytes) -> Result<&[u8], SerializationError> {
     val.data
         .get(..val.len)
         .ok_or(SerializationError::InvalidData)
+}
+
+/// Smallest and largest raw a `bits`-wide field holds (`bits` already within 1..=64).
+fn raw_limits(bits: u32, signed: bool) -> (i128, i128) {
+    if signed {
+        (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1)
+    } else {
+        (0, (1i128 << bits) - 1)
+    }
+}
+
+/// Writes an integer field that carries no resolution. A value outside the field,
+/// too wide or of the wrong sign, is an error: the writer would otherwise keep only
+/// its low bits (158 on 4 bits went out as 14). The sentinels, the largest raws, fit.
+fn write_integer(
+    writer: &mut BitWriter,
+    field_desc: &'static FieldDescriptor,
+    value: i128,
+    bits: u32,
+    signed: bool,
+) -> Result<(), SerializationError> {
+    if !(1..=64).contains(&bits) {
+        return Err(SerializationError::InvalidFieldBits {
+            field_name: field_desc.id,
+        });
+    }
+    let (min, max) = raw_limits(bits, signed);
+    if value < min || value > max {
+        return Err(SerializationError::ValueOutOfRange {
+            field_id: field_desc.id,
+        });
+    }
+    // Low 64 bits: two's complement for a negative value.
+    writer
+        .write_u64(value as u64, bits as u8)
+        .map_err(|e| SerializationError::BitWriteError { err: e })
 }
 
 /// Undoes a field's resolution and returns the raw `bits`-wide pattern to write.
@@ -1030,11 +1055,7 @@ fn quantize(
     };
     // The cast saturates far beyond any 64-bit field, so the range check below catches it.
     let mut raw = rounded as i128;
-    let (min, max) = if signed {
-        (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1)
-    } else {
-        (0, (1i128 << bits) - 1)
-    };
+    let (min, max) = raw_limits(bits, signed);
     // Past 53 bits an f64 cannot tell the last raw values apart: the "not available"
     // raw of a 64-bit latitude (0x7FFF…) decodes to a value that divides back to 2^63.
     // Within that spacing, the nearest raw value is the field's own limit.
