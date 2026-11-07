@@ -4,8 +4,8 @@
 use super::bits::{BitReader, BitWriter};
 use super::traits::FieldAccess;
 use crate::core::{
-    Availability, FieldDescriptor, FieldKind, PgnBytes, PgnDescriptor, PgnValue, RepeatingFieldSet,
-    MAX_PGN_BYTES,
+    scaled_value_fits_f32, Availability, FieldDescriptor, FieldKind, PgnBytes, PgnDescriptor,
+    PgnValue, RepeatingFieldSet, MAX_PGN_BYTES,
 };
 use crate::error::{CodecError, DeserializationError, SerializationError};
 
@@ -621,12 +621,13 @@ fn scale_raw_field(
             let value = if field_desc.is_signed.is_some_and(|s| s) {
                 let signed_val = sign_extend(raw_val, field_desc.bits_length.unwrap_or(0) as u8);
                 if let Some(res) = field_desc.resolution {
-                    match field_desc
+                    let bits = field_desc
                         .bits_length
-                        .ok_or(DeserializationError::InvalidDataLength)?
-                    {
-                        1..=24 => PgnValue::F32(signed_val as f32 * res),
-                        _ => PgnValue::F64(signed_val as f64 * res as f64),
+                        .ok_or(DeserializationError::InvalidDataLength)?;
+                    if scaled_value_fits_f32(bits, true) {
+                        PgnValue::F32(signed_val as f32 * res)
+                    } else {
+                        PgnValue::F64(signed_val as f64 * res as f64)
                     }
                 } else {
                     match field_desc.bits_length {
@@ -637,12 +638,13 @@ fn scale_raw_field(
                     }
                 }
             } else if let Some(res) = field_desc.resolution {
-                match field_desc
+                let bits = field_desc
                     .bits_length
-                    .ok_or(DeserializationError::InvalidDataLength)?
-                {
-                    1..=24 => PgnValue::F32(raw_val as f32 * res),
-                    _ => PgnValue::F64(raw_val as f64 * res as f64),
+                    .ok_or(DeserializationError::InvalidDataLength)?;
+                if scaled_value_fits_f32(bits, false) {
+                    PgnValue::F32(raw_val as f32 * res)
+                } else {
+                    PgnValue::F64(raw_val as f64 * res as f64)
                 }
             } else {
                 match field_desc.bits_length {
@@ -660,9 +662,10 @@ fn scale_raw_field(
         FieldKind::Date | FieldKind::Mmsi => {
             let value = if let Some(res) = field_desc.resolution {
                 let scaled = raw_val as f64 * res as f64;
-                match field_desc.bits_length.unwrap() {
-                    1..=24 => PgnValue::F32(scaled as f32),
-                    _ => PgnValue::F64(scaled),
+                if scaled_value_fits_f32(field_desc.bits_length.unwrap(), false) {
+                    PgnValue::F32(scaled as f32)
+                } else {
+                    PgnValue::F64(scaled)
                 }
             } else {
                 match field_desc.bits_length.unwrap() {
@@ -681,15 +684,17 @@ fn scale_raw_field(
         FieldKind::Duration => {
             let value = if let Some(res) = field_desc.resolution {
                 // shortcut: signed without resolution is not handled, add it if CANboat ever publishes one.
-                let raw = if field_desc.is_signed == Some(true) {
+                let signed = field_desc.is_signed == Some(true);
+                let raw = if signed {
                     sign_extend(raw_val, field_desc.bits_length.unwrap() as u8) as f64
                 } else {
                     raw_val as f64
                 };
                 let scaled = raw * res as f64;
-                match field_desc.bits_length.unwrap() {
-                    1..=24 => PgnValue::F32(scaled as f32),
-                    _ => PgnValue::F64(scaled),
+                if scaled_value_fits_f32(field_desc.bits_length.unwrap(), signed) {
+                    PgnValue::F32(scaled as f32)
+                } else {
+                    PgnValue::F64(scaled)
                 }
             } else {
                 match field_desc.bits_length.unwrap() {

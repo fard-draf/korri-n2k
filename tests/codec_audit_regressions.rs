@@ -665,3 +665,64 @@ fn aud_004_indices_past_the_counter_stay_refused() {
         None
     );
 }
+
+// ---------------------------------------------------------------------------
+// Unsigned 24-bit fields with a resolution: `f32` cannot tell their top raw
+// values apart, so the "not available" raw `FF FF FF` came back as `FF FF FE`.
+// ---------------------------------------------------------------------------
+
+/// 130316 Temperature, Extended Range: sid, instance, source, temperature (24 bits,
+/// 0.001 K), set temperature (16 bits, 0.1 K). Every byte is the CANboat
+/// "not available" pattern.
+#[cfg(feature = "full-pgns")]
+#[test]
+fn unsigned_24_bit_not_available_raw_is_written_back_unchanged() {
+    let payload = [0xFF; 8];
+    let decoded = Pgn130316::from_payload(&payload).expect("valid 130316");
+    // The field is an `f64`: an `f32` loses the unit at the top of the range.
+    let temperature: f64 = decoded.temperature;
+    assert!((temperature - 16_777.215).abs() < 0.01);
+    let mut out = [0u8; 8];
+    assert_eq!(decoded.to_payload(&mut out).unwrap(), 8);
+    assert_eq!(out, payload);
+}
+
+/// Raws the `f32` merged with their neighbour: 0xFA0000 (the first one) and the
+/// two just under the "not available" raw, 0xFFFFFD and 0xFFFFFE.
+#[cfg(feature = "full-pgns")]
+#[test]
+fn unsigned_24_bit_top_raws_are_written_back_unchanged() {
+    for temperature in [[0x00, 0x00, 0xFA], [0xFD, 0xFF, 0xFF], [0xFE, 0xFF, 0xFF]] {
+        let payload = [
+            0x01,
+            0x02,
+            0x03,
+            temperature[0],
+            temperature[1],
+            temperature[2],
+            0x34,
+            0x12,
+        ];
+        let decoded = Pgn130316::from_payload(&payload).expect("valid 130316");
+        let mut out = [0u8; 8];
+        assert_eq!(decoded.to_payload(&mut out).unwrap(), 8);
+        assert_eq!(out, payload);
+    }
+}
+
+/// 65287 Maretron Trip Volume, manufacturer 137 and industry code 4 (`89 98`), sid,
+/// volume instance, fluid type and reserved (`FF`), then the 24-bit trip volume.
+#[cfg(feature = "full-pgns")]
+#[test]
+fn unsigned_24_bit_trip_volume_not_available_is_written_back_unchanged() {
+    let payload = [0x89, 0x98, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+    let decoded = Pgn65287::from_payload(&payload).expect("valid 65287");
+    let Pgn65287::MaretronTripVolume(trip) = &decoded else {
+        panic!("expected the Maretron variant, got {decoded:?}");
+    };
+    let volume: f64 = trip.trip_volume;
+    assert!((volume - 16_777.215).abs() < 0.01);
+    let mut out = [0u8; 8];
+    assert_eq!(decoded.to_payload(&mut out).unwrap(), 8);
+    assert_eq!(out, payload);
+}

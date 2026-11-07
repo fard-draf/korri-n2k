@@ -60,6 +60,17 @@ pub enum FieldKind {
     // FIELD_INDEX
 }
 
+/// Whether a scaled field can be held in an `f32` and still quantize back to its raw.
+///
+/// `raw * resolution` is rounded to 24 significant bits, which moves it by up to
+/// `|raw| / 2^24` raw units. The raw is recovered only while that stays under half
+/// a unit, so `|raw| <= 2^23`: up to 23 bits, or 24 bits when signed. An unsigned
+/// 24-bit field reaches `0xFFFFFF` (its "not available" raw) and needs an `f64`.
+/// The engine and the generator both decide the Rust type with this function.
+pub const fn scaled_value_fits_f32(bits: u32, signed: bool) -> bool {
+    bits >= 1 && (bits < 24 || (bits == 24 && signed))
+}
+
 /// Descriptor for a single PGN field.
 #[derive(Debug)]
 pub struct FieldDescriptor {

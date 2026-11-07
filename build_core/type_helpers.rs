@@ -4,7 +4,7 @@ use crate::build_core::{
     errors::BuildError,
     name_helpers::{to_pascal_case, PascalCaseMode},
 };
-use crate::core::FieldKind;
+use crate::core::{scaled_value_fits_f32, FieldKind};
 use std::collections::HashMap;
 
 /// Determine the `repr` integer type for an enumeration based on its max value.
@@ -123,10 +123,11 @@ pub(crate) fn map_type(
             })?;
             let scaled = field.resolution.is_some_and(|res| res as u8 != 1);
             Ok(match bits {
-                // Same mantissa limit as the generic path above: past 24 bits a
-                // scaled value no longer fits an f32 without losing its low bits.
-                1..=24 if scaled => "f32".to_string(),
-                25..=32 if scaled => "f64".to_string(),
+                // Same mantissa limit as the generic path below.
+                1..=32 if scaled && scaled_value_fits_f32(bits.into(), is_signed_type(field)?) => {
+                    "f32".to_string()
+                }
+                1..=32 if scaled => "f64".to_string(),
                 1..=16 => "u16".to_string(),
                 17..=32 => "u32".to_string(),
                 _ => {
@@ -206,16 +207,21 @@ pub(crate) fn map_type(
         _ => {
             // Fields with a resolution become floating-point values.
             if field.resolution.is_some_and(|r| r != 1.0) || field.kind.contains("DECIMAL") {
-                match field.bits_length.ok_or(BuildError::BitLengthErr {
+                let bits = field.bits_length.ok_or(BuildError::BitLengthErr {
                     path: field.id.clone(),
                     comment: "build.rs / map_type",
-                })? {
-                    // f32 holds every integer only up to 2^24. A wider scaled field
-                    // would lose its low bits: latitude at 1e-7 drifted by 0.75 m.
-                    1..=24 => return Ok("f32".to_string()),
-                    _ => return Ok("f64".to_string()),
-                }
-                // return Ok("f64".to_string());
+                })?;
+                // An f32 does not always give back the raw it came from: latitude at
+                // 1e-7 drifted by 0.75 m, and the 24-bit "not available" came back one
+                // short. See `scaled_value_fits_f32`.
+                return Ok(
+                    if scaled_value_fits_f32(bits.into(), is_signed_type(field)?) {
+                        "f32"
+                    } else {
+                        "f64"
+                    }
+                    .to_string(),
+                );
             }
             // Otherwise rely on bit length and signedness.
             let is_signed = is_signed_type(field)?;
