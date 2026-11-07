@@ -262,9 +262,11 @@ fn test_string_lz_roundtrip() {
 
     let mut buffer = [0xFF; 64];
     let bytes_written = serialize(&payload, &mut buffer, &PgnStringLz::DESCRIPTOR).unwrap();
-    assert_eq!(bytes_written, payload.text.len() + 1);
+    // Length byte, text, then the terminating zero the length does not count.
+    assert_eq!(bytes_written, payload.text.len() + 2);
     assert_eq!(buffer[0], payload.text.len() as u8);
     assert_eq!(&buffer[1..1 + payload.text.len()], payload.text.as_slice());
+    assert_eq!(buffer[1 + payload.text.len()], 0);
 
     let mut decoded = PgnStringLz::default();
     deserialize_into(
@@ -1308,5 +1310,264 @@ fn test_signed_duration_with_resolution_is_sign_extended() {
         let mut buffer = [0u8; 8];
         let written = serialize(&decoded, &mut buffer, descriptor).unwrap();
         assert_eq!(&buffer[..written], bytes);
+    }
+}
+
+/// AUD-008: a text wider than 32 bytes may stop early only as the last field.
+/// Elsewhere the stop would shift the fields that follow it.
+#[test]
+fn test_wide_fixed_string_may_stop_early_only_in_last_position() {
+    use crate::core::RepeatingFieldSet;
+    use crate::infra::codec::engine::for_each_field;
+
+    const fn field(id: &'static str, kind: FieldKind, bits: u32) -> FieldDescriptor {
+        FieldDescriptor {
+            id,
+            name: id,
+            kind,
+            bits_length: Some(bits),
+            bits_length_var: None,
+            bits_offset: None,
+            is_signed: None,
+            resolution: None,
+            enum_direct_name: None,
+            enum_indirect_name: None,
+            enum_indirect_field_order: None,
+            physical_unit: None,
+            physical_qtity: None,
+            unknown_value: None,
+            out_of_range_value: None,
+            reserved_value: None,
+        }
+    }
+
+    const fn descriptor(
+        fields: &'static [FieldDescriptor],
+        repeating_field_sets: &'static [RepeatingFieldSet],
+    ) -> PgnDescriptor {
+        PgnDescriptor {
+            id: 42423,
+            name: "MockWideString",
+            description: "Mocked 40-byte STRING_FIX",
+            priority: Some(6),
+            fastpacket: true,
+            length: None,
+            min_length: None,
+            field_count: None,
+            trans_interval: None,
+            trans_irregular: Some(true),
+            fields,
+            repeating_field_sets,
+        }
+    }
+
+    // Counter, 40-byte text, then an empty group: the group reads nothing, so
+    // only the text's own length can make a short payload fail.
+    static TEXT_FIRST: [FieldDescriptor; 3] = [
+        field("Count", FieldKind::Number, 8),
+        field("Text", FieldKind::StringFix, 320),
+        field("Item", FieldKind::Number, 8),
+    ];
+    static GROUPS: [RepeatingFieldSet; 1] = [RepeatingFieldSet {
+        array_id: "items",
+        count_field_index: Some(0),
+        start_field_index: 2,
+        size: 1,
+        max_repetitions: 4,
+    }];
+    static TEXT_LAST: [FieldDescriptor; 2] = [
+        field("Count", FieldKind::Number, 8),
+        field("Text", FieldKind::StringFix, 320),
+    ];
+    static MIDDLE: PgnDescriptor = descriptor(&TEXT_FIRST, &GROUPS);
+    static LAST: PgnDescriptor = descriptor(&TEXT_LAST, &[]);
+
+    let short = [0u8; 11];
+    assert!(for_each_field(&MIDDLE, &short, |_, _| {}).is_err());
+    assert!(for_each_field(&MIDDLE, &[0u8; 41], |_, _| {}).is_ok());
+
+    let mut text_len = None;
+    for_each_field(&LAST, &short, |field, reading| {
+        if let (true, PgnValue::Bytes(text)) = (field.id == "Text", reading.value) {
+            text_len = Some(text.len);
+        }
+    })
+    .expect("a wide last text may stop early");
+    assert_eq!(text_len, Some(10));
+
+    // The typed path (`from_payload`) applies the same rule.
+    #[derive(Default)]
+    struct Sink {
+        count: u8,
+        text_len: Option<usize>,
+    }
+
+    impl FieldAccess for Sink {
+        fn field(&self, id: &'static str) -> Option<PgnValue> {
+            (id == "Count").then_some(PgnValue::U8(self.count))
+        }
+
+        fn field_mut(&mut self, id: &'static str, value: PgnValue) -> Option<()> {
+            match (id, value) {
+                ("Count", PgnValue::U8(count)) => self.count = count,
+                ("Text", PgnValue::Bytes(text)) => self.text_len = Some(text.len),
+                _ => {}
+            }
+            Some(())
+        }
+
+        fn set_repetitive_count(&mut self, _: &'static str, _: usize) -> Option<()> {
+            Some(())
+        }
+    }
+
+    assert!(deserialize_into(&mut Sink::default(), &short, &MIDDLE).is_err());
+    assert!(deserialize_into(&mut Sink::default(), &[0u8; 41], &MIDDLE).is_ok());
+
+    let mut sink = Sink::default();
+    deserialize_into(&mut sink, &short, &LAST).expect("a wide last text may stop early");
+    assert_eq!(sink.text_len, Some(10));
+}
+
+/// Integer kinds with no resolution (NUMBER, LOOKUP, BITLOOKUP, INDIRECT_LOOKUP,
+/// PGN, ISO_NAME, DATE, TIME, MMSI, DURATION, sub-byte BINARY) refuse a value that
+/// does not fit their width or sign, and write the extremes, sentinels included.
+mod integer_range {
+    use super::*;
+    use crate::error::SerializationError;
+    use crate::infra::codec::bits::BitWriter;
+    use crate::infra::codec::engine::write_field;
+
+    const fn field(kind: FieldKind, bits: u32, signed: bool) -> FieldDescriptor {
+        FieldDescriptor {
+            id: "Narrow",
+            name: "Narrow",
+            kind,
+            bits_length: Some(bits),
+            bits_length_var: None,
+            bits_offset: Some(0),
+            is_signed: Some(signed),
+            resolution: None,
+            enum_direct_name: None,
+            enum_indirect_name: None,
+            enum_indirect_field_order: None,
+            physical_unit: None,
+            physical_qtity: None,
+            unknown_value: None,
+            out_of_range_value: None,
+            reserved_value: None,
+        }
+    }
+
+    fn written(
+        descriptor: &'static FieldDescriptor,
+        value: PgnValue,
+    ) -> Result<[u8; 8], SerializationError> {
+        let mut buffer = [0u8; 8];
+        write_field(&mut BitWriter::new(&mut buffer), descriptor, &value)?;
+        Ok(buffer)
+    }
+
+    fn is_out_of_range(result: Result<[u8; 8], SerializationError>) -> bool {
+        matches!(
+            result,
+            Err(SerializationError::ValueOutOfRange { field_id: "Narrow" })
+        )
+    }
+
+    /// Every kind that reads and writes an unsigned integer, four bits wide.
+    static UNSIGNED_4: [FieldDescriptor; 10] = [
+        field(FieldKind::Number, 4, false),
+        field(FieldKind::Pgn, 4, false),
+        field(FieldKind::IsoName, 4, false),
+        field(FieldKind::Lookup, 4, false),
+        field(FieldKind::BitLookup, 4, false),
+        field(FieldKind::IndirectLookup, 4, false),
+        field(FieldKind::Date, 4, false),
+        field(FieldKind::Time, 4, false),
+        field(FieldKind::Mmsi, 4, false),
+        field(FieldKind::Duration, 4, false),
+    ];
+    static BINARY_4: FieldDescriptor = field(FieldKind::Binary, 4, false);
+
+    #[test]
+    fn unsigned_value_wider_than_the_field_is_refused() {
+        for descriptor in UNSIGNED_4.iter().chain([&BINARY_4]) {
+            for value in [16u64, 158, 255, u64::MAX] {
+                assert!(
+                    is_out_of_range(written(descriptor, PgnValue::U64(value))),
+                    "{:?} {value}",
+                    descriptor.kind
+                );
+            }
+            assert!(is_out_of_range(written(descriptor, PgnValue::U8(158))));
+            assert!(is_out_of_range(written(descriptor, PgnValue::U16(16))));
+            assert!(is_out_of_range(written(descriptor, PgnValue::U32(16))));
+        }
+    }
+
+    #[test]
+    fn unsigned_limits_and_sentinels_are_written() {
+        for descriptor in UNSIGNED_4.iter().chain([&BINARY_4]) {
+            for (value, byte) in [(0u8, 0x00), (1, 0x01), (13, 0x0D), (14, 0x0E), (15, 0x0F)] {
+                assert_eq!(
+                    written(descriptor, PgnValue::U8(value)).unwrap()[0],
+                    byte,
+                    "{:?} {value}",
+                    descriptor.kind
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn negative_value_in_an_unsigned_field_is_refused() {
+        for descriptor in UNSIGNED_4.iter().chain([&BINARY_4]) {
+            assert!(written(descriptor, PgnValue::I8(-1)).is_err());
+            assert!(written(descriptor, PgnValue::I64(i64::MIN)).is_err());
+        }
+    }
+
+    static SIGNED_4: FieldDescriptor = field(FieldKind::Number, 4, true);
+    static SIGNED_64: FieldDescriptor = field(FieldKind::Number, 64, true);
+    static UNSIGNED_64: FieldDescriptor = field(FieldKind::Number, 64, false);
+
+    #[test]
+    fn signed_value_past_the_field_is_refused() {
+        for value in [8i8, 127, -9, -128] {
+            assert!(
+                is_out_of_range(written(&SIGNED_4, PgnValue::I8(value))),
+                "{value}"
+            );
+        }
+        assert!(is_out_of_range(written(&SIGNED_4, PgnValue::I64(i64::MAX))));
+        assert!(is_out_of_range(written(&SIGNED_4, PgnValue::I64(i64::MIN))));
+    }
+
+    #[test]
+    fn signed_limits_are_written_in_twos_complement() {
+        for (value, byte) in [(7i8, 0x07), (0, 0x00), (-1, 0x0F), (-8, 0x08)] {
+            assert_eq!(
+                written(&SIGNED_4, PgnValue::I8(value)).unwrap()[0],
+                byte,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn sixty_four_bit_extremes_are_written() {
+        assert_eq!(
+            written(&UNSIGNED_64, PgnValue::U64(u64::MAX)).unwrap(),
+            [0xFF; 8]
+        );
+        assert_eq!(
+            written(&SIGNED_64, PgnValue::I64(i64::MIN)).unwrap(),
+            [0, 0, 0, 0, 0, 0, 0, 0x80]
+        );
+        assert_eq!(
+            written(&SIGNED_64, PgnValue::I64(i64::MAX)).unwrap(),
+            [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]
+        );
     }
 }

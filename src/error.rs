@@ -112,6 +112,11 @@ pub enum SerializationError {
     #[error("Field {field_id} not found")]
     FieldNotFound { field_id: &'static str },
 
+    /// A numeric value cannot be written to its field: NaN or infinite, negative
+    /// for an unsigned field, or too large for the field's bit width.
+    #[error("Value out of range for field {field_id}")]
+    ValueOutOfRange { field_id: &'static str },
+
     /// Generic conversion error bubbling up from the codec module.
     #[error("Codec Error: {source}")]
     CodecError { source: CodecError },
@@ -151,6 +156,14 @@ pub enum DeserializationError {
     /// Field descriptor defines an invalid bit length.
     #[error("Invalid field bit length for {field_name}")]
     InvalidFieldBits { field_name: &'static str },
+
+    /// The payload carries more repetitions than the generated array can hold.
+    #[error("{count} repetitions of {array_id} exceed the supported maximum of {max}")]
+    RepetitionsExceedCapacity {
+        array_id: &'static str,
+        count: usize,
+        max: usize,
+    },
 
     /// Error bubbled up from the generic codec engine.
     #[error("Codec Error: {source}")]

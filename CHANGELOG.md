@@ -80,6 +80,44 @@ instead of rejected.
 - **BREAKING**: `FieldDescriptor` gains `unknown_value: Option<i64>`,
   `out_of_range_value: Option<i64>` and `reserved_value: Option<i64>`. A
   descriptor built by hand must set them (`None` disables sentinel matching).
+- **BREAKING**: a payload announcing more repetitions than the generated array
+  holds is now rejected with the new
+  `DeserializationError::RepetitionsExceedCapacity { array_id, count, max }`,
+  by decoding and by `for_each_field`. It used to decode successfully with the
+  surplus dropped: 33 `TestId`/`TestResult` pairs of 130944 came back as 32,
+  and re-encoding wrote a counter of 32. The generator still caps an array at
+  32 elements (`RepeatingFieldSet::max_repetitions`).
+- **BREAKING**: encoding a quantized number that does not fit its field now
+  fails with the new `SerializationError::ValueOutOfRange { field_id }`.
+  The writer used to keep the low bits of the scaled integer, so
+  `Pgn130306.wind_speed = 700.0` went out as 44.64 m/s, `-1.0` as 654.36 m/s,
+  and NaN as 0. Rejected: NaN and infinities, a negative value for an unsigned
+  field, a value past the field's width, for fields that carry a resolution
+  (`Number`, `Date`, `Time`, `Mmsi` and `Duration`, signed or not). Nothing is
+  saturated. The largest and smallest raw values, including the "not available"
+  sentinels, are still accepted, and so is NaN in an IEEE-754 `FLOAT` field,
+  which is how that type says "no data".
+- **BREAKING**: the same check now covers integer fields without a resolution
+  (`Number`, `Lookup`, `BitLookup`, `IndirectLookup`, `Pgn`, `IsoName`, `Date`,
+  `Time`, `Mmsi`, `Duration` and a sub-byte `Binary`): `ValueOutOfRange` for a
+  value past the field's width or sign. The writer used to keep only the low
+  bits, so 158 in a 4-bit field went out as 14 and a unique number of
+  0x200000 in the 21-bit field of 60928 as 0. Every raw the field holds is
+  still written, sentinels included; a negative value for an unsigned field was
+  already refused as a `DataTypeMismatch`.
+- **BREAKING**: an unsigned 24-bit field with a resolution that is not a power
+  of two is now an `f64` instead of an `f32`. An `f32` cannot tell the top raw
+  values of a 24-bit range apart: 130316 `Temperature` re-encoded the "not
+  available" raw `FF FF FF` as `FF FF FE`, and 191,890 of the 16.7 million raws
+  came back one unit off (all of them from `F9 FF FF` up). A gateway forwarding
+  that PGN changed the value it relayed. Fields concerned, all `full-pgns`
+  only: `Pgn130316::temperature` and `Pgn65287MaretronTripVolume::trip_volume`.
+  A power-of-two resolution keeps the `f32`: the product is exact, as for
+  `Pgn129541::root_of_semi_major_axis` (2^-11). The default manifest has no
+  24-bit scaled field. Signed 24-bit fields and every narrower one stay `f32`:
+  their raw is at most 2^23 and survives. `PgnValue::F64` replaces
+  `PgnValue::F32` for these fields in `FieldAccess`. Past 53 bits an `f64` has
+  the same limit (see the 64-bit latitude and longitude of 129029).
 - **BREAKING**: `FastPacketAssembler::process_frame` now takes `now_ms: u64`
   instead of `u32`, matching `Clock::now_ms` and `AddressClaimEngine::poll`.
 - **BREAKING**: `canboat.json` is CANboat v9.1.0. Every generated type follows
@@ -202,6 +240,61 @@ instead of rejected.
   Messages of one PGN from one source with different sequence IDs still get
   one slot each. The destination is not part of the key, and messages a source
   aborts under different sequence IDs each hold a slot for 500 ms.
+- The dispatch enum of a multi-variant PGN (e.g. `Pgn130944`) did not forward
+  the four repeating-group methods of `FieldAccess`, so `repetitive_count` and
+  its siblings answered `None` on the enum while the variant held the data.
+  Every enum now delegates them, as it already did `field` and `field_mut`.
+- A payload that stopped inside a fixed-size string was accepted, whatever the
+  string: 129044 (Datum) decoded from 16 to 19 bytes with `ReferenceDatum`
+  half missing. Only the text of 130821 and 130856, which reserve about 230
+  bytes and are sent shorter, may stop early now, and only as the last field of
+  the PGN; any other `STRING_FIX` must be complete. Under `full-pgns` this
+  also applies to the trailing strings of 129045, 130817, 130833 and 130842.
+- `for_each_field` reported two kinds of absent value as `Available`: a NaN
+  `FLOAT` (the `Salinity` of 130321) and a variable string without text, an
+  empty LAU (`02 01`, or the older `00`) or an empty LZ. Both are now
+  `NotAvailable`; the value and its bytes are still handed over unchanged.
+- `PgnBytes::len` is public, and a value past the 230-byte buffer made
+  encoding panic, or overflow in a debug build for `usize::MAX`, instead of
+  returning an error: 231 bytes in a LAU string of 126998 or a LZ string of
+  126720. Encoding a string field now fails with `SerializationError::InvalidData`,
+  and `PgnBytes::as_slice` and `as_mut_slice` clamp to the buffer. The
+  generated types and the receive path never produce such a length.
+- An empty `STRING_LAU` was written as a single `00` byte, so a default
+  `Pgn126998::new()` went out as `00 00 00`. CANboat describes an empty string
+  as length 2 and encoding 1 (ASCII): it is now written `02 01`, three times
+  for 126998. Reading is unchanged and still takes a lone `00` as empty, so a
+  payload that held one is re-encoded `02 01`.
+- A `STRING_LZ` was written without its terminating zero, and a received one
+  left that zero unread. CANboat defines the string as a length byte, the text
+  and a zero the length does not count: it is now written and consumed, and a
+  sender that omits it is still read. Among the generated PGNs only 126720
+  (Fusion Set Zone Name, Set Device Name) and 130847 use it, all `full-pgns`.
+  The 130847 seen on real buses omit that terminal: they are still read, but
+  writing one back adds a byte.
+- The generated repeating-group accessors (`repetitive_field`,
+  `repetitive_field_mut`) trusted the counter field, which is public and can be
+  set to 255 through `field_mut`, so reading or writing index 32 of
+  `Pgn129029.reference_station_types` panicked instead of returning `None`.
+  They now stop at the array's capacity as well as at the counter.
+- `CanIdBuilder::build` accepted a PGN above `0x3FFFF` and a priority above 7
+  set through the public fields, and returned an identifier for another PGN
+  (`0x40000 | 129029` came out as 129029) or with the priority overflowing
+  into the top bits. It now returns `CanIdBuildError::InvalidData`. The
+  `with_priority` and `priority` setters still mask to 3 bits.
+- `PgnSender::send_pgn` sliced its 223-byte buffer with the length a codec
+  reported, so a third-party `PgnData` returning more panicked. It now returns
+  `SendPgnError::Serialization` before any frame goes out. The generated types
+  cannot do this.
+- An empty payload made `FastPacketBuilder` end its iterator before looking at
+  anything, so `send_pgn` and the address manager returned `Ok` having sent
+  nothing. The iterator now yields `CanIdBuildError::EmptyPayload` once, then
+  ends, and both send loops report it.
+- A field declared after a repeating group was read, written and visited
+  before it, so the codec disagreed with the wire layout. 130571 (Library Data
+  Group, `full-pgns`) is the only generated PGN with one: its `Artist` string
+  follows the `IdType`/`Id`/`Name` group. A group is now handled where it
+  starts in the descriptor, by decoding, encoding and `for_each_field`.
 
 ### Removed
 - **BREAKING**: the `AirmarFilter`, `FusionSiriusAlert` and `Seatalk1Att`
@@ -225,6 +318,13 @@ instead of rejected.
   `WpIdInfo` for 130067, 130068 and 130074.
 - CI runs `cargo test --features full-pgns` and checks the build with a minimal
   custom manifest (60928 only). Neither was built before.
+- `tests/codec_round_trip.rs` fails when a PGN never decodes. The fixed-point
+  helper used to skip a payload the decoder refused, so a decoder refusing
+  everything passed. It now counts decoded payloads per PGN, looks for
+  proprietary variants by sweeping the manufacturer code, and only three PGNs
+  with a repeating group but no counter (126464, 129796, 129805) may stay
+  undecoded, which a separate test pins. Before this, about 140 `full-pgns`
+  PGNs went through the check without a single payload decoded.
 - `tests/replay_real_capture.rs` requires zero decode failures. The exception
   it kept for 130850 has no reason left.
 - `tests/test_min_length.rs` pins the three cases of 129794: 76 bytes read the

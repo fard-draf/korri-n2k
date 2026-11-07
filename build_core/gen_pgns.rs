@@ -618,6 +618,40 @@ fn generate_enum_trait_impl(
     })?;
     writeln!(buffer, "\t\t}}")?; // end match_self
     writeln!(buffer, "\t}}")?; // end field_mut
+
+    // The repeating-group accessors live on the variants: without these the trait's
+    // defaults would hide every group of the enum.
+    for (signature, call) in [
+        (
+            "fn repetitive_field(&self, array_id: &'static str, index: usize, field_id: &'static str) -> Option<PgnValue>",
+            "repetitive_field(array_id, index, field_id)",
+        ),
+        (
+            "fn repetitive_field_mut(&mut self, array_id: &'static str, index: usize, field_id: &'static str, value: PgnValue) -> Option<()>",
+            "repetitive_field_mut(array_id, index, field_id, value)",
+        ),
+        (
+            "fn repetitive_count(&self, array_id: &'static str) -> Option<usize>",
+            "repetitive_count(array_id)",
+        ),
+        (
+            "fn set_repetitive_count(&mut self, array_id: &'static str, count: usize) -> Option<()>",
+            "set_repetitive_count(array_id, count)",
+        ),
+    ] {
+        writeln!(buffer)?;
+        writeln!(buffer, "\t{} {{", signature)?;
+        writeln!(buffer, "\t\tmatch self {{")?;
+        generate_enum_impl_helper(&mut buffer, pgn, poly_pgns_map, |writer, poly_pgn| {
+            writeln!(
+                writer,
+                "\t\t\tPgn{}::{}(inner) => inner.{},",
+                pgn.pgn_id, poly_pgn.name, call
+            )
+        })?;
+        writeln!(buffer, "\t\t}}")?; // end match_self
+        writeln!(buffer, "\t}}")?;
+    }
     writeln!(buffer, "}}")?; // end impl FieldAccess
     writeln!(buffer)?;
     Ok(buffer)

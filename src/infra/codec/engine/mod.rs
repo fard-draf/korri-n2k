@@ -4,8 +4,8 @@
 use super::bits::{BitReader, BitWriter};
 use super::traits::FieldAccess;
 use crate::core::{
-    Availability, FieldDescriptor, FieldKind, PgnBytes, PgnDescriptor, PgnValue, RepeatingFieldSet,
-    MAX_PGN_BYTES,
+    scaled_value_fits_f32, Availability, FieldDescriptor, FieldKind, PgnBytes, PgnDescriptor,
+    PgnValue, RepeatingFieldSet, MAX_PGN_BYTES,
 };
 use crate::error::{CodecError, DeserializationError, SerializationError};
 
@@ -48,7 +48,34 @@ fn is_repetitive_field(descriptor: &'static PgnDescriptor, field_idx: usize) -> 
     })
 }
 
-/// Computes the clamped repetition count for `rfs` from its raw counter reading.
+/// Widest `STRING_FIX` that must be present in full: 32 bytes, the widest fixed
+/// identifier CANboat declares. Wider ones are the texts of 130821 and 130856.
+const MAX_FIXED_STRING_BYTES: usize = 32;
+
+/// Returns `true` when the field at `field_idx` is the last one of `descriptor`
+/// and outside any repeating group: the only place a payload may stop inside a
+/// wide `STRING_FIX` without shifting the fields that follow it.
+fn is_last_plain_field(descriptor: &'static PgnDescriptor, field_idx: usize) -> bool {
+    field_idx + 1 == descriptor.fields.len() && !is_repetitive_field(descriptor, field_idx)
+}
+
+/// Returns the repeating group whose first field is `field_idx`, with its index.
+/// A group is read and written where it sits in the descriptor, so a field
+/// declared after the group follows it on the wire.
+fn group_starting_at(
+    descriptor: &'static PgnDescriptor,
+    field_idx: usize,
+) -> Option<(usize, &'static RepeatingFieldSet)> {
+    descriptor
+        .repeating_field_sets
+        .iter()
+        .enumerate()
+        .find(|(_, rfs)| rfs.start_field_index == field_idx)
+}
+
+/// Computes the repetition count for `rfs` from its raw counter reading, limited to
+/// what the payload can hold. More repetitions than the generated array holds
+/// (`max_repetitions`, 32 at most) is an error: dropping them would be a silent loss.
 fn repeating_group_count(
     descriptor: &'static PgnDescriptor,
     rfs: &'static RepeatingFieldSet,
@@ -82,13 +109,21 @@ fn repeating_group_count(
         .map(|f| f.bits_length.unwrap_or(0) as usize)
         .sum();
     let fits = bits_remaining.checked_div(group_bits).unwrap_or(0);
-    Ok(count.min(rfs.max_repetitions).min(fits))
+    let count = count.min(fits);
+    if count > rfs.max_repetitions {
+        return Err(DeserializationError::RepetitionsExceedCapacity {
+            array_id: rfs.array_id,
+            count,
+            max: rfs.max_repetitions,
+        });
+    }
+    Ok(count)
 }
 
 /// Visits every non-reserved field of `payload` according to `desc`, in wire order.
 ///
 /// `Reserved` and `Spare` fields are skipped. Repeating groups follow the same
-/// counter sentinel (`all-ones` = 0) and clamping rules as [`deserialize_into`],
+/// counter sentinel (`all-ones` = 0) and limits as [`deserialize_into`],
 /// reporting `repetition = Some((array_id, index))`. If an unsupported field kind
 /// or truncated tail is encountered mid-message, the error is returned after any
 /// earlier fields have already been passed to `f`.
@@ -107,11 +142,45 @@ pub fn for_each_field(
     let mut counters = [None::<usize>; 4];
 
     for (field_idx, field_desc) in desc.fields.iter().enumerate() {
+        if let Some((rfs_idx, rfs)) = group_starting_at(desc, field_idx) {
+            let counter_raw = counters.get(rfs_idx).copied().flatten();
+            let count = repeating_group_count(desc, rfs, counter_raw, reader.bits_remaining())?;
+
+            for elem_idx in 0..count {
+                for field_offset in 0..rfs.size {
+                    let group_field_idx = rfs.start_field_index + field_offset;
+                    let group_field_desc = desc
+                        .fields
+                        .get(group_field_idx)
+                        .ok_or(DeserializationError::InvalidDataLength)?;
+
+                    if let Some((raw, value)) =
+                        read_field_raw_and_value(&mut reader, group_field_desc, false)?
+                    {
+                        let availability = field_availability(group_field_desc, raw, &value);
+                        f(
+                            group_field_desc,
+                            FieldReading {
+                                value,
+                                raw,
+                                availability,
+                                repetition: Some((rfs.array_id, elem_idx)),
+                            },
+                        );
+                    }
+                }
+            }
+            continue;
+        }
         if is_repetitive_field(desc, field_idx) {
             continue;
         }
 
-        if let Some((raw, value)) = read_field_raw_and_value(&mut reader, field_desc)? {
+        if let Some((raw, value)) = read_field_raw_and_value(
+            &mut reader,
+            field_desc,
+            is_last_plain_field(desc, field_idx),
+        )? {
             for (rfs_idx, rfs) in desc.repeating_field_sets.iter().enumerate().take(4) {
                 if rfs.count_field_index == Some(field_idx) {
                     counters[rfs_idx] = raw.map(|v| v as usize);
@@ -130,34 +199,6 @@ pub fn for_each_field(
         }
     }
 
-    for (rfs_idx, rfs) in desc.repeating_field_sets.iter().enumerate() {
-        let counter_raw = counters.get(rfs_idx).copied().flatten();
-        let count = repeating_group_count(desc, rfs, counter_raw, reader.bits_remaining())?;
-
-        for elem_idx in 0..count {
-            for field_offset in 0..rfs.size {
-                let field_idx = rfs.start_field_index + field_offset;
-                let field_desc = desc
-                    .fields
-                    .get(field_idx)
-                    .ok_or(DeserializationError::InvalidDataLength)?;
-
-                if let Some((raw, value)) = read_field_raw_and_value(&mut reader, field_desc)? {
-                    let availability = field_availability(field_desc, raw, &value);
-                    f(
-                        field_desc,
-                        FieldReading {
-                            value,
-                            raw,
-                            availability,
-                            repetition: Some((rfs.array_id, elem_idx)),
-                        },
-                    );
-                }
-            }
-        }
-    }
-
     Ok(())
 }
 
@@ -166,13 +207,25 @@ fn field_availability(
     raw: Option<u64>,
     value: &PgnValue,
 ) -> Availability {
-    if field_desc.kind == FieldKind::StringFix {
-        if let PgnValue::Bytes(ref b) = value {
+    match (field_desc.kind, value) {
+        (FieldKind::StringFix, PgnValue::Bytes(b)) => {
             if string_fix_trimmed(b.as_slice()).is_empty() {
                 return Availability::NotAvailable;
             }
+            return Availability::Available;
         }
-        return Availability::Available;
+        (FieldKind::StringFix, _) => return Availability::Available,
+        // NaN is how an IEEE-754 field says "no data"; it has no integer sentinel.
+        (FieldKind::Float, PgnValue::F32(v)) if v.is_nan() => return Availability::NotAvailable,
+        // A variable string without text is absent. A LAU value starts with its
+        // encoding byte, which is not text.
+        (FieldKind::StringLau, PgnValue::Bytes(b)) if b.len() <= 1 => {
+            return Availability::NotAvailable
+        }
+        (FieldKind::StringLz, PgnValue::Bytes(b)) if b.is_empty() => {
+            return Availability::NotAvailable
+        }
+        _ => {}
     }
     match raw {
         Some(raw_val) => field_desc.availability(raw_val),
@@ -203,63 +256,69 @@ pub fn deserialize_into<T: FieldAccess>(
     let mut reader = BitReader::new(payload);
 
     for (field_idx, field_desc) in descriptor.fields.iter().enumerate() {
-        // Skip fields that belong to repeating groups; they are handled later
+        // A repeating group is read where it starts; its other fields are not
+        // visited on their own.
+        if let Some((_, rfs)) = group_starting_at(descriptor, field_idx) {
+            let counter_raw = if let Some(counter_idx) = rfs.count_field_index {
+                let counter_field = descriptor
+                    .fields
+                    .get(counter_idx)
+                    .ok_or(DeserializationError::InvalidDataLength)?;
+                match instance.field(counter_field.id) {
+                    Some(PgnValue::U8(v)) => Some(v as usize),
+                    Some(PgnValue::U16(v)) => Some(v as usize),
+                    Some(PgnValue::U32(v)) => Some(v as usize),
+                    _ => return Err(DeserializationError::InvalidDataLength),
+                }
+            } else {
+                None
+            };
+            let count =
+                repeating_group_count(descriptor, rfs, counter_raw, reader.bits_remaining())?;
+
+            // Set the number of valid elements through the FieldAccess trait
+            instance
+                .set_repetitive_count(rfs.array_id, count)
+                .ok_or(DeserializationError::FieldAssignmentFailed { desc: rfs.array_id })?;
+
+            for elem_idx in 0..count {
+                for field_offset in 0..rfs.size {
+                    let group_field_idx = rfs.start_field_index + field_offset;
+                    let group_field_desc = descriptor
+                        .fields
+                        .get(group_field_idx)
+                        .ok_or(DeserializationError::InvalidDataLength)?;
+
+                    if let Some(value) = read_field_value(&mut reader, group_field_desc, false)? {
+                        instance
+                            .repetitive_field_mut(
+                                rfs.array_id,
+                                elem_idx,
+                                group_field_desc.id,
+                                value,
+                            )
+                            .ok_or(DeserializationError::FieldAssignmentFailed {
+                                desc: group_field_desc.id,
+                            })?;
+                    }
+                }
+            }
+            continue;
+        }
         if is_repetitive_field(descriptor, field_idx) {
             continue;
         }
 
-        if let Some(value) = read_field_value(&mut reader, field_desc)? {
+        if let Some(value) = read_field_value(
+            &mut reader,
+            field_desc,
+            is_last_plain_field(descriptor, field_idx),
+        )? {
             instance.field_mut(field_desc.id, value).ok_or(
                 DeserializationError::FieldAssignmentFailed {
                     desc: field_desc.id,
                 },
             )?
-        }
-    }
-
-    // ==================== Repeating field handling ====================
-    // After processing all regular fields, handle repeating groups
-    for rfs in descriptor.repeating_field_sets {
-        let counter_raw = if let Some(counter_idx) = rfs.count_field_index {
-            let counter_field = descriptor
-                .fields
-                .get(counter_idx)
-                .ok_or(DeserializationError::InvalidDataLength)?;
-            match instance.field(counter_field.id) {
-                Some(PgnValue::U8(v)) => Some(v as usize),
-                Some(PgnValue::U16(v)) => Some(v as usize),
-                Some(PgnValue::U32(v)) => Some(v as usize),
-                _ => return Err(DeserializationError::InvalidDataLength),
-            }
-        } else {
-            None
-        };
-        let count = repeating_group_count(descriptor, rfs, counter_raw, reader.bits_remaining())?;
-
-        // 2. Set the number of valid elements through the FieldAccess trait
-        instance
-            .set_repetitive_count(rfs.array_id, count)
-            .ok_or(DeserializationError::FieldAssignmentFailed { desc: rfs.array_id })?;
-
-        // 3. Iterate through every element of the repeating group
-        for elem_idx in 0..count {
-            // For each field in the group
-            for field_offset in 0..rfs.size {
-                let field_idx = rfs.start_field_index + field_offset;
-                let field_desc = descriptor
-                    .fields
-                    .get(field_idx)
-                    .ok_or(DeserializationError::InvalidDataLength)?;
-
-                if let Some(value) = read_field_value(&mut reader, field_desc)? {
-                    // Write the value into the array entry through FieldAccess
-                    instance
-                        .repetitive_field_mut(rfs.array_id, elem_idx, field_desc.id, value)
-                        .ok_or(DeserializationError::FieldAssignmentFailed {
-                            desc: field_desc.id,
-                        })?;
-                }
-            }
         }
     }
 
@@ -285,20 +344,40 @@ pub fn serialize<T: FieldAccess>(
 
     let mut writer = BitWriter::new(buffer);
 
-    // Helper to detect whether a field belongs to a repeating group
-    let is_repetitive_field = |field_idx: usize| -> bool {
-        for rfs in descriptor.repeating_field_sets {
-            if field_idx >= rfs.start_field_index && field_idx < (rfs.start_field_index + rfs.size)
-            {
-                return true;
-            }
-        }
-        false
-    };
-
     for (field_idx, field_desc) in descriptor.fields.iter().enumerate() {
-        // Skip repeating fields; they are processed afterwards
-        if is_repetitive_field(field_idx) {
+        // A repeating group is written where it starts; its other fields are not
+        // written on their own.
+        if let Some((_, rfs)) = group_starting_at(descriptor, field_idx) {
+            // 1. Retrieve the number of valid elements for the array
+            let count = pgn_instance.repetitive_count(rfs.array_id).ok_or(
+                SerializationError::FieldNotFound {
+                    field_id: rfs.array_id,
+                },
+            )?;
+
+            // 2. Clamp the counter against the allowed maximum
+            let count = count.min(rfs.max_repetitions);
+
+            // 3. Serialize every element of the repeating group
+            for elem_idx in 0..count {
+                for field_offset in 0..rfs.size {
+                    let group_field_idx = rfs.start_field_index + field_offset;
+                    let group_field_desc = descriptor
+                        .fields
+                        .get(group_field_idx)
+                        .ok_or(SerializationError::InvalidData)?;
+
+                    let value = pgn_instance
+                        .repetitive_field(rfs.array_id, elem_idx, group_field_desc.id)
+                        .ok_or(SerializationError::FieldNotFound {
+                            field_id: group_field_desc.id,
+                        })?;
+                    write_field(&mut writer, group_field_desc, &value)?;
+                }
+            }
+            continue;
+        }
+        if is_repetitive_field(descriptor, field_idx) {
             continue;
         }
 
@@ -308,42 +387,6 @@ pub fn serialize<T: FieldAccess>(
                 field_id: field_desc.id,
             })?;
         write_field(&mut writer, field_desc, &value)?;
-    }
-
-    // ==================== Repeating field serialization ====================
-    // After writing regular fields, serialize the repeating groups
-    for rfs in descriptor.repeating_field_sets {
-        // 1. Retrieve the number of valid elements for the array
-        let count = pgn_instance.repetitive_count(rfs.array_id).ok_or(
-            SerializationError::FieldNotFound {
-                field_id: rfs.array_id,
-            },
-        )?;
-
-        // 2. Clamp the counter against the allowed maximum
-        let count = count.min(rfs.max_repetitions);
-
-        // 3. Serialize every element of the repeating group
-        for elem_idx in 0..count {
-            // For each field in the group
-            for field_offset in 0..rfs.size {
-                let field_idx = rfs.start_field_index + field_offset;
-                let field_desc = descriptor
-                    .fields
-                    .get(field_idx)
-                    .ok_or(SerializationError::InvalidData)?;
-
-                // Fetch the value from the structure via the trait
-                let value = pgn_instance
-                    .repetitive_field(rfs.array_id, elem_idx, field_desc.id)
-                    .ok_or(SerializationError::FieldNotFound {
-                        field_id: field_desc.id,
-                    })?;
-
-                // Write the value into the buffer
-                write_field(&mut writer, field_desc, &value)?;
-            }
-        }
     }
 
     let bits_written = writer.bit_cursor();
@@ -366,15 +409,18 @@ pub fn string_fix_trimmed(bytes: &[u8]) -> &[u8] {
 fn read_field_value(
     reader: &mut BitReader,
     field_desc: &'static FieldDescriptor,
+    may_stop_early: bool,
 ) -> Result<Option<PgnValue>, DeserializationError> {
-    read_field_raw_and_value(reader, field_desc).map(|opt| opt.map(|(_, val)| val))
+    read_field_raw_and_value(reader, field_desc, may_stop_early).map(|opt| opt.map(|(_, val)| val))
 }
 
 /// Read the raw on-wire value (`Some(u64)` for bit/scalar fields, `None` for byte
-/// slices and strings) and scale it into a [`PgnValue`].
+/// slices and strings) and scale it into a [`PgnValue`]. `may_stop_early` lets a
+/// payload end inside a `STRING_FIX` wider than [`MAX_FIXED_STRING_BYTES`].
 fn read_field_raw_and_value(
     reader: &mut BitReader,
     field_desc: &'static FieldDescriptor,
+    may_stop_early: bool,
 ) -> Result<Option<(Option<u64>, PgnValue)>, DeserializationError> {
     match field_desc.kind {
         // BitLookup: bitfield where each bit has its own meaning (bitmask).
@@ -419,10 +465,18 @@ fn read_field_raw_and_value(
             let num_bits = field_desc
                 .bits_length
                 .ok_or(DeserializationError::InvalidDataLength)?;
-            // The declared size is the field's capacity, not the bytes on the wire:
-            // Navico 130821 reserves 230 for its text and sends about 155, the real
-            // length being carried by the Fast Packet header. Read what is there.
-            let num_bytes = ((num_bits / 8) as usize).min(reader.bits_remaining() / 8);
+            // A short text has exactly its declared size on the wire: a payload
+            // that stops inside it lacks data, so reading it fails. A wider one in
+            // last position is a capacity, not a size: Navico 130821 reserves 230
+            // bytes for its text and sends about 155, the real length being carried
+            // by the Fast Packet header. Read what is there. Anywhere else the stop
+            // would shift the following fields, so the text must be complete.
+            let declared = (num_bits / 8) as usize;
+            let num_bytes = if may_stop_early && declared > MAX_FIXED_STRING_BYTES {
+                declared.min(reader.bits_remaining() / 8)
+            } else {
+                declared
+            };
             let slice = reader
                 .read_slice(num_bytes)
                 .map_err(|e| DeserializationError::BitReaderError { err: e })?;
@@ -450,6 +504,20 @@ fn read_field_raw_and_value(
                 pgn_bytes.copy_from_slice(slice);
             }
             pgn_bytes.len = strlen;
+            // The text ends with a zero byte that the length does not count. A
+            // sender that leaves it out is still read: the byte is consumed only
+            // when it is there.
+            // shortcut: an absent terminator followed by a field starting with 0x00
+            // would lose that byte; every generated LZ string is the last field.
+            if reader.bits_remaining() >= 8 {
+                let text_end = reader.bit_cursor();
+                let next = reader
+                    .read_u8(8)
+                    .map_err(|e| DeserializationError::BitReaderError { err: e })?;
+                if next != 0 {
+                    reader.seek(text_end);
+                }
+            }
             Ok(Some((None, PgnValue::Bytes(pgn_bytes))))
         }
 
@@ -553,12 +621,13 @@ fn scale_raw_field(
             let value = if field_desc.is_signed.is_some_and(|s| s) {
                 let signed_val = sign_extend(raw_val, field_desc.bits_length.unwrap_or(0) as u8);
                 if let Some(res) = field_desc.resolution {
-                    match field_desc
+                    let bits = field_desc
                         .bits_length
-                        .ok_or(DeserializationError::InvalidDataLength)?
-                    {
-                        1..=24 => PgnValue::F32(signed_val as f32 * res),
-                        _ => PgnValue::F64(signed_val as f64 * res as f64),
+                        .ok_or(DeserializationError::InvalidDataLength)?;
+                    if scaled_value_fits_f32(bits, true, res) {
+                        PgnValue::F32(signed_val as f32 * res)
+                    } else {
+                        PgnValue::F64(signed_val as f64 * res as f64)
                     }
                 } else {
                     match field_desc.bits_length {
@@ -569,12 +638,13 @@ fn scale_raw_field(
                     }
                 }
             } else if let Some(res) = field_desc.resolution {
-                match field_desc
+                let bits = field_desc
                     .bits_length
-                    .ok_or(DeserializationError::InvalidDataLength)?
-                {
-                    1..=24 => PgnValue::F32(raw_val as f32 * res),
-                    _ => PgnValue::F64(raw_val as f64 * res as f64),
+                    .ok_or(DeserializationError::InvalidDataLength)?;
+                if scaled_value_fits_f32(bits, false, res) {
+                    PgnValue::F32(raw_val as f32 * res)
+                } else {
+                    PgnValue::F64(raw_val as f64 * res as f64)
                 }
             } else {
                 match field_desc.bits_length {
@@ -592,9 +662,10 @@ fn scale_raw_field(
         FieldKind::Date | FieldKind::Mmsi => {
             let value = if let Some(res) = field_desc.resolution {
                 let scaled = raw_val as f64 * res as f64;
-                match field_desc.bits_length.unwrap() {
-                    1..=24 => PgnValue::F32(scaled as f32),
-                    _ => PgnValue::F64(scaled),
+                if scaled_value_fits_f32(field_desc.bits_length.unwrap(), false, res) {
+                    PgnValue::F32(scaled as f32)
+                } else {
+                    PgnValue::F64(scaled)
                 }
             } else {
                 match field_desc.bits_length.unwrap() {
@@ -613,15 +684,17 @@ fn scale_raw_field(
         FieldKind::Duration => {
             let value = if let Some(res) = field_desc.resolution {
                 // shortcut: signed without resolution is not handled, add it if CANboat ever publishes one.
-                let raw = if field_desc.is_signed == Some(true) {
+                let signed = field_desc.is_signed == Some(true);
+                let raw = if signed {
                     sign_extend(raw_val, field_desc.bits_length.unwrap() as u8) as f64
                 } else {
                     raw_val as f64
                 };
                 let scaled = raw * res as f64;
-                match field_desc.bits_length.unwrap() {
-                    1..=24 => PgnValue::F32(scaled as f32),
-                    _ => PgnValue::F64(scaled),
+                if scaled_value_fits_f32(field_desc.bits_length.unwrap(), signed, res) {
+                    PgnValue::F32(scaled as f32)
+                } else {
+                    PgnValue::F64(scaled)
                 }
             } else {
                 match field_desc.bits_length.unwrap() {
@@ -659,33 +732,27 @@ fn write_field(
 ) -> Result<(), SerializationError> {
     match field_desc.kind {
         FieldKind::Number | FieldKind::Pgn | FieldKind::IsoName => {
-            let bits_to_write = if field_desc.is_signed.is_some_and(|s| s) {
-                let prepared_val = if let Some(res) = field_desc.resolution {
-                    // Common path: floating-point value that must be scaled back to an integer
-                    let float_val = pgn_value_to_f64(value)
-                        .map_err(|e| SerializationError::CodecError { source: e })?;
-                    scale_to_i64(float_val, res)
-                } else {
-                    pgn_value_to_i64(value)
-                        .map_err(|e| SerializationError::CodecError { source: e })?
-                };
-                // Use the helper to reinterpret the signed integer as u64
-                i64_to_u64_bitwise(prepared_val)
-            } else if let Some(res) = field_desc.resolution {
+            let signed = field_desc.is_signed.is_some_and(|s| s);
+            let bit_length = field_desc
+                .bits_length
+                .ok_or(SerializationError::InvalidData)?;
+            if let Some(res) = field_desc.resolution {
+                // Common path: floating-point value that must be scaled back to an integer
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                i64_to_u64_bitwise(scale_to_i64(float_val, res))
-            } else {
-                pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
-            };
-
-            if let Some(bit_length) = field_desc.bits_length {
+                let raw = quantize(field_desc, float_val, res, bit_length, signed)?;
                 writer
-                    .write_u64(bits_to_write, bit_length as u8)
+                    .write_u64(raw, bit_length as u8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
+            } else if signed {
+                let int_val = pgn_value_to_i64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                write_integer(writer, field_desc, int_val.into(), bit_length, true)?;
             } else {
-                return Err(SerializationError::InvalidData);
-            };
+                let int_val = pgn_value_to_u64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                write_integer(writer, field_desc, int_val.into(), bit_length, false)?;
+            }
         }
 
         FieldKind::Date | FieldKind::Time | FieldKind::Mmsi => {
@@ -696,19 +763,26 @@ fn write_field(
                         field_name: field_desc.id,
                     })?;
 
-            let int_val = if field_desc.resolution.is_some_and(|res| res as u8 != 1) {
+            if field_desc.resolution.is_some_and(|res| res as u8 != 1) {
                 // With resolution: value stored as F32/F64
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                scale_to_i64(float_val, field_desc.resolution.unwrap()) as u64 // Direct cast; two's-complement helper not required
+                let raw = quantize(
+                    field_desc,
+                    float_val,
+                    field_desc.resolution.unwrap(),
+                    bits_to_write,
+                    false,
+                )?;
+                writer
+                    .write_u64(raw, bits_to_write as u8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 // Without resolution: value stored as U16/U32
-                pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
-            };
-
-            writer
-                .write_u64(int_val, bits_to_write as u8)
-                .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                let int_val = pgn_value_to_u64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                write_integer(writer, field_desc, int_val.into(), bits_to_write, false)?;
+            }
         }
 
         FieldKind::Duration => {
@@ -720,27 +794,32 @@ fn write_field(
                         field_name: field_desc.id,
                     })?;
 
-            let prepared_val = if let Some(res) = field_desc.resolution {
+            if let Some(res) = field_desc.resolution {
                 // Apply the inverse resolution
                 let float_val = pgn_value_to_f64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                scale_to_i64(float_val, res) as u64
+                let raw = quantize(
+                    field_desc,
+                    float_val,
+                    res,
+                    bits_to_write,
+                    field_desc.is_signed.is_some_and(|s| s),
+                )?;
+                writer
+                    .write_u64(raw, bits_to_write as u8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 // No resolution involved
-                pgn_value_to_u64(value).map_err(|e| SerializationError::CodecError { source: e })?
-            };
-
-            writer
-                .write_u64(prepared_val, bits_to_write as u8)
-                .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                let int_val = pgn_value_to_u64(value)
+                    .map_err(|e| SerializationError::CodecError { source: e })?;
+                write_integer(writer, field_desc, int_val.into(), bits_to_write, false)?;
+            }
         }
         FieldKind::Lookup => {
             let int_val = pgn_value_to_u64(value)
                 .map_err(|e| SerializationError::CodecError { source: e })?;
             if let Some(bit_len) = field_desc.bits_length {
-                writer
-                    .write_u64(int_val, bit_len as u8)
-                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                write_integer(writer, field_desc, int_val.into(), bit_len, false)?;
             };
         }
 
@@ -757,9 +836,7 @@ fn write_field(
                     field_name: field_desc.id,
                 })?;
 
-            writer
-                .write_u64(int_val, bit_len as u8)
-                .map_err(|e| SerializationError::BitWriteError { err: e })?;
+            write_integer(writer, field_desc, int_val.into(), bit_len, false)?;
         }
         FieldKind::IndirectLookup => {
             // The field holds its own raw value; the master field is written separately.
@@ -767,9 +844,7 @@ fn write_field(
                 .map_err(|e| SerializationError::CodecError { source: e })?;
 
             if let Some(bit_len) = field_desc.bits_length {
-                writer
-                    .write_u64(value_to_write, bit_len as u8)
-                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                write_integer(writer, field_desc, value_to_write.into(), bit_len, false)?;
             };
         }
         FieldKind::Spare => {
@@ -800,7 +875,7 @@ fn write_field(
         FieldKind::StringFix => {
             if let PgnValue::Bytes(val) = value {
                 writer
-                    .write_slice(&val.data[..val.len])
+                    .write_slice(pgn_bytes_slice(val)?)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 return Err(SerializationError::CodecError {
@@ -813,17 +888,19 @@ fn write_field(
         }
         FieldKind::StringLz => {
             if let PgnValue::Bytes(val) = value {
-                if val.len > u8::MAX as usize {
-                    return Err(SerializationError::InvalidData);
-                }
+                let text = pgn_bytes_slice(val)?;
                 writer
-                    .write_u64(val.len as u64, 8)
+                    .write_u64(text.len() as u64, 8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                if val.len > 0 {
+                if !text.is_empty() {
                     writer
-                        .write_slice(&val.data[..val.len])
+                        .write_slice(text)
                         .map_err(|e| SerializationError::BitWriteError { err: e })?;
                 }
+                // Terminating zero, not counted by the length.
+                writer
+                    .write_u64(0, 8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 return Err(SerializationError::CodecError {
                     source: CodecError::DataTypeMismatch {
@@ -836,24 +913,21 @@ fn write_field(
         FieldKind::StringLau => {
             if let PgnValue::Bytes(val) = value {
                 // `val` holds the encoding byte followed by the text; the declared
-                // length also counts the length byte itself. An empty field
-                // declares zero, so that reading it back consumes one byte too.
-                let declared = if val.len == 0 { 0 } else { val.len + 1 };
-                if declared > u8::MAX as usize {
-                    return Err(SerializationError::InvalidData);
-                }
+                // length also counts the length byte itself. An empty value is
+                // written as CANboat describes an empty string: length 2 and
+                // the ASCII encoding (`02 01`). Reading still accepts a lone `00`.
+                let content = pgn_bytes_slice(val)?;
+                let (encoding, text) = content.split_first().unwrap_or((&1, &[]));
                 writer
-                    .write_u64(declared as u64, 8)
+                    .write_u64(text.len() as u64 + 2, 8)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                if val.len > 0 {
+                writer
+                    .write_u64(*encoding as u64, 8)
+                    .map_err(|e| SerializationError::BitWriteError { err: e })?;
+                if !text.is_empty() {
                     writer
-                        .write_u64(val.data[0] as u64, 8)
+                        .write_slice(text)
                         .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                    if val.len > 1 {
-                        writer
-                            .write_slice(&val.data[1..val.len])
-                            .map_err(|e| SerializationError::BitWriteError { err: e })?;
-                    }
                 }
             } else {
                 return Err(SerializationError::CodecError {
@@ -876,9 +950,7 @@ fn write_field(
             if expected_bits % 8 != 0 {
                 let raw_val = pgn_value_to_u64(value)
                     .map_err(|e| SerializationError::CodecError { source: e })?;
-                return writer
-                    .write_u64(raw_val, expected_bits as u8)
-                    .map_err(|e| SerializationError::BitWriteError { err: e });
+                return write_integer(writer, field_desc, raw_val.into(), expected_bits, false);
             }
 
             if let PgnValue::Bytes(val) = value {
@@ -887,7 +959,7 @@ fn write_field(
                     return Err(SerializationError::InvalidData);
                 }
                 writer
-                    .write_slice(&val.data[..expected_len])
+                    .write_slice(pgn_bytes_slice(val)?)
                     .map_err(|e| SerializationError::BitWriteError { err: e })?;
             } else {
                 return Err(SerializationError::CodecError {
@@ -903,17 +975,101 @@ fn write_field(
     Ok(())
 }
 
-/// Undoes a field's resolution, rounding half away from zero.
-/// Truncating instead would shift every scaled value one LSB towards zero:
-/// 23.767 at a resolution of 0.001 divides to 23766.999… and came back as 23.766.
-/// `f64::round` lives in `std`, which this crate does not have.
-fn scale_to_i64(value: f64, resolution: f32) -> i64 {
-    let scaled = value / resolution as f64;
-    if scaled >= 0.0 {
-        (scaled + 0.5) as i64
+/// The `len` bytes of `val`. `PgnBytes::len` is public, so it can exceed the
+/// buffer: that is invalid data to refuse, never an index to trust.
+fn pgn_bytes_slice(val: &PgnBytes) -> Result<&[u8], SerializationError> {
+    val.data
+        .get(..val.len)
+        .ok_or(SerializationError::InvalidData)
+}
+
+/// Smallest and largest raw a `bits`-wide field holds (`bits` already within 1..=64).
+fn raw_limits(bits: u32, signed: bool) -> (i128, i128) {
+    if signed {
+        (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1)
     } else {
-        (scaled - 0.5) as i64
+        (0, (1i128 << bits) - 1)
     }
+}
+
+/// Writes an integer field that carries no resolution. A value outside the field,
+/// too wide or of the wrong sign, is an error: the writer would otherwise keep only
+/// its low bits (158 on 4 bits went out as 14). The sentinels, the largest raws, fit.
+fn write_integer(
+    writer: &mut BitWriter,
+    field_desc: &'static FieldDescriptor,
+    value: i128,
+    bits: u32,
+    signed: bool,
+) -> Result<(), SerializationError> {
+    if !(1..=64).contains(&bits) {
+        return Err(SerializationError::InvalidFieldBits {
+            field_name: field_desc.id,
+        });
+    }
+    let (min, max) = raw_limits(bits, signed);
+    if value < min || value > max {
+        return Err(SerializationError::ValueOutOfRange {
+            field_id: field_desc.id,
+        });
+    }
+    // Low 64 bits: two's complement for a negative value.
+    writer
+        .write_u64(value as u64, bits as u8)
+        .map_err(|e| SerializationError::BitWriteError { err: e })
+}
+
+/// Undoes a field's resolution and returns the raw `bits`-wide pattern to write.
+/// The value is rounded half away from zero: truncating instead would shift every
+/// scaled value one LSB towards zero (23.767 at a resolution of 0.001 divides to
+/// 23766.999… and came back as 23.766). `f64::round` lives in `std`, which this
+/// crate does not have.
+///
+/// A value that does not fit is an error, never a wrapped or masked number:
+/// NaN and infinities, a negative value for an unsigned field, and anything past
+/// the field's width (700.0 m/s at 0.01 is 70000 units, which a 16-bit field
+/// would silently turn into 44.64 m/s).
+fn quantize(
+    field_desc: &'static FieldDescriptor,
+    value: f64,
+    resolution: f32,
+    bits: u32,
+    signed: bool,
+) -> Result<u64, SerializationError> {
+    let out_of_range = SerializationError::ValueOutOfRange {
+        field_id: field_desc.id,
+    };
+    if !(1..=64).contains(&bits) {
+        return Err(SerializationError::InvalidFieldBits {
+            field_name: field_desc.id,
+        });
+    }
+    let scaled = value / resolution as f64;
+    if !scaled.is_finite() {
+        return Err(out_of_range);
+    }
+    let rounded = if scaled >= 0.0 {
+        scaled + 0.5
+    } else {
+        scaled - 0.5
+    };
+    // The cast saturates far beyond any 64-bit field, so the range check below catches it.
+    let mut raw = rounded as i128;
+    let (min, max) = raw_limits(bits, signed);
+    // Past 53 bits an f64 cannot tell the last raw values apart: the "not available"
+    // raw of a 64-bit latitude (0x7FFF…) decodes to a value that divides back to 2^63.
+    // Within that spacing, the nearest raw value is the field's own limit.
+    let spacing = 1i128 << bits.saturating_sub(53);
+    if bits > 53 && (raw > max && raw - max <= spacing) {
+        raw = max;
+    } else if bits > 53 && (raw < min && min - raw <= spacing) {
+        raw = min;
+    }
+    if raw < min || raw > max {
+        return Err(out_of_range);
+    }
+    // Low 64 bits: two's complement for a negative value.
+    Ok(raw as u64)
 }
 
 /// Converts a `PgnValue` into `f64`.
@@ -987,15 +1143,6 @@ fn sign_extend(value: u64, bits: u8) -> i64 {
         // Positive values are returned as-is.
         value as i64
     }
-}
-
-/// Reinterprets the bits of an `i64` as `u64` for writing.
-/// Negative `i64` values are already stored in two's complement, so the bits can be reused verbatim.
-/// Keeps the bitwise `as` cast in a single helper to simplify debugging and reviews.
-/// The `inline` annotation avoids the overhead of a function call for a trivial conversion.
-#[inline] // The function is tiny; encourage inlining.
-fn i64_to_u64_bitwise(value: i64) -> u64 {
-    value as u64
 }
 
 //==================================================================================TESTS

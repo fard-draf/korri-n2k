@@ -60,6 +60,25 @@ pub enum FieldKind {
     // FIELD_INDEX
 }
 
+/// Whether a scaled field can be held in an `f32` and still quantize back to its raw.
+///
+/// `raw * resolution` is rounded to 24 significant bits, which moves it by up to
+/// `|raw| / 2^24` raw units. The raw is recovered only while that stays under half
+/// a unit, so `|raw| <= 2^23`: up to 23 bits, or 24 bits when signed. An unsigned
+/// 24-bit field reaches `0xFFFFFF` (its "not available" raw) and needs an `f64`,
+/// unless its resolution is a power of two: the product then only moves the
+/// exponent and stays exact.
+/// The engine and the generator both decide the Rust type with this function, from
+/// the same `f32` resolution.
+pub const fn scaled_value_fits_f32(bits: u32, signed: bool, resolution: f32) -> bool {
+    // shortcut: a power-of-two resolution is assumed in `f32` range, as every CANboat one.
+    let bits_of_resolution = resolution.to_bits();
+    let exponent = (bits_of_resolution >> 23) & 0xFF;
+    let is_power_of_two =
+        bits_of_resolution & 0x007F_FFFF == 0 && exponent != 0 && exponent != 0xFF;
+    bits >= 1 && (bits < 24 || (bits == 24 && (signed || is_power_of_two)))
+}
+
 /// Descriptor for a single PGN field.
 #[derive(Debug)]
 pub struct FieldDescriptor {
@@ -191,6 +210,9 @@ pub struct RepeatingFieldSet {
     /// - Static analysis performed by the code generator
     ///
     /// **Usage:** determines the array size in the generated Rust structure.
+    ///
+    /// Capped at 32 by the generator. A payload announcing more repetitions
+    /// is rejected (`DeserializationError::RepetitionsExceedCapacity`), never truncated.
     pub max_repetitions: usize,
 }
 
@@ -277,15 +299,18 @@ impl PgnBytes {
     }
 
     /// Immutable view over the populated bytes.
+    ///
+    /// `len` is a public field: a value past the 230-byte buffer is clamped to it
+    /// rather than indexed. The codec refuses such a value when writing.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {
-        &self.data[..self.len]
+        &self.data[..self.len.min(MAX_PGN_BYTES)]
     }
 
-    /// Mutable view over the populated bytes.
+    /// Mutable view over the populated bytes (clamped like [`Self::as_slice`]).
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        &mut self.data[..self.len]
+        &mut self.data[..self.len.min(MAX_PGN_BYTES)]
     }
 }
 
