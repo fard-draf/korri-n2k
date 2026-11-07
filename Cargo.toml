@@ -9,7 +9,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["n2k", "nmea2000", "can", "embedded", "no-std"]
 categories = ["embedded", "no-std", "network-programming"]
-exclude = ["tests/", ".github/", "archives/", "hil/"]
+exclude = ["tests/", ".github/", "archives/", "hil/", "justfile"]
 
 [features]
 default = []
