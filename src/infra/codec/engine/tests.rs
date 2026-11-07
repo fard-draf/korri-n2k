@@ -1312,3 +1312,86 @@ fn test_signed_duration_with_resolution_is_sign_extended() {
         assert_eq!(&buffer[..written], bytes);
     }
 }
+
+/// AUD-008: a text wider than 32 bytes may stop early only as the last field.
+/// Elsewhere the stop would shift the fields that follow it.
+#[test]
+fn test_wide_fixed_string_may_stop_early_only_in_last_position() {
+    use crate::core::RepeatingFieldSet;
+    use crate::infra::codec::engine::for_each_field;
+
+    const fn field(id: &'static str, kind: FieldKind, bits: u32) -> FieldDescriptor {
+        FieldDescriptor {
+            id,
+            name: id,
+            kind,
+            bits_length: Some(bits),
+            bits_length_var: None,
+            bits_offset: None,
+            is_signed: None,
+            resolution: None,
+            enum_direct_name: None,
+            enum_indirect_name: None,
+            enum_indirect_field_order: None,
+            physical_unit: None,
+            physical_qtity: None,
+            unknown_value: None,
+            out_of_range_value: None,
+            reserved_value: None,
+        }
+    }
+
+    const fn descriptor(
+        fields: &'static [FieldDescriptor],
+        repeating_field_sets: &'static [RepeatingFieldSet],
+    ) -> PgnDescriptor {
+        PgnDescriptor {
+            id: 42423,
+            name: "MockWideString",
+            description: "Mocked 40-byte STRING_FIX",
+            priority: Some(6),
+            fastpacket: true,
+            length: None,
+            min_length: None,
+            field_count: None,
+            trans_interval: None,
+            trans_irregular: Some(true),
+            fields,
+            repeating_field_sets,
+        }
+    }
+
+    // Counter, 40-byte text, then an empty group: the group reads nothing, so
+    // only the text's own length can make a short payload fail.
+    static TEXT_FIRST: [FieldDescriptor; 3] = [
+        field("Count", FieldKind::Number, 8),
+        field("Text", FieldKind::StringFix, 320),
+        field("Item", FieldKind::Number, 8),
+    ];
+    static GROUPS: [RepeatingFieldSet; 1] = [RepeatingFieldSet {
+        array_id: "items",
+        count_field_index: Some(0),
+        start_field_index: 2,
+        size: 1,
+        max_repetitions: 4,
+    }];
+    static TEXT_LAST: [FieldDescriptor; 2] = [
+        field("Count", FieldKind::Number, 8),
+        field("Text", FieldKind::StringFix, 320),
+    ];
+    static MIDDLE: PgnDescriptor = descriptor(&TEXT_FIRST, &GROUPS);
+    static LAST: PgnDescriptor = descriptor(&TEXT_LAST, &[]);
+
+    let short = [0u8; 11];
+    assert!(for_each_field(&MIDDLE, &short, |_, _| {}).is_err());
+    assert!(for_each_field(&MIDDLE, &[0u8; 41], |_, _| {}).is_ok());
+
+    let mut text_len = None;
+    for_each_field(&LAST, &short, |field, reading| {
+        if let (true, PgnValue::Bytes(text)) = (field.id == "Text", reading.value) {
+            text_len = Some(text.len);
+        }
+    })
+    .expect("a wide last text may stop early");
+    assert_eq!(text_len, Some(10));
+}

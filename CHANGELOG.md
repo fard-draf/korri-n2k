@@ -227,9 +227,9 @@ instead of rejected.
 - A payload that stopped inside a fixed-size string was accepted, whatever the
   string: 129044 (Datum) decoded from 16 to 19 bytes with `ReferenceDatum`
   half missing. Only the text of 130821 and 130856, which reserve about 230
-  bytes and are sent shorter, may stop early now; any `STRING_FIX` of 32 bytes
-  or less must be complete. Under `full-pgns` this also applies to the trailing
-  strings of 129045, 130817, 130833 and 130842.
+  bytes and are sent shorter, may stop early now, and only as the last field of
+  the PGN; any other `STRING_FIX` must be complete. Under `full-pgns` this
+  also applies to the trailing strings of 129045, 130817, 130833 and 130842.
 - `for_each_field` reported two kinds of absent value as `Available`: a NaN
   `FLOAT` (the `Salinity` of 130321) and a variable string without text, an
   empty LAU (`02 01`, or the older `00`) or an empty LZ. Both are now

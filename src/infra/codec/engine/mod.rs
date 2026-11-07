@@ -52,6 +52,13 @@ fn is_repetitive_field(descriptor: &'static PgnDescriptor, field_idx: usize) -> 
 /// identifier CANboat declares. Wider ones are the texts of 130821 and 130856.
 const MAX_FIXED_STRING_BYTES: usize = 32;
 
+/// Returns `true` when the field at `field_idx` is the last one of `descriptor`
+/// and outside any repeating group: the only place a payload may stop inside a
+/// wide `STRING_FIX` without shifting the fields that follow it.
+fn is_last_plain_field(descriptor: &'static PgnDescriptor, field_idx: usize) -> bool {
+    field_idx + 1 == descriptor.fields.len() && !is_repetitive_field(descriptor, field_idx)
+}
+
 /// Returns the repeating group whose first field is `field_idx`, with its index.
 /// A group is read and written where it sits in the descriptor, so a field
 /// declared after the group follows it on the wire.
@@ -148,7 +155,7 @@ pub fn for_each_field(
                         .ok_or(DeserializationError::InvalidDataLength)?;
 
                     if let Some((raw, value)) =
-                        read_field_raw_and_value(&mut reader, group_field_desc)?
+                        read_field_raw_and_value(&mut reader, group_field_desc, false)?
                     {
                         let availability = field_availability(group_field_desc, raw, &value);
                         f(
@@ -169,7 +176,11 @@ pub fn for_each_field(
             continue;
         }
 
-        if let Some((raw, value)) = read_field_raw_and_value(&mut reader, field_desc)? {
+        if let Some((raw, value)) = read_field_raw_and_value(
+            &mut reader,
+            field_desc,
+            is_last_plain_field(desc, field_idx),
+        )? {
             for (rfs_idx, rfs) in desc.repeating_field_sets.iter().enumerate().take(4) {
                 if rfs.count_field_index == Some(field_idx) {
                     counters[rfs_idx] = raw.map(|v| v as usize);
@@ -278,7 +289,7 @@ pub fn deserialize_into<T: FieldAccess>(
                         .get(group_field_idx)
                         .ok_or(DeserializationError::InvalidDataLength)?;
 
-                    if let Some(value) = read_field_value(&mut reader, group_field_desc)? {
+                    if let Some(value) = read_field_value(&mut reader, group_field_desc, false)? {
                         instance
                             .repetitive_field_mut(
                                 rfs.array_id,
@@ -298,7 +309,11 @@ pub fn deserialize_into<T: FieldAccess>(
             continue;
         }
 
-        if let Some(value) = read_field_value(&mut reader, field_desc)? {
+        if let Some(value) = read_field_value(
+            &mut reader,
+            field_desc,
+            is_last_plain_field(descriptor, field_idx),
+        )? {
             instance.field_mut(field_desc.id, value).ok_or(
                 DeserializationError::FieldAssignmentFailed {
                     desc: field_desc.id,
@@ -394,15 +409,18 @@ pub fn string_fix_trimmed(bytes: &[u8]) -> &[u8] {
 fn read_field_value(
     reader: &mut BitReader,
     field_desc: &'static FieldDescriptor,
+    may_stop_early: bool,
 ) -> Result<Option<PgnValue>, DeserializationError> {
-    read_field_raw_and_value(reader, field_desc).map(|opt| opt.map(|(_, val)| val))
+    read_field_raw_and_value(reader, field_desc, may_stop_early).map(|opt| opt.map(|(_, val)| val))
 }
 
 /// Read the raw on-wire value (`Some(u64)` for bit/scalar fields, `None` for byte
-/// slices and strings) and scale it into a [`PgnValue`].
+/// slices and strings) and scale it into a [`PgnValue`]. `may_stop_early` lets a
+/// payload end inside a `STRING_FIX` wider than [`MAX_FIXED_STRING_BYTES`].
 fn read_field_raw_and_value(
     reader: &mut BitReader,
     field_desc: &'static FieldDescriptor,
+    may_stop_early: bool,
 ) -> Result<Option<(Option<u64>, PgnValue)>, DeserializationError> {
     match field_desc.kind {
         // BitLookup: bitfield where each bit has its own meaning (bitmask).
@@ -448,12 +466,13 @@ fn read_field_raw_and_value(
                 .bits_length
                 .ok_or(DeserializationError::InvalidDataLength)?;
             // A short text has exactly its declared size on the wire: a payload
-            // that stops inside it lacks data, so reading it fails. A wider one is
-            // a capacity, not a size: Navico 130821 reserves 230 bytes for its text
-            // and sends about 155, the real length being carried by the Fast Packet
-            // header. Read what is there.
+            // that stops inside it lacks data, so reading it fails. A wider one in
+            // last position is a capacity, not a size: Navico 130821 reserves 230
+            // bytes for its text and sends about 155, the real length being carried
+            // by the Fast Packet header. Read what is there. Anywhere else the stop
+            // would shift the following fields, so the text must be complete.
             let declared = (num_bits / 8) as usize;
-            let num_bytes = if declared > MAX_FIXED_STRING_BYTES {
+            let num_bytes = if may_stop_early && declared > MAX_FIXED_STRING_BYTES {
                 declared.min(reader.bits_remaining() / 8)
             } else {
                 declared
