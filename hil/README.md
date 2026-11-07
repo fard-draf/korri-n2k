@@ -27,7 +27,7 @@ firmware's own verdict and an oracle on the frames captured on `can0`.
 | `KORRI_HIL_PROBE` | none, required | Probe selector as printed by `probe-rs list` (`VID:PID:SERIAL`). It picks the DUT among the probes plugged in. |
 | `KORRI_HIL_CAN` | `can0` | SocketCAN interface. |
 | `KORRI_HIL_OUT` | `$TMPDIR/korri-hil` | Where RTT logs (`<scenario>.rtt.log`), captures (`<scenario>.can.log`) and, unless `CARGO_TARGET_DIR` is set, the firmware build go. |
-| `KORRI_HIL_TIMEOUT_S` | 90 | Limit of one scenario, flashing included. |
+| `KORRI_HIL_TIMEOUT_S` | 90 | Positive limit for the firmware process, flashing included; a forced stop may take 5 s more. SocketCAN writes have a separate 100 ms timeout per frame. |
 | `KORRI_HIL_EXPECTED_MESSAGES` | 5 | Messages the `tx_fast_packet` oracle expects. A wrong value makes the bench fail, which shows the verdict is not rubber-stamped. |
 
 ## Use

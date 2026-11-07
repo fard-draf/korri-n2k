@@ -64,9 +64,12 @@ pub struct Injector(CanSocket);
 
 impl Injector {
     pub fn open(interface: &str) -> Result<Self, String> {
-        CanSocket::open(interface)
-            .map(Self)
-            .map_err(|e| format!("cannot open {interface}: {e}"))
+        let socket =
+            CanSocket::open(interface).map_err(|e| format!("cannot open {interface}: {e}"))?;
+        socket
+            .set_write_timeout(Duration::from_millis(100))
+            .map_err(|e| format!("cannot set the write timeout: {e}"))?;
+        Ok(Self(socket))
     }
 
     pub fn send(&self, frame: &Frame) -> Result<(), String> {

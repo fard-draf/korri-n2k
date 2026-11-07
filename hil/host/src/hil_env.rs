@@ -8,7 +8,7 @@ pub struct Env {
     pub can: String,
     /// Logs, captures and the firmware build directory.
     pub out: PathBuf,
-    /// Wall-clock limit of one scenario, flashing included.
+    /// Positive limit of the firmware process, flashing included (plus 5 s kill grace).
     pub timeout_s: u64,
     /// Messages the `tx_fast_packet` oracle expects. Setting it wrong is how to see the bench fail.
     pub expected_messages: usize,
@@ -21,6 +21,10 @@ impl Env {
             None => Ok(default),
             Some(v) => v.parse().map_err(|_| format!("{name}={v} is not a number")),
         };
+        let timeout_s = number("KORRI_HIL_TIMEOUT_S", 90)?;
+        if timeout_s == 0 {
+            return Err("KORRI_HIL_TIMEOUT_S must be greater than zero".to_string());
+        }
         Ok(Self {
             probe: var("KORRI_HIL_PROBE")
                 .ok_or("KORRI_HIL_PROBE is not set (see hil/README.md)")?,
@@ -28,7 +32,7 @@ impl Env {
             out: var("KORRI_HIL_OUT")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| std::env::temp_dir().join("korri-hil")),
-            timeout_s: number("KORRI_HIL_TIMEOUT_S", 90)?,
+            timeout_s,
             expected_messages: number(
                 "KORRI_HIL_EXPECTED_MESSAGES",
                 crate::scenario::MESSAGE_COUNT as u64,
