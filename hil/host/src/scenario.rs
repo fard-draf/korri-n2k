@@ -50,7 +50,7 @@ pub fn run(name: &str, elf: &Path, env: &Env) -> Result<Verdict, String> {
     };
     let status = wait_firmware(&mut firmware);
     std::thread::sleep(Duration::from_millis(300));
-    let frames = capture.stop();
+    let (frames, capture_result) = capture.stop();
     bus::write_log(&env.out.join(format!("{name}.can.log")), &frames)
         .map_err(|e| format!("cannot write the capture: {e}"))?;
 
@@ -72,7 +72,7 @@ pub fn run(name: &str, elf: &Path, env: &Env) -> Result<Verdict, String> {
     };
     Ok(Verdict {
         firmware: firmware_result,
-        oracle,
+        oracle: capture_result.and(oracle),
     })
 }
 
@@ -132,7 +132,7 @@ fn inject_when_ready(
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    // The claim is out at the end of its 250 ms contention window: the node is ready.
+    // The initial claim starts the 250 ms contention window; allow it to finish.
     std::thread::sleep(Duration::from_millis(300));
 
     let socket = bus::Injector::open(&env.can)?;
