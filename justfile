@@ -1,5 +1,5 @@
 # Single list of the CI commands: `.github/workflows/ci.yml` only calls these recipes.
-# `just ci` replays CI locally. Needs the toolchain pinned by rust-toolchain.toml.
+# `just ci` replays CI locally. Needs just >= 1.44.0 and the pinned Rust toolchain.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -46,12 +46,15 @@ ci-cortex-m4:
     cargo check --lib --target thumbv7em-none-eabihf --features embassy --verbose
     just ci-hil-crates
 
-# The bench crates are not built by anything else, so they would rot unnoticed. They are
-# checked from their own directory: that is where their toolchain and target are read.
+# Offline bench checks, from each crate's directory for its toolchain and target.
+# Clippy also checks compilation; host tests never access hardware.
 [private]
 ci-hil-crates:
-    cd hil/firmware && cargo check --locked --release
-    cd hil/host && cargo check --locked
+    cd hil/firmware && cargo fmt -- --check
+    cd hil/firmware && cargo clippy --locked --release -- -D warnings
+    cd hil/host && cargo fmt -- --check
+    cd hil/host && cargo clippy --locked --all-targets -- -D warnings
+    cd hil/host && cargo test --locked
 
 # Job `check-embedded-esp32c3`.
 ci-esp32c3:

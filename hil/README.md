@@ -10,7 +10,7 @@ firmware's own verdict and an oracle on the frames captured on `can0`.
 
 ## Prerequisites
 
-- `just`, `probe-rs` (0.32 tested), `ip`, `timeout`, and the toolchain of `hil/firmware/rust-toolchain.toml`
+- `just` >= 1.44.0, `probe-rs` (0.32 tested), `ip`, `timeout`, and the toolchain of `hil/firmware/rust-toolchain.toml`
   (Rust 1.96.0 with `thumbv7em-none-eabihf`).
 - A debug probe wired to an STM32G431CB board with its CAN transceiver on `can0`'s bus.
 - `can0` brought up by you, at **250000 bit/s**, UP and ERROR-ACTIVE. The bench never changes it
@@ -28,12 +28,14 @@ firmware's own verdict and an oracle on the frames captured on `can0`.
 | `KORRI_HIL_CAN` | `can0` | SocketCAN interface. |
 | `KORRI_HIL_OUT` | `$TMPDIR/korri-hil` | Where RTT logs (`<scenario>.rtt.log`), captures (`<scenario>.can.log`) and, unless `CARGO_TARGET_DIR` is set, the firmware build go. |
 | `KORRI_HIL_TIMEOUT_S` | 90 | Positive limit for the firmware process, flashing included; a forced stop may take 5 s more. SocketCAN writes have a separate 100 ms timeout per frame. |
+| `DEFMT_LOG` | `error` | Firmware log level at build time; set `info` to include readiness, received messages and PASS traces. |
 | `KORRI_HIL_EXPECTED_MESSAGES` | 5 | Positive number of messages the `tx_fast_packet` oracle expects. A wrong value makes the bench fail, which shows the verdict is not rubber-stamped. |
 
 ## Use
 
 ```sh
 export KORRI_HIL_PROBE=<VID:PID:SERIAL>
+export DEFMT_LOG=info        # include informative firmware RTT logs
 just hil                    # both scenarios
 just hil tx_fast_packet     # one scenario
 just check                  # `just ci`, then `just hil`, before a PR
@@ -63,4 +65,9 @@ The firmware ends with a semihosting call that faults when no debugger is attach
 boards are test images, to be reflashed with their normal firmware afterwards.
 
 `hil/firmware` and `hil/host` are independent cargo projects (no workspace, not part of the
-published crate). `just ci` only runs `cargo check` on them.
+published crate). `just ci` runs fmt and clippy on both, plus `cargo test --locked` on the host,
+without accessing the bench.
+
+A forced kill after the timeout's 5 s grace can be reported as "firmware killed by a signal"
+rather than "timeout"; both fail the verdict. Cleanup after interrupting or killing the host
+itself (Ctrl-C/SIGKILL) has not been validated.
