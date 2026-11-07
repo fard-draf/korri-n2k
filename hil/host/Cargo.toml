@@ -1,0 +1,12 @@
+[package]
+name = "korri-hil-host"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.96"
+publish = false
+description = "Orchestrator of the korri-n2k hardware-in-the-loop bench (probe + can0)"
+
+# The oracle must not share code with the library under test, so there is no korri-n2k
+# dependency: frames are read and built byte by byte.
+[dependencies]
+socketcan = "4"

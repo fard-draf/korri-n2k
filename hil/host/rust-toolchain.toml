@@ -1,0 +1,4 @@
+# Same pin as the library (see ../../rust-toolchain.toml); this crate is built on its own.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]

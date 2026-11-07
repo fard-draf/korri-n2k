@@ -1,0 +1,29 @@
+[package]
+name = "korri-hil-firmware"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "STM32G431 firmware of the korri-n2k hardware-in-the-loop bench"
+
+# Dependencies follow korri-n2k-examples/arm/stm32/g431-cbu6 (its committed HEAD).
+[dependencies]
+embassy-executor = { version = "0.9", features = ["arch-cortex-m", "executor-thread"] }
+embassy-time = { version = "0.5", features = ["tick-hz-32_768"] }
+embassy-sync = "0.6.2"
+embassy-stm32 = { version = "0.6", features = ["stm32g431cb", "time-driver-any", "exti"] }
+
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+cortex-m-semihosting = "0.5"
+static_cell = "2.1.1"
+
+defmt = "1.0"
+defmt-rtt = "1.1"
+
+korri-n2k = { path = "../..", features = ["embassy", "defmt"] }
+embedded-can = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+debug = 2

@@ -318,6 +318,10 @@ instead of rejected.
   `WpIdInfo` for 130067, 130068 and 130074.
 - CI runs `cargo test --features full-pgns` and checks the build with a minimal
   custom manifest (60928 only). Neither was built before.
+- CI/HIL: the CI commands live in a `justfile` (`just ci`) that `ci.yml` calls,
+  and `hil/` holds a local hardware bench (`just hil`, `just check`): an STM32G431
+  and `can0`, two Fast Packet scenarios, a byte-level oracle. Not part of the
+  published crate. See `hil/README.md`.
 - `tests/codec_round_trip.rs` fails when a PGN never decodes. The fixed-point
   helper used to skip a payload the decoder refused, so a decoder refusing
   everything passed. It now counts decoded payloads per PGN, looks for
